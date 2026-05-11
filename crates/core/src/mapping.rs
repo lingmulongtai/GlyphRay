@@ -175,12 +175,12 @@ mod tests {
         );
 
         let top_left = mapper.map(0.0, 0.0);
-        assert_eq!(top_left.x, 0.0);
-        assert!((top_left.y - 15.0).abs() < 0.01);
+        assert!((top_left.x - 96.0).abs() < 0.01);
+        assert_eq!(top_left.y, 0.0);
 
         let bottom_right = mapper.map(1600.0, 1000.0);
-        assert_eq!(bottom_right.x, 1920.0);
-        assert!((bottom_right.y - 1065.0).abs() < 0.01);
+        assert!((bottom_right.x - 1824.0).abs() < 0.01);
+        assert_eq!(bottom_right.y, 1080.0);
     }
 
     #[test]
@@ -209,4 +209,3 @@ mod tests {
         assert_eq!(point.y, 0.0);
     }
 }
-

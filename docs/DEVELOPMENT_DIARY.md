@@ -86,6 +86,14 @@ Android から stylus packet を送れるようになったので、今日は Wi
 
 この時点の進捗見積もり: 68%。
 
+## 2026-05-11 JST - Day 1, Rust Test Cleanup
+
+Windows 実コンパイルが通った後に出た残りは、coordinate mapping の期待値ズレと GDI cleanup warning だった。`1600x1000` を `1920x1080` に Fit する場合は上下 letterbox ではなく左右 pillarbox になるので、test の期待値を x=96..1824 / y=0..1080 に直した。
+
+GDI cleanup は `DeleteDC` / `DeleteObject` の戻り値を明示的に捨てるようにして、warning を消した。ここまで来ると、Rust 側はかなり普通の unit test failure の世界に戻ってきた感じがある。
+
+この時点の進捗見積もり: 68%。
+
 ## 2026-05-11 JST - Day 1, Windows API Compile Fix
 
 今日は Windows 実コンパイルで見つかった `windows` crate 0.58 の API 配置差分を直した。GDI capture 側は `GetDC` / `ReleaseDC` の import 先、`MONITORINFOF_PRIMARY` の namespace、handle の null pointer 判定、`BitBlt` の `Result` 戻り値に合わせて修正した。

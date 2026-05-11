@@ -109,7 +109,7 @@ mod platform {
         let bitmap = unsafe { CreateCompatibleBitmap(screen_dc, width, height) };
         if bitmap.0 == null_mut() {
             unsafe {
-                DeleteDC(mem_dc);
+                let _ = DeleteDC(mem_dc);
                 ReleaseDC(hwnd, screen_dc);
             }
             return Err(last_error("CreateCompatibleBitmap"));
@@ -223,8 +223,8 @@ mod platform {
             if old_object.0 != null_mut() {
                 SelectObject(mem_dc, old_object);
             }
-            DeleteObject(HGDIOBJ(bitmap.0));
-            DeleteDC(mem_dc);
+            let _ = DeleteObject(HGDIOBJ(bitmap.0));
+            let _ = DeleteDC(mem_dc);
             ReleaseDC(hwnd, screen_dc);
         }
     }
