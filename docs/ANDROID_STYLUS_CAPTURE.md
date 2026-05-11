@@ -10,6 +10,8 @@ Implementation entry points:
 - `apps/android-client/src/main/java/com/glyphray/android/input/StylusPacketEncoder.kt`
 - `apps/android-client/src/main/java/com/glyphray/android/input/StylusStreamController.kt`
 - `apps/android-client/src/main/java/com/glyphray/android/network/TransportPacketCodec.kt`
+- `apps/android-client/src/main/java/com/glyphray/android/network/StylusLanBridgeController.kt`
+- `apps/android-client/src/main/java/com/glyphray/android/ui/video/RemoteDisplayView.kt`
 
 ## Captured Fields
 
@@ -34,3 +36,5 @@ Palm rejection is currently represented as a settings surface. Milestone 3 shoul
 `StylusPacketEncoder` writes the compact `GLYS` packet format documented in `docs/PROTOCOL.md`.
 
 `TransportPacketCodec` wraps those `GLYS` payloads in the UDP `GLYT` datagram shape used by the Rust host backend. `StylusUdpSender` is the Android-side sender boundary for the Milestone 3 LAN input stream.
+
+`StylusLanBridgeController` connects a discovered host to the remote-session drawing surface. It converts `MotionEvent` data into compact stylus packets immediately, then sends UDP datagrams on a background worker so Android never performs network I/O on the UI thread.

@@ -22,10 +22,13 @@ For early LAN input testing before the host approval UI exists:
 
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
+$env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
-This bypass is intentionally explicit and must not become the production permission model.
+`GLYPHRAY_DEV_AUTO_APPROVE` bypasses the approval UI for local smoke tests. `GLYPHRAY_ENABLE_PEN_INJECTION` connects the backend router to the native Win32 synthetic pen injector when that API is available. Both switches are intentionally explicit and must not become the production permission model.
+
+The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
 The backend binds:
 
@@ -43,6 +46,7 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 - The backend loop is still console-driven.
 - Peer approval is exposed in code but not yet wired to a host UI prompt.
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once approval UI exists.
+- `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
 - Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.
 - Production Windows secret storage still needs DPAPI or Credential Manager.
 - Real app validation for Windows Ink input is still required.

@@ -38,6 +38,20 @@ pub trait PenInjector {
     ) -> Result<InjectionReport, InputError>;
 }
 
+impl<T> PenInjector for Box<T>
+where
+    T: PenInjector + ?Sized,
+{
+    fn inject_batch(
+        &mut self,
+        batch: &StylusInputBatch,
+        mapper: &CoordinateMapper,
+        pressure: &PressureMapper,
+    ) -> Result<InjectionReport, InputError> {
+        self.as_mut().inject_batch(batch, mapper, pressure)
+    }
+}
+
 pub fn create_pen_injector() -> Result<Box<dyn PenInjector>, InputError> {
     Ok(Box::new(PlatformPenInjector::open()?))
 }

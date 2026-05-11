@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.input.StylusDiagnosticsController
 import com.glyphray.android.network.HostDiscoveryState
+import com.glyphray.android.network.StylusLanBridgeController
 import com.glyphray.android.ui.components.CalibrationPanel
 import com.glyphray.android.ui.components.CalibrationStep
 import com.glyphray.android.ui.components.SessionTelemetrySnapshot
@@ -133,11 +134,33 @@ fun ConnectionScreen(selectedHost: DiscoveredHost?, onConnected: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun RemoteSessionScreen(onPenSettings: () -> Unit, onDiagnostics: () -> Unit) {
+fun RemoteSessionScreen(
+    selectedHost: DiscoveredHost?,
+    onPenSettings: () -> Unit,
+    onDiagnostics: () -> Unit,
+) {
+    val stylusBridge = remember { StylusLanBridgeController() }
+    val bridgeState = stylusBridge.state
+
+    androidx.compose.runtime.DisposableEffect(selectedHost) {
+        if (selectedHost != null) {
+            stylusBridge.connect(selectedHost)
+        } else {
+            stylusBridge.disconnect()
+        }
+        onDispose { stylusBridge.disconnect() }
+    }
+
+    androidx.compose.runtime.DisposableEffect(stylusBridge) {
+        onDispose { stylusBridge.close() }
+    }
+
     ScreenFrame(
         title = "Session",
-        subtitle = "Low-latency remote display workspace",
+        subtitle = selectedHost?.let { "Streaming workspace for ${it.hostName}" }
+            ?: "Low-latency remote display workspace",
         actions = {
             PrimaryAction("Pen", onPenSettings)
             PrimaryAction("Diag", onDiagnostics)
@@ -155,12 +178,21 @@ fun RemoteSessionScreen(onPenSettings: () -> Unit, onDiagnostics: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(320.dp),
+            onInputEvent = stylusBridge::onMotionEvent,
         )
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(onClick = {}, label = { Text("60 fps") })
             AssistChip(onClick = {}, label = { Text("12 ms RTT") })
             AssistChip(onClick = {}, label = { Text("Ink input") })
+        }
+        Spacer(Modifier.height(10.dp))
+        MetricRow("Input stream", bridgeState.statusLabel)
+        MetricRow("Input host", bridgeState.connectedHostName ?: "-")
+        MetricRow("Stylus packets", bridgeState.packetsSent.toString())
+        MetricRow("Stylus samples", bridgeState.samplesSent.toString())
+        bridgeState.lastError?.let { error ->
+            Text("Input stream error: $error", color = MaterialTheme.colorScheme.error)
         }
     }
 }

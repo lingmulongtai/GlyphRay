@@ -2,6 +2,7 @@ package com.glyphray.android.ui.video
 
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +30,7 @@ import com.glyphray.android.video.VideoDecoderConfig
 fun RemoteDisplayView(
     telemetry: SessionTelemetrySnapshot,
     modifier: Modifier = Modifier,
+    onInputEvent: ((MotionEvent) -> Boolean)? = null,
 ) {
     var status by remember { mutableStateOf("Waiting for video") }
     var decoder by remember { mutableStateOf<RemoteVideoDecoder?>(null) }
@@ -79,6 +81,11 @@ fun RemoteDisplayView(
                             status = "Surface closed"
                         }
                     })
+                }
+            },
+            update = { view ->
+                view.setOnTouchListener { _, event ->
+                    onInputEvent?.invoke(event) ?: false
                 }
             },
         )

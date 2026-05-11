@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 66%.
+Current overall progress estimate: 68%.
 
 ## Milestone 1
 
@@ -45,8 +45,10 @@ Current overall progress estimate: 66%.
 
 - [x] Add Android compact stylus packet encoder.
 - [x] Add Android UDP transport packet encoder for compact stylus batches.
+- [x] Wire remote-session stylus capture to Android LAN UDP sender.
 - [x] Add Rust compact stylus packet decoder/encoder.
 - [x] Add Windows host stylus input bridge.
+- [x] Add opt-in native pen injection bridge to Windows backend serve runtime.
 - [x] Add backend session registry and input packet routing.
 - [x] Add backend permission gate for input packets.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.

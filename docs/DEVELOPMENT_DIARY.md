@@ -69,3 +69,19 @@ Android 側は Compose の `Column` を CI で確実に解決できるよう `fo
 さらに日本語版の `README.ja.md` を追加した。GlyphRay は扱っている領域が Android、Windows native、Rust protocol、security、低遅延 video と広いので、日本語で全体像を掴める入口があるだけで開発の迷子率がかなり下がるはず。
 
 この時点の進捗見積もり: 66%。
+
+## 2026-05-11 JST - Day 1, Live Stylus Sender
+
+今日は Android の remote session 画面を、ただの表示面から「ペン入力を host に送る面」に近づけた。`StylusLanBridgeController` を追加して、選択済み host へ `GLYS` stylus packet を `GLYT` UDP datagram として送る background worker を作った。
+
+`RemoteDisplayView` も入力 callback を受け取れるようにし、内部の `SurfaceView` で stylus `MotionEvent` を拾えるようにした。これで Host discovery、Host selection、Session screen、Stylus capture、UDP sender が Android 側ではかなり一本の線になった。まだ production pairing と Windows native injection への完全な end-to-end 検証は残るけれど、Milestone 3 の背骨は太くなってきた。
+
+この時点の進捗見積もり: 67%。
+
+## 2026-05-11 JST - Day 1, Opt-In Pen Bridge
+
+Android から stylus packet を送れるようになったので、今日は Windows backend の受け側を一段進めた。`Box<dyn PenInjector>` を backend runtime に差し込めるようにして、`GLYPHRAY_ENABLE_PEN_INJECTION=1` のときだけ native Win32 synthetic pen injector bridge を使う道を作った。
+
+これはまだ production の接続ではない。mapping は一時的な 1920x1080 stretch で、approval UI も本番 handshake もこれから。でも、`GLYPHRAY_DEV_AUTO_APPROVE=1` と組み合わせると、Android remote surface から Windows host の pen injection までを smoke test できる形に近づいた。
+
+この時点の進捗見積もり: 68%。

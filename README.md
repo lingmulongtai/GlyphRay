@@ -8,28 +8,28 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 66%**
+**Overall progress estimate: 68%**
 
 Last updated: 2026-05-11 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 66
-  "Remaining product work" : 34
+  "Implemented foundation" : 68
+  "Remaining product work" : 32
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 86% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 56% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 63% |
 | Milestone 4 hardening and packaging | In progress | 46% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  86%
-M3 Stylus -> Windows Ink      [###########---------]  56%
+M3 Stylus -> Windows Ink      [#############-------]  63%
 M4 Security + Packaging       [#########-----------]  46%
 M5 macOS + Audio + Relay      [#######-------------]  35%
 ```
@@ -58,7 +58,7 @@ flowchart TB
 
 | Path | Purpose | Current State |
 | --- | --- | --- |
-| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, stylus diagnostics, stylus UDP packet foundation, MediaCodec decode surface |
+| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
 | `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, VideoToolbox encoder foundation |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
@@ -133,10 +133,11 @@ sequenceDiagram
 - Android Compose app with host list, pairing, connection, session, pen settings, video settings, security, and diagnostics screens.
 - Android raw stylus diagnostics for pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
-- Android UDP packet encoder for sending compact stylus batches to the host backend.
+- Android remote-session stylus bridge that captures drawing-surface input and sends compact stylus batches over UDP on a background worker.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, permission gating, and latency pong replies.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
+- Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, and adaptive bitrate foundations.
@@ -171,6 +172,7 @@ For local input-path smoke testing before the host approval UI exists:
 
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
+$env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
@@ -182,7 +184,7 @@ Install Android Studio or Android SDK command-line tools, then run:
 gradle :apps:android-client:assembleDebug
 ```
 
-The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a UDP stylus packet sender foundation, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
+The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a remote-session stylus UDP bridge, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
 
 ### macOS Host
 
@@ -216,8 +218,9 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 - Full local builds were not executed in this workspace because `cargo`, `gradle`, `swift`, and Android SDK tools are not installed on `PATH`.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
 - A concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction.
-- Android stylus packets can be encoded for UDP, but the complete production pairing and session handshake still needs hardening.
+- Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
 - Host approval UI is not wired yet; `GLYPHRAY_DEV_AUTO_APPROVE` is only for local smoke tests.
+- `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.
 - Native Windows Ink pressure/tilt/hover must still be validated in real creative apps.
 
 ## Next Focus

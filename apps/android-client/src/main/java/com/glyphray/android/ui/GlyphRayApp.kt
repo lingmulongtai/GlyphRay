@@ -110,6 +110,7 @@ fun GlyphRayApp() {
                     onConnected = { screen = GlyphRayScreen.Session },
                 )
                 GlyphRayScreen.Session -> RemoteSessionScreen(
+                    selectedHost = selectedHost,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
                 )
