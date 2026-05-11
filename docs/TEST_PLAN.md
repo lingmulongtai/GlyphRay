@@ -15,6 +15,9 @@ Rust tests cover:
 - UDP transport datagram encode/decode and checksum rejection.
 - Video frame fragment/reassembly behavior.
 - Encoded video access-unit packetization and reassembly.
+- LAN discovery advertisement encode/decode.
+- Backend session permission gate and pairing request routing.
+- Backend stylus packet routing into the input bridge.
 - Transport packet-loss simulation.
 - Telemetry p95 and latency totals.
 - Windows host encoder settings and start-state behavior.
@@ -56,7 +59,9 @@ cargo test --workspace
 - Run a host capture smoke test once the capture CLI is added.
 - Run `cargo run -p glyphray-capture-diagnostics`.
 - Run `cargo run -p glyphray-host-diagnostics`.
+- Run `cargo run -p glyphray-windows-host -- serve`.
 - Confirm GDI fallback captures the selected monitor before replacing it with Windows Graphics Capture or Desktop Duplication.
+- Confirm a pending Android peer cannot inject input until approved.
 
 ## Integration Tests To Add
 

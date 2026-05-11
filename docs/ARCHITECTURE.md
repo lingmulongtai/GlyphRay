@@ -83,6 +83,30 @@ Windows Ink-style pen injection remains Windows-specific.
 
 Session payloads can be sealed through `SessionCipher` and `SecureDatagramCodec`. This is the foundation for encrypted UDP/WebRTC-like packet transport. Relay selection is optional and prefers direct trusted LAN routes.
 
+## Backend Runtime
+
+The Windows backend runtime owns LAN discovery, UDP packet receive/send, session state, permission gating, and routing into input/video/control handlers.
+
+```mermaid
+flowchart LR
+  Discovery["LAN Discovery"]
+  UDP["UdpServer"]
+  Sessions["SessionRegistry"]
+  Router["HostPacketRouter"]
+  Input["StylusInputBridge"]
+  Video["VideoStreamPipeline"]
+  Control["Latency/Pairing Control"]
+
+  Discovery --> UDP
+  UDP --> Router
+  Router --> Sessions
+  Router --> Input
+  Router --> Video
+  Router --> Control
+```
+
+Backend notes live in `docs/BACKEND.md`.
+
 ## Audio And Relay
 
 Audio packetization and relay candidate selection exist as code-level foundations. Capture/playback and relay server/client implementations remain future work.

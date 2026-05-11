@@ -37,3 +37,11 @@ Milestone 4 側では ChaCha20-Poly1305 の session cipher、replay guard、secu
 Milestone 5 側では audio packetization crate、relay candidate selection、macOS VideoToolbox encoder foundation、CGEvent input foundation、audio permission plumbing、beta checklist を追加した。まだ実機での live capture/encode/relay/audio playback までは届いていない。でも、Windows/Android/macOS/transport/security/audio/relay の主要な境界はそろった。
 
 この時点の進捗見積もり: 58%。
+
+## 2026-05-11 JST - Day 1, Backend Runtime Push
+
+今日は backend の芯を厚くした。transport に LAN discovery advertisement (`GLYD`) と server-side UDP socket を追加し、Windows host には `HostBackendRuntime`、`SessionRegistry`、`HostPacketRouter` を入れた。これで host は「LAN 上で見つかる」「peer を session として覚える」「未承認 peer の input を止める」「pairing request を拾う」「approved peer の stylus packet を native pen bridge へ送る」という backend らしい振る舞いを持ち始めた。
+
+`glyphray-windows-host serve` も追加した。まだ console loop で、approval UI や continuous video loop はこれからだけれど、今までの部品が backend runtime としてまとまり始めたのは大きい。次は host UI から peer approve/reject を動かし、video pipeline を runtime loop に接続する。
+
+この時点の進捗見積もり: 62%。

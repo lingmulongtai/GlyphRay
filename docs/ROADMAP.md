@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 58%.
+Current overall progress estimate: 62%.
 
 ## Milestone 1
 
@@ -32,6 +32,8 @@ Current overall progress estimate: 58%.
 - [x] Add Windows capture to encode to packetize streaming pipeline.
 - [x] Add Windows GDI capture fallback for early local validation.
 - [x] Add Windows capture diagnostic CLI.
+- [x] Add server-side UDP socket for host backend.
+- [x] Add LAN host discovery advertisement.
 - [ ] Stream video over LAN using the transport abstraction.
 - [x] Add secure datagram codec foundation for encrypted transport.
 - [x] Add latency overlay prepared for `glyphray-telemetry`.
@@ -41,6 +43,8 @@ Current overall progress estimate: 58%.
 - [x] Add Android compact stylus packet encoder.
 - [x] Add Rust compact stylus packet decoder/encoder.
 - [x] Add Windows host stylus input bridge.
+- [x] Add backend session registry and input packet routing.
+- [x] Add backend permission gate for input packets.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
 - [x] Add drawing area calibration UI surface.
@@ -54,6 +58,7 @@ Current overall progress estimate: 58%.
 - [x] Add Windows platform secret-store boundary.
 - [x] Add reconnect and adaptive bitrate controllers.
 - [x] Add host diagnostics CLI.
+- [x] Add console backend runtime entry point.
 - [x] Add installer packaging foundation.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.
 - [ ] Add macOS Keychain implementation.

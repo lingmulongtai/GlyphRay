@@ -6,6 +6,7 @@ use std::time::Duration;
 
 pub mod fragment;
 pub mod bitrate;
+pub mod discovery;
 pub mod reconnect;
 pub mod relay;
 pub mod udp;

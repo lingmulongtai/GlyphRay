@@ -4,6 +4,9 @@ pub struct HostConfig {
     pub default_display_id: u32,
     pub encoder_preference: EncoderPreference,
     pub require_connection_permission: bool,
+    pub discovery_port: u16,
+    pub control_port: u16,
+    pub video_port: u16,
 }
 
 impl Default for HostConfig {
@@ -13,6 +16,9 @@ impl Default for HostConfig {
             default_display_id: 0,
             encoder_preference: EncoderPreference::Auto,
             require_connection_permission: true,
+            discovery_port: 44998,
+            control_port: 44999,
+            video_port: 45000,
         }
     }
 }
@@ -25,4 +31,3 @@ pub enum EncoderPreference {
     AmdAmf,
     Software,
 }
-

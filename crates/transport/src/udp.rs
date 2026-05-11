@@ -13,6 +13,54 @@ pub struct UdpTransport {
     stats: ConnectionStats,
 }
 
+pub struct UdpServer {
+    socket: UdpSocket,
+    stats: ConnectionStats,
+}
+
+impl UdpServer {
+    pub fn bind(local: SocketAddr) -> Result<Self, TransportError> {
+        let socket = UdpSocket::bind(local).map_err(io_error)?;
+        socket.set_nonblocking(true).map_err(io_error)?;
+        Ok(Self {
+            socket,
+            stats: ConnectionStats {
+                rtt_ms: 0.0,
+                jitter_ms: 0.0,
+                packet_loss_percent: 0.0,
+                estimated_bandwidth_kbps: 0,
+            },
+        })
+    }
+
+    pub fn local_addr(&self) -> Result<SocketAddr, TransportError> {
+        self.socket.local_addr().map_err(io_error)
+    }
+
+    pub fn send_to(
+        &mut self,
+        packet: &TransportPacket,
+        peer: SocketAddr,
+    ) -> Result<(), TransportError> {
+        let datagram = encode_packet(packet)?;
+        self.socket.send_to(&datagram, peer).map_err(io_error)?;
+        Ok(())
+    }
+
+    pub fn poll_recv_from(&mut self) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
+        let mut buffer = vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD];
+        match self.socket.recv_from(&mut buffer) {
+            Ok((len, peer)) => decode_packet(&buffer[..len]).map(|packet| Some((packet, peer))),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
+            Err(err) => Err(io_error(err)),
+        }
+    }
+
+    pub fn stats(&self) -> ConnectionStats {
+        self.stats
+    }
+}
+
 impl UdpTransport {
     pub fn bind(local: SocketAddr, peer: SocketAddr) -> Result<Self, TransportError> {
         let socket = UdpSocket::bind(local).map_err(io_error)?;
@@ -173,4 +221,3 @@ mod tests {
         assert!(matches!(decode_packet(&encoded), Err(TransportError::Decode(_))));
     }
 }
-

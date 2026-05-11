@@ -6,16 +6,16 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Development Progress
 
-**Overall progress estimate: 58%**
+**Overall progress estimate: 62%**
 
 Last updated: 2026-05-11 JST
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 80% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 45% |
-| Milestone 4 hardening and packaging | In progress | 40% |
+| Milestone 2 video and transport foundation | In progress | 83% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 52% |
+| Milestone 4 hardening and packaging | In progress | 44% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -32,6 +32,7 @@ Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
 - Android compact stylus packet encoder and calibration UI surface.
 - Android Keystore device identity key foundation.
 - Windows Rust host skeleton with pairing, monitor enumeration, GDI capture fallback, encoder abstraction, streaming pipeline, and synthetic pen injection wrapper.
+- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, permission gating, and latency pong replies.
 - Windows stylus input bridge for forwarding remote batches to native pen injection.
 - Session cipher and secure datagram codec using ChaCha20-Poly1305.
 - Reconnect backoff and adaptive bitrate controllers.
@@ -89,6 +90,12 @@ Run the Windows host diagnostics tool:
 cargo run -p glyphray-host-diagnostics
 ```
 
+Run the host backend runtime:
+
+```powershell
+cargo run -p glyphray-windows-host -- serve
+```
+
 ### Android Client
 
 Install Android Studio or Android SDK command-line tools:
@@ -116,4 +123,4 @@ This workspace was generated on a machine where `cargo`, `gradle`, `swift`, and 
 
 ## Next Focus
 
-The next hardest work is replacing fallback capture with Windows Graphics Capture or Desktop Duplication, adding a concrete H.264 encoder backend, wiring a live LAN loop into Android, and validating Windows Ink pressure/tilt/hover in real creative apps.
+The next hardest work is replacing fallback capture with Windows Graphics Capture or Desktop Duplication, adding a concrete H.264 encoder backend, wiring backend peer approval to UI, driving the video pipeline continuously, and validating Windows Ink pressure/tilt/hover in real creative apps.
