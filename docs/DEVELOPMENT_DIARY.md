@@ -86,6 +86,12 @@ Android から stylus packet を送れるようになったので、今日は Wi
 
 この時点の進捗見積もり: 68%。
 
+## 2026-05-11 JST - Day 1, Android Gradle Configuration Fix
+
+Android build で `debugRuntimeClasspathCopy` が resolution root と consumable variant の両方として扱われる Gradle configuration error が出た。Android module 側で `*RuntimeClasspathCopy` configuration を明示的に `canBeConsumed=false` にして、依存解決用 configuration としてだけ扱うようにした。
+
+この時点の進捗見積もり: 68%。
+
 ## 2026-05-11 JST - Day 1, Rust Test Cleanup
 
 Windows 実コンパイルが通った後に出た残りは、coordinate mapping の期待値ズレと GDI cleanup warning だった。`1600x1000` を `1920x1080` に Fit する場合は上下 letterbox ではなく左右 pillarbox になるので、test の期待値を x=96..1824 / y=0..1080 に直した。
