@@ -1,0 +1,12 @@
+[package]
+name = "glyphray-capture-diagnostics"
+description = "Windows screen capture diagnostic CLI for GlyphRay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+glyphray-windows-host = { path = "../.." }
+

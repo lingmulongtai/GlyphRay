@@ -16,6 +16,7 @@ Implementation entry point:
 
 - `hosts/windows-host/src/input/mod.rs`
 - `hosts/windows-host/src/input/win32_pen.rs`
+- `hosts/windows-host/src/input::StylusInputBridge`
 
 ## Preserved Fields
 
@@ -48,4 +49,3 @@ The tool injects a short synthetic pressure stroke. Validate it in apps that exp
 - Hover behavior across Win32, UWP, and Wintab-aware apps.
 - Multi-monitor high-DPI coordinate correctness.
 - Whether elevated target apps require host privilege changes.
-

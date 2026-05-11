@@ -1,4 +1,6 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chacha20poly1305::aead::{Aead, Payload};
+use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
@@ -18,6 +20,10 @@ pub enum SecurityError {
     SecretStore(String),
     #[error("authentication tag did not verify")]
     InvalidAuthenticationTag,
+    #[error("session cipher operation failed")]
+    Cipher,
+    #[error("packet replay or stale counter detected")]
+    Replay,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -209,6 +215,108 @@ pub trait SecretStore {
     fn get_device_secret(&self, device_id: &DeviceId) -> Result<Option<SecretBytes>, SecurityError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SealedPacket {
+    pub counter: u64,
+    pub ciphertext: Vec<u8>,
+}
+
+pub struct SessionCipher {
+    cipher: XChaCha20Poly1305,
+}
+
+impl SessionCipher {
+    pub fn new(secret: &SecretBytes, transcript_hash: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"GlyphRay session key v1");
+        hasher.update(secret.expose());
+        hasher.update(transcript_hash);
+        let key = hasher.finalize();
+        Self {
+            cipher: XChaCha20Poly1305::new_from_slice(key.as_slice()).expect("32-byte key"),
+        }
+    }
+
+    pub fn seal(
+        &self,
+        counter: u64,
+        aad: &[u8],
+        plaintext: &[u8],
+    ) -> Result<SealedPacket, SecurityError> {
+        let nonce = nonce_from_counter(counter);
+        let ciphertext = self
+            .cipher
+            .encrypt(
+                XNonce::from_slice(&nonce),
+                Payload {
+                    msg: plaintext,
+                    aad,
+                },
+            )
+            .map_err(|_| SecurityError::Cipher)?;
+        Ok(SealedPacket {
+            counter,
+            ciphertext,
+        })
+    }
+
+    pub fn open(
+        &self,
+        packet: &SealedPacket,
+        aad: &[u8],
+    ) -> Result<Vec<u8>, SecurityError> {
+        let nonce = nonce_from_counter(packet.counter);
+        self.cipher
+            .decrypt(
+                XNonce::from_slice(&nonce),
+                Payload {
+                    msg: &packet.ciphertext,
+                    aad,
+                },
+            )
+            .map_err(|_| SecurityError::InvalidAuthenticationTag)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayGuard {
+    highest_counter: Option<u64>,
+    window: u64,
+}
+
+impl ReplayGuard {
+    pub fn new(window: u64) -> Self {
+        Self {
+            highest_counter: None,
+            window: window.max(1),
+        }
+    }
+
+    pub fn accept(&mut self, counter: u64) -> Result<(), SecurityError> {
+        match self.highest_counter {
+            None => {
+                self.highest_counter = Some(counter);
+                Ok(())
+            }
+            Some(highest) if counter > highest => {
+                self.highest_counter = Some(counter);
+                Ok(())
+            }
+            Some(highest) if highest.saturating_sub(counter) < self.window => {
+                Err(SecurityError::Replay)
+            }
+            Some(_) => Err(SecurityError::Replay),
+        }
+    }
+}
+
+fn nonce_from_counter(counter: u64) -> [u8; 24] {
+    let mut nonce = [0_u8; 24];
+    nonce[0..8].copy_from_slice(b"GLYRSESS");
+    nonce[16..24].copy_from_slice(&counter.to_le_bytes());
+    nonce
+}
+
 #[derive(Default)]
 pub struct InMemorySecretStore {
     secrets: HashMap<DeviceId, Vec<u8>>,
@@ -281,5 +389,24 @@ mod tests {
             Err(SecurityError::RateLimited)
         ));
     }
-}
 
+    #[test]
+    fn session_cipher_round_trips_and_authenticates_aad() {
+        let secret = SecretBytes::from_bytes(b"shared secret used for cipher".to_vec());
+        let cipher = SessionCipher::new(&secret, b"handshake");
+        let sealed = cipher.seal(1, b"video", b"payload").expect("seal");
+        assert_eq!(cipher.open(&sealed, b"video").expect("open"), b"payload");
+        assert!(matches!(
+            cipher.open(&sealed, b"input"),
+            Err(SecurityError::InvalidAuthenticationTag)
+        ));
+    }
+
+    #[test]
+    fn replay_guard_rejects_duplicate_counter() {
+        let mut guard = ReplayGuard::new(64);
+        guard.accept(10).expect("first");
+        assert!(matches!(guard.accept(10), Err(SecurityError::Replay)));
+        guard.accept(11).expect("next");
+    }
+}

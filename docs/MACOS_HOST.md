@@ -21,3 +21,4 @@ cd hosts/macos-host
 swift build
 ```
 
+Current code includes a SwiftUI shell, ScreenCaptureKit display listing, VideoToolbox encoder setup, CGEvent mouse posting, and audio permission status plumbing. Live streaming is still pending.

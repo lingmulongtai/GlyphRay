@@ -15,6 +15,7 @@ final class HostStatusModel: ObservableObject {
     @Published var status: String = "Idle"
     @Published var captureStatus: String = "Capture idle"
     @Published var encoderStatus: String = "Encoder idle"
+    @Published var audioStatus: String = AudioCaptureController().authorizationStatusDescription()
 }
 
 struct ContentView: View {
@@ -30,6 +31,7 @@ struct ContentView: View {
             Divider()
             Label(model.captureStatus, systemImage: "display")
             Label(model.encoderStatus, systemImage: "video")
+            Label("Audio: \(model.audioStatus)", systemImage: "waveform")
             Label("Mouse and keyboard input first; Windows Ink-style pen injection is Windows-specific.", systemImage: "hand.draw")
         }
         .padding(24)

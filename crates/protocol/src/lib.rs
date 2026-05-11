@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub mod stylus_wire;
+
 pub const MAGIC: [u8; 4] = *b"GLYR";
 pub const WIRE_VERSION: u16 = 1;
 pub const HEADER_LEN: usize = 24;

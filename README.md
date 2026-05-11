@@ -6,17 +6,17 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Development Progress
 
-**Overall progress estimate: 31%**
+**Overall progress estimate: 58%**
 
 Last updated: 2026-05-11 JST
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 55% |
-| Milestone 3 Android stylus to Windows Ink stream | Not started | 0% |
-| Milestone 4 hardening and packaging | Not started | 0% |
-| Milestone 5 macOS, audio, relay readiness | Not started | 0% |
+| Milestone 2 video and transport foundation | In progress | 80% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 45% |
+| Milestone 4 hardening and packaging | In progress | 40% |
+| Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
 
@@ -28,7 +28,16 @@ Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
 - Android Jetpack Compose client skeleton with host, pairing, session, pen settings, video settings, and diagnostics screens.
 - Android stylus diagnostics reading raw `MotionEvent` pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android low-latency `SurfaceView` plus `MediaCodec` H.264 decoder foundation.
-- Windows Rust host skeleton with pairing, monitor enumeration, encoder abstraction, and synthetic pen injection wrapper.
+- Android video fragment reassembly and decoder feed controller.
+- Android compact stylus packet encoder and calibration UI surface.
+- Android Keystore device identity key foundation.
+- Windows Rust host skeleton with pairing, monitor enumeration, GDI capture fallback, encoder abstraction, streaming pipeline, and synthetic pen injection wrapper.
+- Windows stylus input bridge for forwarding remote batches to native pen injection.
+- Session cipher and secure datagram codec using ChaCha20-Poly1305.
+- Reconnect backoff and adaptive bitrate controllers.
+- Audio packetization primitives.
+- Relay candidate selection logic.
+- macOS VideoToolbox, CGEvent, and audio-capture controller foundations.
 - Windows pen diagnostic CLI for synthetic pressure-stroke injection.
 - UDP datagram transport packet format with checksum validation.
 - Video frame chunking/reassembly utilities for UDP-sized packets.
@@ -68,6 +77,18 @@ Run the Windows pen diagnostic tool on Windows 10/11:
 cargo run -p glyphray-pen-diagnostics
 ```
 
+Run the Windows capture diagnostic tool:
+
+```powershell
+cargo run -p glyphray-capture-diagnostics
+```
+
+Run the Windows host diagnostics tool:
+
+```powershell
+cargo run -p glyphray-host-diagnostics
+```
+
 ### Android Client
 
 Install Android Studio or Android SDK command-line tools:
@@ -95,4 +116,4 @@ This workspace was generated on a machine where `cargo`, `gradle`, `swift`, and 
 
 ## Next Focus
 
-Milestone 2 now needs real Windows screen capture, a concrete H.264 encoder backend, packetization of encoded frames over LAN, and Android decoder feed plumbing from the transport layer.
+The next hardest work is replacing fallback capture with Windows Graphics Capture or Desktop Duplication, adding a concrete H.264 encoder backend, wiring a live LAN loop into Android, and validating Windows Ink pressure/tilt/hover in real creative apps.

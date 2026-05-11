@@ -29,6 +29,8 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.glyphray.android.input.StylusDiagnosticsController
+import com.glyphray.android.ui.components.CalibrationPanel
+import com.glyphray.android.ui.components.CalibrationStep
 import com.glyphray.android.ui.components.SessionTelemetrySnapshot
 import com.glyphray.android.ui.MetricRow
 import com.glyphray.android.ui.PrimaryAction
@@ -133,6 +135,7 @@ fun RemoteSessionScreen(onPenSettings: () -> Unit, onDiagnostics: () -> Unit) {
 fun PenSettingsScreen(onDiagnostics: () -> Unit) {
     var pressure by remember { mutableFloatStateOf(0.45f) }
     var palmRejection by remember { mutableStateOf(true) }
+    var calibrationStep by remember { mutableStateOf(CalibrationStep.TopLeft) }
 
     ScreenFrame(
         title = "Pen Settings",
@@ -151,7 +154,17 @@ fun PenSettingsScreen(onDiagnostics: () -> Unit) {
         ToggleRow("Palm rejection hints", palmRejection) { palmRejection = it }
         Spacer(Modifier.height(12.dp))
         MetricRow("Mapping", "Fit / Fill / 1:1 / selected monitor")
-        MetricRow("Calibration", "Not calibrated")
+        MetricRow("Calibration", calibrationStep.name)
+        Spacer(Modifier.height(12.dp))
+        CalibrationPanel(step = calibrationStep)
+        Spacer(Modifier.height(12.dp))
+        PrimaryAction("Advance calibration") {
+            calibrationStep = when (calibrationStep) {
+                CalibrationStep.TopLeft -> CalibrationStep.BottomRight
+                CalibrationStep.BottomRight -> CalibrationStep.Complete
+                CalibrationStep.Complete -> CalibrationStep.TopLeft
+            }
+        }
     }
 }
 
@@ -164,6 +177,20 @@ fun VideoSettingsScreen() {
         MetricRow("Codec", "H.264 first")
         MetricRow("Render target", "Low-latency surface")
         MetricRow("Frame rate", "60 fps now, 90/120 fps later")
+    }
+}
+
+@Composable
+fun SecuritySettingsScreen() {
+    ScreenFrame(
+        title = "Security",
+        subtitle = "Local trust, pairing, and device identity",
+    ) {
+        MetricRow("Device identity", "Android Keystore")
+        MetricRow("Pairing", "One-time code / QR-ready")
+        MetricRow("Transport", "Encrypted session packets")
+        MetricRow("Keyboard logging", "Disabled")
+        MetricRow("Clipboard", "Off")
     }
 }
 

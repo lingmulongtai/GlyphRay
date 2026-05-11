@@ -22,6 +22,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.glyphray.android.ui.components.LatencyOverlay
 import com.glyphray.android.ui.components.SessionTelemetrySnapshot
 import com.glyphray.android.video.RemoteVideoDecoder
+import com.glyphray.android.video.RemoteVideoStreamController
 import com.glyphray.android.video.VideoDecoderConfig
 
 @Composable
@@ -31,10 +32,12 @@ fun RemoteDisplayView(
 ) {
     var status by remember { mutableStateOf("Waiting for video") }
     var decoder by remember { mutableStateOf<RemoteVideoDecoder?>(null) }
+    val streamController = remember { RemoteVideoStreamController() }
 
     DisposableEffect(Unit) {
         onDispose {
             decoder?.close()
+            streamController.detachDecoder()
             decoder = null
         }
     }
@@ -54,6 +57,7 @@ fun RemoteDisplayView(
                             decoder = RemoteVideoDecoder(holder.surface)
                             runCatching {
                                 decoder?.configure(VideoDecoderConfig(width = 1920, height = 1080))
+                                decoder?.let(streamController::attachDecoder)
                             }.onSuccess {
                                 status = "Decoder ready"
                             }.onFailure { error ->
@@ -70,6 +74,7 @@ fun RemoteDisplayView(
 
                         override fun surfaceDestroyed(holder: SurfaceHolder) {
                             decoder?.close()
+                            streamController.detachDecoder()
                             decoder = null
                             status = "Surface closed"
                         }
@@ -92,4 +97,3 @@ fun RemoteDisplayView(
         )
     }
 }
-

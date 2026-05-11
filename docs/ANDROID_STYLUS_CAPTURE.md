@@ -7,6 +7,8 @@ Implementation entry points:
 - `apps/android-client/src/main/java/com/glyphray/android/input/StylusModels.kt`
 - `apps/android-client/src/main/java/com/glyphray/android/input/StylusDiagnosticsController.kt`
 - `apps/android-client/src/main/java/com/glyphray/android/ui/screens/Screens.kt`
+- `apps/android-client/src/main/java/com/glyphray/android/input/StylusPacketEncoder.kt`
+- `apps/android-client/src/main/java/com/glyphray/android/input/StylusStreamController.kt`
 
 ## Captured Fields
 
@@ -28,3 +30,4 @@ Samsung devices can provide high-frequency historical samples. GlyphRay keeps th
 
 Palm rejection is currently represented as a settings surface. Milestone 3 should add policy around finger rejection while the stylus is hovering or in contact.
 
+`StylusPacketEncoder` writes the compact `GLYS` packet format documented in `docs/PROTOCOL.md`.

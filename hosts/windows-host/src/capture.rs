@@ -6,6 +6,8 @@ pub enum CaptureError {
     UnsupportedPlatform,
     #[error("display {0} was not found")]
     DisplayNotFound(u32),
+    #[error("screen capture backend failed: {0}")]
+    Backend(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +32,7 @@ impl ScreenCapture for WindowsGraphicsCaptureBackend {
     }
 
     fn capture_frame(&mut self, display_id: u32) -> Result<CapturedFrame, CaptureError> {
-        Err(CaptureError::DisplayNotFound(display_id))
+        platform::capture_display(display_id)
     }
 }
 
@@ -42,18 +44,26 @@ mod platform {
     pub fn list_displays() -> Result<Vec<DisplayDescriptor>, CaptureError> {
         Ok(Vec::new())
     }
+
+    pub fn capture_display(_display_id: u32) -> Result<super::CapturedFrame, CaptureError> {
+        Err(CaptureError::UnsupportedPlatform)
+    }
 }
 
 #[cfg(windows)]
 mod platform {
-    use super::CaptureError;
+    use super::{CaptureError, CapturedFrame};
     use glyphray_protocol::DisplayDescriptor;
     use std::mem::size_of;
-    use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
-        EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
-        MONITORINFOF_PRIMARY,
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+        EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, SelectObject, BITMAPINFO,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
+        MONITORINFOEXW, MONITORINFOF_PRIMARY, RGBQUAD, SRCCOPY,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{GetDC, ReleaseDC};
 
     pub fn list_displays() -> Result<Vec<DisplayDescriptor>, CaptureError> {
         let mut displays = Vec::<DisplayDescriptor>::new();
@@ -63,6 +73,105 @@ mod platform {
             return Err(CaptureError::UnsupportedPlatform);
         }
         Ok(displays)
+    }
+
+    pub fn capture_display(display_id: u32) -> Result<CapturedFrame, CaptureError> {
+        let display = list_displays()?
+            .into_iter()
+            .find(|display| display.id == display_id)
+            .ok_or(CaptureError::DisplayNotFound(display_id))?;
+
+        capture_rect(display)
+    }
+
+    fn capture_rect(display: DisplayDescriptor) -> Result<CapturedFrame, CaptureError> {
+        let width = display.width_px as i32;
+        let height = display.height_px as i32;
+        if width <= 0 || height <= 0 {
+            return Err(CaptureError::Backend("display has no capture area".to_string()));
+        }
+
+        let hwnd = HWND::default();
+        let screen_dc = unsafe { GetDC(hwnd) };
+        if screen_dc.0 == 0 {
+            return Err(last_error("GetDC"));
+        }
+
+        let mem_dc = unsafe { CreateCompatibleDC(screen_dc) };
+        if mem_dc.0 == 0 {
+            unsafe {
+                ReleaseDC(hwnd, screen_dc);
+            }
+            return Err(last_error("CreateCompatibleDC"));
+        }
+
+        let bitmap = unsafe { CreateCompatibleBitmap(screen_dc, width, height) };
+        if bitmap.0 == 0 {
+            unsafe {
+                DeleteDC(mem_dc);
+                ReleaseDC(hwnd, screen_dc);
+            }
+            return Err(last_error("CreateCompatibleBitmap"));
+        }
+
+        let old_object = unsafe { SelectObject(mem_dc, HGDIOBJ(bitmap.0)) };
+        let bitblt_ok = unsafe {
+            BitBlt(
+                mem_dc,
+                0,
+                0,
+                width,
+                height,
+                screen_dc,
+                display.origin_x,
+                display.origin_y,
+                SRCCOPY,
+            )
+        };
+        if !bitblt_ok.as_bool() {
+            cleanup_gdi(hwnd, screen_dc, mem_dc, bitmap, old_object);
+            return Err(last_error("BitBlt"));
+        }
+
+        let mut bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: (width * height * 4) as u32,
+                ..Default::default()
+            },
+            bmiColors: [RGBQUAD::default(); 1],
+        };
+        let mut pixels = vec![0_u8; (width * height * 4) as usize];
+        let rows = unsafe {
+            GetDIBits(
+                mem_dc,
+                bitmap,
+                0,
+                height as u32,
+                Some(pixels.as_mut_ptr() as *mut _),
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            )
+        };
+
+        cleanup_gdi(hwnd, screen_dc, mem_dc, bitmap, old_object);
+
+        if rows == 0 {
+            return Err(last_error("GetDIBits"));
+        }
+
+        Ok(CapturedFrame {
+            display_id: display.id,
+            width: display.width_px,
+            height: display.height_px,
+            capture_timestamp_us: now_us(),
+            bgra: pixels,
+        })
     }
 
     unsafe extern "system" fn enum_monitor(
@@ -106,5 +215,28 @@ mod platform {
             return None;
         }
         Some(String::from_utf16_lossy(&raw[..len]))
+    }
+
+    fn cleanup_gdi(hwnd: HWND, screen_dc: HDC, mem_dc: HDC, bitmap: HBITMAP, old_object: HGDIOBJ) {
+        unsafe {
+            if old_object.0 != 0 {
+                SelectObject(mem_dc, old_object);
+            }
+            DeleteObject(HGDIOBJ(bitmap.0));
+            DeleteDC(mem_dc);
+            ReleaseDC(hwnd, screen_dc);
+        }
+    }
+
+    fn now_us() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_micros() as u64)
+            .unwrap_or_default()
+    }
+
+    fn last_error(api: &str) -> CaptureError {
+        let code = unsafe { windows::Win32::Foundation::GetLastError() };
+        CaptureError::Backend(format!("{api} failed with Win32 error {}", code.0))
     }
 }

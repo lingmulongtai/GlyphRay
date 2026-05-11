@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 crc32fast.workspace = true
 glyphray-protocol = { path = "../protocol" }
+glyphray-security = { path = "../security" }
 rand.workspace = true
 serde.workspace = true
 thiserror.workspace = true

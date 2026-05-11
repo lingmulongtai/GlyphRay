@@ -39,6 +39,7 @@ import com.glyphray.android.ui.screens.HostListScreen
 import com.glyphray.android.ui.screens.PairingScreen
 import com.glyphray.android.ui.screens.PenSettingsScreen
 import com.glyphray.android.ui.screens.RemoteSessionScreen
+import com.glyphray.android.ui.screens.SecuritySettingsScreen
 import com.glyphray.android.ui.screens.VideoSettingsScreen
 
 enum class GlyphRayScreen(val label: String) {
@@ -48,6 +49,7 @@ enum class GlyphRayScreen(val label: String) {
     Session("Session"),
     Pen("Pen"),
     Video("Video"),
+    Security("Security"),
     Diagnostics("Diagnostics"),
 }
 
@@ -63,6 +65,7 @@ fun GlyphRayApp() {
                     GlyphRayScreen.Hosts,
                     GlyphRayScreen.Session,
                     GlyphRayScreen.Pen,
+                    GlyphRayScreen.Security,
                     GlyphRayScreen.Diagnostics,
                 ).forEach { item ->
                     NavigationBarItem(
@@ -94,6 +97,7 @@ fun GlyphRayApp() {
                 )
                 GlyphRayScreen.Pen -> PenSettingsScreen(onDiagnostics = { screen = GlyphRayScreen.Diagnostics })
                 GlyphRayScreen.Video -> VideoSettingsScreen()
+                GlyphRayScreen.Security -> SecuritySettingsScreen()
                 GlyphRayScreen.Diagnostics -> DiagnosticsScreen(diagnosticsController)
             }
         }

@@ -48,6 +48,19 @@ Large encoded frames can be split with the transport-level `GLYF` fragment paylo
 
 `FrameReassembler` rebuilds the encoded frame once every fragment for a sequence has arrived. Loss recovery and retransmission policy are still part of the Milestone 2 streaming work.
 
+The complete encoded access unit inside the fragment stream is:
+
+| Field | Size | Description |
+| --- | ---: | --- |
+| codec | 1 | H.264, H.265, or AV1 |
+| is_keyframe | 1 | `0` or `1` |
+| sequence | 8 | encoded frame sequence |
+| presentation_time_us | 8 | presentation timestamp |
+| payload_len | 4 | encoded frame payload length |
+| payload | variable | codec bytes, currently H.264 Annex B expected by Android decoder |
+
+Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
+
 ## Message Families
 
 - Handshake: `ClientHello`, `HostHello`
@@ -81,3 +94,27 @@ Large encoded frames can be split with the transport-level `GLYF` fragment paylo
 - predicted flag
 
 Input channel packets must be prioritized over video when congestion appears.
+
+## Compact Stylus Wire Packet
+
+Android and Windows also share a compact stylus packet format for high-frequency input transport. It starts with `GLYS`, version `1`, batch sequence, monotonic timestamp, sample count, and reserved bytes. Each sample is 58 bytes:
+
+| Field | Size |
+| --- | ---: |
+| sequence | 8 |
+| timestamp_us | 8 |
+| display_id | 4 |
+| pointer_id | 4 |
+| tool_type | 1 |
+| action | 1 |
+| x | 4 |
+| y | 4 |
+| pressure | 4 |
+| tilt_x_degrees | 4 |
+| tilt_y_degrees | 4 |
+| orientation_degrees | 4 |
+| button_flags | 4 |
+| flags | 1 |
+| reserved | 3 |
+
+Flags: bit 0 hover, bit 1 eraser, bit 2 predicted.

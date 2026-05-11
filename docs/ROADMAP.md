@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 31%.
+Current overall progress estimate: 58%.
 
 ## Milestone 1
 
@@ -26,29 +26,48 @@ Current overall progress estimate: 31%.
 - [x] Add encoder trait with H.264 low-latency configuration.
 - [ ] Add at least one hardware encoder path or a clean software fallback.
 - [x] Add Android MediaCodec H.264 decode pipeline.
+- [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
+- [x] Add Windows capture to encode to packetize streaming pipeline.
+- [x] Add Windows GDI capture fallback for early local validation.
+- [x] Add Windows capture diagnostic CLI.
 - [ ] Stream video over LAN using the transport abstraction.
+- [x] Add secure datagram codec foundation for encrypted transport.
 - [x] Add latency overlay prepared for `glyphray-telemetry`.
 
 ## Milestone 3
 
-- [ ] Connect Android stylus packets to Windows native pen injection.
+- [x] Add Android compact stylus packet encoder.
+- [x] Add Rust compact stylus packet decoder/encoder.
+- [x] Add Windows host stylus input bridge.
+- [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
-- [ ] Add drawing area calibration UI.
-- [ ] Harden multi-monitor and high-DPI mapping.
+- [x] Add drawing area calibration UI surface.
+- [x] Add calibration profile math.
+- [ ] Harden multi-monitor and high-DPI mapping on real hardware.
 
 ## Milestone 4
 
-- [ ] Add encrypted production transport.
-- [ ] Add platform secret stores.
-- [ ] Add reconnect and adaptive bitrate.
-- [ ] Add host diagnostics UI.
-- [ ] Add installer packaging.
+- [x] Add session cipher and secure datagram codec foundation.
+- [x] Add Android Keystore device identity foundation.
+- [x] Add Windows platform secret-store boundary.
+- [x] Add reconnect and adaptive bitrate controllers.
+- [x] Add host diagnostics CLI.
+- [x] Add installer packaging foundation.
+- [ ] Replace Windows development secret store with DPAPI or Credential Manager.
+- [ ] Add macOS Keychain implementation.
+- [ ] Add signed production installers.
 
 ## Milestone 5
 
-- [ ] Complete macOS host capture and encode path.
-- [ ] Add audio.
-- [ ] Add optional relay architecture.
-- [ ] Prepare beta release.
+- [x] Add macOS ScreenCaptureKit display enumeration foundation.
+- [x] Add macOS VideoToolbox encoder foundation.
+- [x] Add macOS CGEvent input foundation.
+- [x] Add audio packetization primitives.
+- [x] Add optional relay architecture notes and route selection logic.
+- [x] Add beta release checklist.
+- [ ] Complete macOS host live capture and encode stream.
+- [ ] Add Windows/macOS audio capture and Android playback.
+- [ ] Implement relay server/client.
+- [ ] Prepare signed beta release.

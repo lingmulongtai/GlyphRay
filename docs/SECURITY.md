@@ -42,5 +42,6 @@ The Rust `SecretStore` trait is intentionally abstract so platform storage is im
 
 ## Current Implementation
 
-Milestone 1 includes pairing code generation, salted pairing-code hashing, challenge-response helpers, session-token type, and pairing rate limiting. Encrypted transport and platform secret stores are tracked in the roadmap.
+Current code includes pairing code generation, salted pairing-code hashing, challenge-response helpers, session-token type, pairing rate limiting, a ChaCha20-Poly1305 session cipher, replay protection, and a secure datagram codec foundation. Android device identity keys use Android Keystore.
 
+Windows DPAPI/Credential Manager and macOS Keychain are still required before beta.

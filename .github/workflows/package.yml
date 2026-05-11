@@ -1,0 +1,20 @@
+name: Package Smoke Checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tools/packaging/**"
+      - ".github/workflows/package.yml"
+
+jobs:
+  packaging-files:
+    name: Packaging files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check packaging manifests exist
+        run: |
+          test -f tools/packaging/README.md
+          test -f tools/packaging/windows/GlyphRayHost.wxs
+

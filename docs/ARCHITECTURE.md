@@ -22,6 +22,7 @@ flowchart LR
 
 ## Crate Boundaries
 
+- `crates/audio`: audio packetization primitives.
 - `crates/protocol`: schema types and binary frame encoding/decoding.
 - `crates/core`: pressure curves, coordinate mapping, session state.
 - `crates/security`: pairing codes, challenge response, rate limiting, secret store traits.
@@ -37,6 +38,7 @@ The Android app owns:
 - Pressure curve and mapping UI.
 - Hardware video decode through MediaCodec in Milestone 2.
 - Secure device identity through Android Keystore in a platform module.
+- Compact stylus packet encoding for high-frequency `GLYS` input batches.
 
 ## Windows Host
 
@@ -50,6 +52,22 @@ The Windows host owns:
 
 Unsafe/native code is isolated under `hosts/windows-host/src/input/win32_pen.rs`.
 
+Milestone 2 also includes a video streaming pipeline:
+
+```mermaid
+flowchart LR
+  Capture["ScreenCapture"]
+  Encoder["VideoEncoder"]
+  Packetizer["VideoPacketizer"]
+  Transport["RealtimeTransport"]
+
+  Capture --> Encoder
+  Encoder --> Packetizer
+  Packetizer --> Transport
+```
+
+The current capture implementation includes a GDI fallback for early validation. The production path should move to Windows Graphics Capture or Desktop Duplication.
+
 ## macOS Host
 
 The macOS host is parallel in structure but lower priority:
@@ -61,3 +79,10 @@ The macOS host is parallel in structure but lower priority:
 
 Windows Ink-style pen injection remains Windows-specific.
 
+## Security And Transport
+
+Session payloads can be sealed through `SessionCipher` and `SecureDatagramCodec`. This is the foundation for encrypted UDP/WebRTC-like packet transport. Relay selection is optional and prefers direct trusted LAN routes.
+
+## Audio And Relay
+
+Audio packetization and relay candidate selection exist as code-level foundations. Capture/playback and relay server/client implementations remain future work.

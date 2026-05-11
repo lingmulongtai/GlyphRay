@@ -1,12 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/audio",
   "crates/core",
   "crates/protocol",
   "crates/security",
   "crates/telemetry",
   "crates/transport",
   "hosts/windows-host",
+  "hosts/windows-host/tools/capture-diagnostics",
+  "hosts/windows-host/tools/host-diagnostics",
   "hosts/windows-host/tools/pen-diagnostics",
 ]
 exclude = [

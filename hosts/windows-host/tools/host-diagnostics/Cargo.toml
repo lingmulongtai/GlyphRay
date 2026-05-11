@@ -1,0 +1,13 @@
+[package]
+name = "glyphray-host-diagnostics"
+description = "Windows host diagnostics CLI for GlyphRay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+glyphray-telemetry = { path = "../../../../crates/telemetry" }
+glyphray-transport = { path = "../../../../crates/transport" }
+glyphray-windows-host = { path = "../.." }
+
