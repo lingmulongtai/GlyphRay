@@ -85,3 +85,11 @@ Android から stylus packet を送れるようになったので、今日は Wi
 これはまだ production の接続ではない。mapping は一時的な 1920x1080 stretch で、approval UI も本番 handshake もこれから。でも、`GLYPHRAY_DEV_AUTO_APPROVE=1` と組み合わせると、Android remote surface から Windows host の pen injection までを smoke test できる形に近づいた。
 
 この時点の進捗見積もり: 68%。
+
+## 2026-05-11 JST - Day 1, Windows API Compile Fix
+
+今日は Windows 実コンパイルで見つかった `windows` crate 0.58 の API 配置差分を直した。GDI capture 側は `GetDC` / `ReleaseDC` の import 先、`MONITORINFOF_PRIMARY` の namespace、handle の null pointer 判定、`BitBlt` の `Result` 戻り値に合わせて修正した。
+
+synthetic pen injection 側は、`CreateSyntheticPointerDevice` / `DestroySyntheticPointerDevice` / `POINTER_TYPE_INFO` が `Win32_UI_Controls` 側にあるため feature と import を追加し、pen mask は `WindowsAndMessaging` の `PEN_MASK_*` を使う形に直した。これで少なくとも報告された unresolved import / type mismatch 系は潰した。
+
+この時点の進捗見積もり: 68%。

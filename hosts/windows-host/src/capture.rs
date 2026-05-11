@@ -55,15 +55,16 @@ mod platform {
     use super::{CaptureError, CapturedFrame};
     use glyphray_protocol::DisplayDescriptor;
     use std::mem::size_of;
+    use std::ptr::null_mut;
     use std::time::{SystemTime, UNIX_EPOCH};
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
-        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
         EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, SelectObject, BITMAPINFO,
         BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
-        MONITORINFOEXW, MONITORINFOF_PRIMARY, RGBQUAD, SRCCOPY,
+        MONITORINFOEXW, ReleaseDC, RGBQUAD, SRCCOPY,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{GetDC, ReleaseDC};
+    use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 
     pub fn list_displays() -> Result<Vec<DisplayDescriptor>, CaptureError> {
         let mut displays = Vec::<DisplayDescriptor>::new();
@@ -93,12 +94,12 @@ mod platform {
 
         let hwnd = HWND::default();
         let screen_dc = unsafe { GetDC(hwnd) };
-        if screen_dc.0 == 0 {
+        if screen_dc.0 == null_mut() {
             return Err(last_error("GetDC"));
         }
 
         let mem_dc = unsafe { CreateCompatibleDC(screen_dc) };
-        if mem_dc.0 == 0 {
+        if mem_dc.0 == null_mut() {
             unsafe {
                 ReleaseDC(hwnd, screen_dc);
             }
@@ -106,7 +107,7 @@ mod platform {
         }
 
         let bitmap = unsafe { CreateCompatibleBitmap(screen_dc, width, height) };
-        if bitmap.0 == 0 {
+        if bitmap.0 == null_mut() {
             unsafe {
                 DeleteDC(mem_dc);
                 ReleaseDC(hwnd, screen_dc);
@@ -128,7 +129,7 @@ mod platform {
                 SRCCOPY,
             )
         };
-        if !bitblt_ok.as_bool() {
+        if bitblt_ok.is_err() {
             cleanup_gdi(hwnd, screen_dc, mem_dc, bitmap, old_object);
             return Err(last_error("BitBlt"));
         }
@@ -219,7 +220,7 @@ mod platform {
 
     fn cleanup_gdi(hwnd: HWND, screen_dc: HDC, mem_dc: HDC, bitmap: HBITMAP, old_object: HGDIOBJ) {
         unsafe {
-            if old_object.0 != 0 {
+            if old_object.0 != null_mut() {
                 SelectObject(mem_dc, old_object);
             }
             DeleteObject(HGDIOBJ(bitmap.0));

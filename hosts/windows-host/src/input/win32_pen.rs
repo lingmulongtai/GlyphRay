@@ -2,21 +2,28 @@ use super::{map_action_to_contact, InjectionReport, InputError, PenInjector};
 use glyphray_core::{CoordinateMapper, PressureMapper};
 use glyphray_protocol::{StylusAction, StylusInputBatch};
 use windows::Win32::Foundation::POINT;
+use windows::Win32::UI::Controls::{
+    CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, HSYNTHETICPOINTERDEVICE,
+    POINTER_FEEDBACK_DEFAULT, POINTER_TYPE_INFO, POINTER_TYPE_INFO_0,
+};
 use windows::Win32::UI::Input::Pointer::{
-    CreateSyntheticPointerDevice, DestroySyntheticPointerDevice, InjectSyntheticPointerInput,
-    POINTER_FEEDBACK_DEFAULT, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE,
+    InjectSyntheticPointerInput, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE,
     POINTER_FLAG_PRIMARY, POINTER_FLAG_UPDATE, POINTER_FLAG_UP, POINTER_INFO, POINTER_PEN_INFO,
-    POINTER_PEN_MASK, POINTER_PEN_MASK_PRESSURE, POINTER_PEN_MASK_ROTATION,
-    POINTER_PEN_MASK_TILT_X, POINTER_PEN_MASK_TILT_Y, POINTER_TYPE_INFO, PT_PEN,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    PEN_MASK_PRESSURE, PEN_MASK_ROTATION, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN,
 };
 
 pub struct PlatformPenInjector {
-    device: windows::Win32::UI::Input::Pointer::HSYNTHETICPOINTERDEVICE,
+    device: HSYNTHETICPOINTERDEVICE,
 }
 
 impl PlatformPenInjector {
     pub fn open() -> Result<Self, InputError> {
-        let device = unsafe { CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_DEFAULT) };
+        let device = unsafe {
+            CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_DEFAULT)
+                .map_err(|_| InputError::DeviceCreationFailed)?
+        };
         if device.is_invalid() {
             return Err(InputError::DeviceCreationFailed);
         }
@@ -64,12 +71,10 @@ impl PenInjector for PlatformPenInjector {
             let pen_info = POINTER_PEN_INFO {
                 pointerInfo: pointer_info,
                 penFlags: Default::default(),
-                penMask: POINTER_PEN_MASK(
-                    POINTER_PEN_MASK_PRESSURE.0
-                        | POINTER_PEN_MASK_TILT_X.0
-                        | POINTER_PEN_MASK_TILT_Y.0
-                        | POINTER_PEN_MASK_ROTATION.0,
-                ),
+                penMask: PEN_MASK_PRESSURE
+                    | PEN_MASK_TILT_X
+                    | PEN_MASK_TILT_Y
+                    | PEN_MASK_ROTATION,
                 pressure: pressure.to_windows_pressure(sample.pressure),
                 rotation: sample.orientation_degrees.rem_euclid(360.0).round() as u32,
                 tiltX: sample.tilt_x_degrees.round().clamp(-90.0, 90.0) as i32,
@@ -78,13 +83,10 @@ impl PenInjector for PlatformPenInjector {
 
             let pointer_type_info = POINTER_TYPE_INFO {
                 r#type: PT_PEN,
-                Anonymous: windows::Win32::UI::Input::Pointer::POINTER_TYPE_INFO_0 {
-                    penInfo: pen_info,
-                },
+                Anonymous: POINTER_TYPE_INFO_0 { penInfo: pen_info },
             };
 
-            let ok = unsafe { InjectSyntheticPointerInput(self.device, &pointer_type_info, 1) };
-            if !ok.as_bool() {
+            if unsafe { InjectSyntheticPointerInput(self.device, &[pointer_type_info]) }.is_err() {
                 return Err(InputError::InjectionFailed);
             }
         }
@@ -95,4 +97,3 @@ impl PenInjector for PlatformPenInjector {
         })
     }
 }
-
