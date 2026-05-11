@@ -61,3 +61,11 @@ Android 側は Compose の `Column` を CI で確実に解決できるよう `fo
 さらに Android から `GLYS` stylus payload を `GLYT` UDP datagram に包む `TransportPacketCodec` と `StylusUdpSender` を追加した。Windows backend 側には、approval UI ができるまでの実機 smoke test 用として `GLYPHRAY_DEV_AUTO_APPROVE` の明示的な開発モードを入れた。まだ production pairing ではないけれど、Android のペン入力を LAN packet として host backend に届ける足場ができた。
 
 この時点の進捗見積もり: 65%。
+
+## 2026-05-11 JST - Day 1, README Visual Pass
+
+今日は README を、ただの説明文から「リポジトリの地図」に近づけた。`README.md` には進捗 pie chart、milestone progress bar、monorepo map、runtime flow、system shape を追加し、初見でも Android / Windows host / Rust crates / docs がどう関係するか分かるようにした。
+
+さらに日本語版の `README.ja.md` を追加した。GlyphRay は扱っている領域が Android、Windows native、Rust protocol、security、低遅延 video と広いので、日本語で全体像を掴める入口があるだけで開発の迷子率がかなり下がるはず。
+
+この時点の進捗見積もり: 66%。

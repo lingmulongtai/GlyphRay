@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 65%.
+Current overall progress estimate: 66%.
 
 ## Milestone 1
 
@@ -19,6 +19,7 @@ Current overall progress estimate: 65%.
 - [x] Add Windows pen diagnostic CLI.
 - [x] Add macOS host shell.
 - [x] Add initial docs and CI.
+- [x] Add visual README and Japanese README for repository onboarding.
 
 ## Milestone 2
 
