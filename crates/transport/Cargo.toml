@@ -1,0 +1,14 @@
+[package]
+name = "glyphray-transport"
+description = "Transport abstractions and low-latency network simulation for GlyphRay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+glyphray-protocol = { path = "../protocol" }
+rand.workspace = true
+serde.workspace = true
+thiserror.workspace = true

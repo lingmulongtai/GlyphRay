@@ -1,0 +1,13 @@
+[package]
+name = "glyphray-pen-diagnostics"
+description = "Windows pen injection diagnostic CLI for GlyphRay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+glyphray-core = { path = "../../../../crates/core" }
+glyphray-protocol = { path = "../../../../crates/protocol" }
+glyphray-windows-host = { path = "../.." }
+

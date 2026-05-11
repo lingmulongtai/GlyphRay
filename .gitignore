@@ -1,0 +1,14 @@
+.gradle/
+.idea/
+.vscode/
+build/
+out/
+target/
+DerivedData/
+*.iml
+*.log
+*.keystore
+*.p12
+*.pem
+local.properties
+

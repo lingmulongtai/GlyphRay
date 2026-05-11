@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.GlyphRay" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/glyphray_bg</item>
+        <item name="android:navigationBarColor">@color/glyphray_bg</item>
+    </style>
+</resources>
+
