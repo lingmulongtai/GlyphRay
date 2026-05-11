@@ -45,3 +45,11 @@ Milestone 5 側では audio packetization crate、relay candidate selection、ma
 `glyphray-windows-host serve` も追加した。まだ console loop で、approval UI や continuous video loop はこれからだけれど、今までの部品が backend runtime としてまとまり始めたのは大きい。次は host UI から peer approve/reject を動かし、video pipeline を runtime loop に接続する。
 
 この時点の進捗見積もり: 62%。
+
+## 2026-05-11 JST - Day 1, CI Repair Pass
+
+今日は GitHub Actions で落ちていた Rust tests と Android build の修正に集中した。Rust 側は `hmac::Mac` と `chacha20poly1305::KeyInit` がどちらも `new_from_slice` を持つため、HMAC 初期化を明示的に `Mac` 側へ解決するようにした。
+
+Android 側は Compose の `Column` を CI で確実に解決できるよう `foundation-layout` を明示依存に追加し、stylus diagnostics の `pointerInteropFilter` は `onTouchEvent` named argument で渡すようにした。小さい修正だけれど、CI が赤いままだと開発速度が落ちるので、ここは地味に大事な前進。
+
+この時点の進捗見積もり: 63%。

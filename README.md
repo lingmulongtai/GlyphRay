@@ -6,7 +6,7 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Development Progress
 
-**Overall progress estimate: 62%**
+**Overall progress estimate: 63%**
 
 Last updated: 2026-05-11 JST
 
@@ -15,7 +15,7 @@ Last updated: 2026-05-11 JST
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 83% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 52% |
-| Milestone 4 hardening and packaging | In progress | 44% |
+| Milestone 4 hardening and packaging | In progress | 45% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -45,6 +45,7 @@ Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
 - macOS SwiftUI host shell prepared for ScreenCaptureKit and VideoToolbox work.
 - Product, architecture, protocol, security, performance, roadmap, and test documentation.
 - GitHub Actions CI for Rust tests and Android debug build.
+- CI compile fixes for Rust HMAC initialization and Android Compose layout/input APIs.
 
 ## Repository Layout
 

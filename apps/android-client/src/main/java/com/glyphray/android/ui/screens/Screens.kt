@@ -210,7 +210,7 @@ fun DiagnosticsScreen(controller: StylusDiagnosticsController) {
                 .height(260.dp)
                 .background(Color(0xFF070A0E), RoundedCornerShape(8.dp))
                 .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                .pointerInteropFilter(controller::onMotionEvent),
+                .pointerInteropFilter(onTouchEvent = controller::onMotionEvent),
             contentAlignment = Alignment.Center,
         ) {
             Text("Draw or hover here", color = Color(0xFF9DB2BC))

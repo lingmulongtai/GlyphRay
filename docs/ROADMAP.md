@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 62%.
+Current overall progress estimate: 63%.
 
 ## Milestone 1
 
@@ -12,6 +12,7 @@ Current overall progress estimate: 62%.
 - [x] Add security/session helper tests.
 - [x] Add transport simulation tests.
 - [x] Add Android Compose skeleton.
+- [x] Fix Compose layout dependency and stylus diagnostics pointer-input compile path.
 - [x] Add Android stylus diagnostics screen.
 - [x] Add Windows host skeleton.
 - [x] Add Windows pen injection wrapper.
@@ -59,6 +60,7 @@ Current overall progress estimate: 62%.
 - [x] Add reconnect and adaptive bitrate controllers.
 - [x] Add host diagnostics CLI.
 - [x] Add console backend runtime entry point.
+- [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.
 - [ ] Add macOS Keychain implementation.

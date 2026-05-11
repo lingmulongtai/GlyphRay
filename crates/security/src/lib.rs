@@ -154,8 +154,8 @@ pub fn sign_challenge(
     device_id: &DeviceId,
     challenge: &AuthChallenge,
 ) -> Vec<u8> {
-    let mut mac =
-        HmacSha256::new_from_slice(shared_secret.expose()).expect("HMAC accepts any key length");
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(shared_secret.expose())
+        .expect("HMAC accepts any key length");
     mac.update(device_id.as_str().as_bytes());
     mac.update(&challenge.id.to_le_bytes());
     mac.update(&challenge.nonce);
@@ -169,8 +169,8 @@ pub fn verify_challenge(
     tag: &[u8],
 ) -> Result<(), SecurityError> {
     let expected = sign_challenge(shared_secret, device_id, challenge);
-    let mut mac =
-        HmacSha256::new_from_slice(shared_secret.expose()).expect("HMAC accepts any key length");
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(shared_secret.expose())
+        .expect("HMAC accepts any key length");
     mac.update(device_id.as_str().as_bytes());
     mac.update(&challenge.id.to_le_bytes());
     mac.update(&challenge.nonce);
