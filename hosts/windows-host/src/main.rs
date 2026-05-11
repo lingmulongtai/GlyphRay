@@ -1,6 +1,6 @@
 use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
-use glyphray_windows_host::backend::{HostBackendRuntime, NoopPenInjector};
+use glyphray_windows_host::backend::{HostBackendRuntime, NoopPenInjector, PermissionPolicy};
 use glyphray_windows_host::{input::create_pen_injector, HostConfig};
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -34,7 +34,14 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     ));
     let mut server = UdpServer::bind(control_addr)?;
     let discovery = LanDiscoverySocket::bind(config.discovery_port)?;
-    let mut runtime = HostBackendRuntime::<NoopPenInjector>::new(config, None);
+    let permission_policy = if std::env::var_os("GLYPHRAY_DEV_AUTO_APPROVE").is_some() {
+        println!("Development auto-approval is enabled for incoming LAN clients.");
+        PermissionPolicy::DevAutoApprove
+    } else {
+        PermissionPolicy::RequireApproval
+    };
+    let mut runtime =
+        HostBackendRuntime::<NoopPenInjector>::new_with_permission_policy(config, None, permission_policy);
     let mut last_announce = Instant::now() - Duration::from_secs(2);
 
     println!("GlyphRay backend listening on {}", server.local_addr()?);

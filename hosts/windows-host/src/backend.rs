@@ -30,6 +30,12 @@ pub enum PermissionState {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermissionPolicy {
+    RequireApproval,
+    DevAutoApprove,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientSession {
     pub peer: SocketAddr,
@@ -80,6 +86,7 @@ impl SessionRegistry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendEvent {
     SessionDiscovered { peer: SocketAddr },
+    PeerAutoApproved { peer: SocketAddr },
     PairingRequested { peer: SocketAddr, device_name: String },
     PermissionRequired { peer: SocketAddr },
     PacketIgnored { peer: SocketAddr, reason: String },
@@ -98,6 +105,7 @@ pub struct RouteOutcome {
 pub struct HostPacketRouter<I> {
     pub sessions: SessionRegistry,
     input_bridge: Option<StylusInputBridge<I>>,
+    permission_policy: PermissionPolicy,
     next_outbound_sequence: u64,
 }
 
@@ -123,9 +131,17 @@ where
     I: PenInjector,
 {
     pub fn new(input_bridge: Option<StylusInputBridge<I>>) -> Self {
+        Self::new_with_permission_policy(input_bridge, PermissionPolicy::RequireApproval)
+    }
+
+    pub fn new_with_permission_policy(
+        input_bridge: Option<StylusInputBridge<I>>,
+        permission_policy: PermissionPolicy,
+    ) -> Self {
         Self {
             sessions: SessionRegistry::default(),
             input_bridge,
+            permission_policy,
             next_outbound_sequence: 1,
         }
     }
@@ -169,6 +185,18 @@ where
                 device_name: request.device_name,
             });
             return Ok(outcome);
+        }
+
+        if session.permission != PermissionState::Approved {
+            if self.permission_policy == PermissionPolicy::DevAutoApprove {
+                session.permission = PermissionState::Approved;
+                session.device_id
+                    .get_or_insert_with(|| format!("dev-peer-{peer}"));
+                outcome.events.push(BackendEvent::PeerAutoApproved { peer });
+            } else {
+                outcome.events.push(BackendEvent::PermissionRequired { peer });
+                return Ok(outcome);
+            }
         }
 
         if session.permission != PermissionState::Approved {
@@ -250,6 +278,18 @@ where
     I: PenInjector,
 {
     pub fn new(config: HostConfig, input_bridge: Option<StylusInputBridge<I>>) -> Self {
+        Self::new_with_permission_policy(
+            config,
+            input_bridge,
+            PermissionPolicy::RequireApproval,
+        )
+    }
+
+    pub fn new_with_permission_policy(
+        config: HostConfig,
+        input_bridge: Option<StylusInputBridge<I>>,
+        permission_policy: PermissionPolicy,
+    ) -> Self {
         let advertisement = HostAdvertisement {
             host_id: host_id_from_name(&config.host_name),
             host_name: config.host_name.clone(),
@@ -264,7 +304,7 @@ where
         Self {
             config,
             advertisement,
-            router: HostPacketRouter::new(input_bridge),
+            router: HostPacketRouter::new_with_permission_policy(input_bridge, permission_policy),
         }
     }
 
@@ -394,6 +434,23 @@ mod tests {
             peer,
             device_name: "Galaxy Tab".to_string()
         }));
+    }
+
+    #[test]
+    fn dev_auto_approve_allows_input_without_manual_permission() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new_with_permission_policy(
+            None,
+            PermissionPolicy::DevAutoApprove,
+        );
+        let peer: SocketAddr = "127.0.0.1:50003".parse().expect("peer");
+        let payload = encode_stylus_batch(&sample_batch()).expect("encode");
+        let outcome = router.route_packet(peer, input_packet(payload)).expect("route");
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::PeerAutoApproved { peer }));
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::StylusDecoded { peer, samples: 1 }));
     }
 
     fn input_packet(payload: Vec<u8>) -> TransportPacket {

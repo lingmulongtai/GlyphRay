@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 63%.
+Current overall progress estimate: 65%.
 
 ## Milestone 1
 
@@ -27,6 +27,7 @@ Current overall progress estimate: 63%.
 - [x] Add encoder trait with H.264 low-latency configuration.
 - [ ] Add at least one hardware encoder path or a clean software fallback.
 - [x] Add Android MediaCodec H.264 decode pipeline.
+- [x] Add Android LAN host discovery receiver for host advertisements.
 - [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
@@ -42,6 +43,7 @@ Current overall progress estimate: 63%.
 ## Milestone 3
 
 - [x] Add Android compact stylus packet encoder.
+- [x] Add Android UDP transport packet encoder for compact stylus batches.
 - [x] Add Rust compact stylus packet decoder/encoder.
 - [x] Add Windows host stylus input bridge.
 - [x] Add backend session registry and input packet routing.
@@ -60,6 +62,7 @@ Current overall progress estimate: 63%.
 - [x] Add reconnect and adaptive bitrate controllers.
 - [x] Add host diagnostics CLI.
 - [x] Add console backend runtime entry point.
+- [x] Add development-only backend auto-approval mode for LAN input smoke tests.
 - [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.

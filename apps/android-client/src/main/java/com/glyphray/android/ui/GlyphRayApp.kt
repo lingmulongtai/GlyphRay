@@ -23,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,6 +34,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.glyphray.android.input.StylusDiagnosticsController
+import com.glyphray.android.network.DiscoveredHost
+import com.glyphray.android.network.HostDiscoveryController
 import com.glyphray.android.ui.screens.ConnectionScreen
 import com.glyphray.android.ui.screens.DiagnosticsScreen
 import com.glyphray.android.ui.screens.HostListScreen
@@ -56,7 +59,14 @@ enum class GlyphRayScreen(val label: String) {
 @Composable
 fun GlyphRayApp() {
     var screen by remember { mutableStateOf(GlyphRayScreen.Hosts) }
+    var selectedHost by remember { mutableStateOf<DiscoveredHost?>(null) }
     val diagnosticsController = remember { StylusDiagnosticsController() }
+    val hostDiscoveryController = remember { HostDiscoveryController() }
+
+    DisposableEffect(hostDiscoveryController) {
+        hostDiscoveryController.startContinuousScan()
+        onDispose { hostDiscoveryController.close() }
+    }
 
     Scaffold(
         bottomBar = {
@@ -86,11 +96,19 @@ fun GlyphRayApp() {
         ) {
             when (screen) {
                 GlyphRayScreen.Hosts -> HostListScreen(
+                    discoveryState = hostDiscoveryController.state,
+                    onRefresh = hostDiscoveryController::refreshOnce,
                     onPair = { screen = GlyphRayScreen.Pair },
-                    onConnect = { screen = GlyphRayScreen.Connect },
+                    onConnect = { host ->
+                        selectedHost = host
+                        screen = GlyphRayScreen.Connect
+                    },
                 )
                 GlyphRayScreen.Pair -> PairingScreen(onDone = { screen = GlyphRayScreen.Hosts })
-                GlyphRayScreen.Connect -> ConnectionScreen(onConnected = { screen = GlyphRayScreen.Session })
+                GlyphRayScreen.Connect -> ConnectionScreen(
+                    selectedHost = selectedHost,
+                    onConnected = { screen = GlyphRayScreen.Session },
+                )
                 GlyphRayScreen.Session -> RemoteSessionScreen(
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },

@@ -53,3 +53,11 @@ Milestone 5 側では audio packetization crate、relay candidate selection、ma
 Android 側は Compose の `Column` を CI で確実に解決できるよう `foundation-layout` を明示依存に追加し、stylus diagnostics の `pointerInteropFilter` は `onTouchEvent` named argument で渡すようにした。小さい修正だけれど、CI が赤いままだと開発速度が落ちるので、ここは地味に大事な前進。
 
 この時点の進捗見積もり: 63%。
+
+## 2026-05-11 JST - Day 1, Android LAN Path
+
+今日は Android 側が LAN 上の GlyphRay host を自分で見つけるところまで進めた。Rust host が投げる `GLYD` advertisement を Kotlin で decode する `HostDiscovery` を追加し、Host list 画面は固定ダミーではなく discovery state を表示する構造に変わった。
+
+さらに Android から `GLYS` stylus payload を `GLYT` UDP datagram に包む `TransportPacketCodec` と `StylusUdpSender` を追加した。Windows backend 側には、approval UI ができるまでの実機 smoke test 用として `GLYPHRAY_DEV_AUTO_APPROVE` の明示的な開発モードを入れた。まだ production pairing ではないけれど、Android のペン入力を LAN packet として host backend に届ける足場ができた。
+
+この時点の進捗見積もり: 65%。

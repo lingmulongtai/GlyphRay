@@ -6,16 +6,16 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Development Progress
 
-**Overall progress estimate: 63%**
+**Overall progress estimate: 65%**
 
 Last updated: 2026-05-11 JST
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 83% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 52% |
-| Milestone 4 hardening and packaging | In progress | 45% |
+| Milestone 2 video and transport foundation | In progress | 86% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 56% |
+| Milestone 4 hardening and packaging | In progress | 46% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -29,10 +29,13 @@ Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
 - Android stylus diagnostics reading raw `MotionEvent` pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android low-latency `SurfaceView` plus `MediaCodec` H.264 decoder foundation.
 - Android video fragment reassembly and decoder feed controller.
+- Android LAN host discovery receiver for `GLYD` advertisements.
+- Android UDP transport packet encoder for sending compact stylus batches to the host backend.
 - Android compact stylus packet encoder and calibration UI surface.
 - Android Keystore device identity key foundation.
 - Windows Rust host skeleton with pairing, monitor enumeration, GDI capture fallback, encoder abstraction, streaming pipeline, and synthetic pen injection wrapper.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, permission gating, and latency pong replies.
+- Windows backend development auto-approval mode for local LAN stylus-path testing.
 - Windows stylus input bridge for forwarding remote batches to native pen injection.
 - Session cipher and secure datagram codec using ChaCha20-Poly1305.
 - Reconnect backoff and adaptive bitrate controllers.
@@ -97,6 +100,12 @@ Run the host backend runtime:
 cargo run -p glyphray-windows-host -- serve
 ```
 
+For local input-path smoke testing without the host approval UI, enable the development-only auto-approval path:
+
+```powershell
+$env:GLYPHRAY_DEV_AUTO_APPROVE='1'; cargo run -p glyphray-windows-host -- serve
+```
+
 ### Android Client
 
 Install Android Studio or Android SDK command-line tools:
@@ -105,7 +114,7 @@ Install Android Studio or Android SDK command-line tools:
 gradle :apps:android-client:assembleDebug
 ```
 
-The Android app currently includes stylus diagnostics, a session UI, a latency overlay, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
+The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a UDP stylus packet sender foundation, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
 
 ### macOS Host
 

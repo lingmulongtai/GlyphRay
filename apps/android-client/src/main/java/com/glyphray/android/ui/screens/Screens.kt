@@ -28,7 +28,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.input.StylusDiagnosticsController
+import com.glyphray.android.network.HostDiscoveryState
 import com.glyphray.android.ui.components.CalibrationPanel
 import com.glyphray.android.ui.components.CalibrationStep
 import com.glyphray.android.ui.components.SessionTelemetrySnapshot
@@ -39,16 +41,46 @@ import com.glyphray.android.ui.ToggleRow
 import com.glyphray.android.ui.video.RemoteDisplayView
 
 @Composable
-fun HostListScreen(onPair: () -> Unit, onConnect: () -> Unit) {
+fun HostListScreen(
+    discoveryState: HostDiscoveryState,
+    onRefresh: () -> Unit,
+    onPair: () -> Unit,
+    onConnect: (DiscoveredHost) -> Unit,
+) {
     ScreenFrame(
         title = "GlyphRay",
         subtitle = "Creative remote display hosts on your local network",
-        actions = { PrimaryAction("Pair", onPair) },
+        actions = {
+            PrimaryAction("Scan", onRefresh)
+            PrimaryAction("Pair", onPair)
+        },
     ) {
-        HostRow("Studio PC", "Windows 11 / Pen ready / 2 ms LAN", onConnect)
-        HostRow("MacBook Pro", "macOS / Mouse and keyboard", onConnect)
+        if (discoveryState.hosts.isEmpty()) {
+            Text(
+                text = if (discoveryState.isScanning) {
+                    "Listening for GlyphRay hosts..."
+                } else {
+                    "No GlyphRay hosts found"
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        discoveryState.hosts.forEach { host ->
+            HostRow(
+                name = host.hostName,
+                details = "${host.address.hostAddress}:${host.controlPort} / ${host.capabilitiesLabel} / load ${host.loadPercent}%",
+                onConnect = { onConnect(host) },
+            )
+        }
         Spacer(Modifier.height(18.dp))
-        Text("Last scan: just now", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        discoveryState.lastError?.let { error ->
+            Text("Discovery error: $error", color = MaterialTheme.colorScheme.error)
+        }
+        Text(
+            "Last scan: ${discoveryState.lastScanLabel}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -86,11 +118,13 @@ fun PairingScreen(onDone: () -> Unit) {
 }
 
 @Composable
-fun ConnectionScreen(onConnected: () -> Unit) {
+fun ConnectionScreen(selectedHost: DiscoveredHost?, onConnected: () -> Unit) {
     ScreenFrame(
         title = "Connect",
         subtitle = "Permission, display, and encoder negotiation",
     ) {
+        MetricRow("Host", selectedHost?.hostName ?: "No host selected")
+        MetricRow("Endpoint", selectedHost?.let { "${it.address.hostAddress}:${it.controlPort}" } ?: "-")
         MetricRow("Selected display", "Primary monitor")
         MetricRow("Video", "H.264 / low latency / 60 fps")
         MetricRow("Input", "Stylus priority channel")
