@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Pages Permission Fix
+
+GitHub Pages workflow で `enablement: true` を使って Pages site の自動作成を試したが、この repository では `GITHUB_TOKEN` が Pages site creation API にアクセスできず、`Resource not accessible by integration` になった。workflow から site を作る方式は諦め、GitHub settings で Pages を一度だけ手動有効化してから deploy する前提に戻した。
+
+同時に GitHub Actions の Node.js 20 deprecation warning に備えて、workflow env に `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を追加した。これで Pages workflow は「手動有効化済みの Pages に artifact を deploy する」役割へ絞られた。
+
+この時点の進捗見積もり: 71%。
+
 ## 2026-05-12 JST - Pages Enablement Fix
 
 GitHub Pages workflow の初回実行で、repository の Pages site がまだ存在しないため `actions/configure-pages` が `Get Pages site failed` で止まった。`configure-pages@v5` に `enablement: true` を渡すようにして、workflow 側から Pages の初回有効化を試せる構成へ修正した。

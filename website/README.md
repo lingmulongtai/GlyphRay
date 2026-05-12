@@ -8,4 +8,4 @@ Open `index.html` directly in a browser. The page has no build step and no backe
 
 ## Deployment
 
-The `pages.yml` workflow uploads this directory as a GitHub Pages artifact. It asks `actions/configure-pages` to enable Pages automatically on first run. If your organization blocks workflow-based enablement, open repository settings, enable Pages manually, and choose GitHub Actions as the source.
+The `pages.yml` workflow uploads this directory as a GitHub Pages artifact. GitHub does not always allow the workflow token to create a Pages site, so enable Pages once in repository settings and choose GitHub Actions as the source before rerunning the workflow.

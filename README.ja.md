@@ -232,7 +232,7 @@ GitHub Pages 用サイトは [website](website) にあります。frontend-only 
 Start-Process .\website\index.html
 ```
 
-デプロイは [pages.yml](.github/workflows/pages.yml) で行います。workflow は初回実行時に Pages の自動有効化を試します。GitHub または organization 側で自動有効化がブロックされる場合は、repository settings で Pages を手動有効化し、source を GitHub Actions にしてください。
+デプロイは [pages.yml](.github/workflows/pages.yml) で行います。workflow を再実行する前に、repository settings で Pages を一度だけ手動有効化し、source を GitHub Actions にしてください。GitHub は workflow token に Pages site の自動作成権限を渡さない場合があります。
 
 ## 現在の制限
 
