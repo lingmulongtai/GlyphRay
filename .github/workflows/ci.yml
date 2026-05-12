@@ -31,5 +31,7 @@ jobs:
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
+      - name: Android unit tests
+        run: ./gradlew :apps:android-client:testDebugUnitTest
       - name: Assemble debug
         run: ./gradlew :apps:android-client:assembleDebug

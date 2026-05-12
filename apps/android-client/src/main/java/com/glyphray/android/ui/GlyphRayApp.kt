@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.glyphray.android.input.StylusDiagnosticsController
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.network.HostDiscoveryController
+import com.glyphray.android.network.SessionControlController
 import com.glyphray.android.ui.screens.ConnectionScreen
 import com.glyphray.android.ui.screens.DiagnosticsScreen
 import com.glyphray.android.ui.screens.HostListScreen
@@ -63,10 +64,15 @@ fun GlyphRayApp() {
     var selectedHost by remember { mutableStateOf<DiscoveredHost?>(null) }
     val diagnosticsController = remember { StylusDiagnosticsController() }
     val hostDiscoveryController = remember { HostDiscoveryController() }
+    val sessionControlController = remember { SessionControlController() }
 
     DisposableEffect(hostDiscoveryController) {
         hostDiscoveryController.startContinuousScan()
         onDispose { hostDiscoveryController.close() }
+    }
+
+    DisposableEffect(sessionControlController) {
+        onDispose { sessionControlController.close() }
     }
 
     Scaffold(
@@ -108,7 +114,15 @@ fun GlyphRayApp() {
                 GlyphRayScreen.Pair -> PairingScreen(onDone = { screen = GlyphRayScreen.Hosts })
                 GlyphRayScreen.Connect -> ConnectionScreen(
                     selectedHost = selectedHost,
-                    onConnected = { screen = GlyphRayScreen.Session },
+                    controlState = sessionControlController.state,
+                    onConnected = {
+                        selectedHost?.let { host ->
+                            sessionControlController.connect(host)
+                            sessionControlController.sendPairingRequest()
+                            sessionControlController.sendLatencyPing()
+                        }
+                        screen = GlyphRayScreen.Session
+                    },
                 )
                 GlyphRayScreen.Session -> RemoteSessionScreen(
                     selectedHost = selectedHost,

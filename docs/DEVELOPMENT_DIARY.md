@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Android Control Channel
+
+今日は Android 側に session control の送信経路を追加した。Host list で見つけた host を選び、Connect 画面の Start session を押すと、`GLYT` control datagram の中に `GLYR` の `PairingRequest` と `LatencyPing` を包んで Windows host へ送る。
+
+Kotlin 側には Rust の `bincode` enum layout に合わせた最小限の `ProtocolFrameCodec` も入れた。これで stylus UDP だけでなく、接続開始時の control path も Android から実際に動かせる。あわせて protocol frame の JVM unit test を追加し、GitHub Actions の Android job でも `testDebugUnitTest` を走らせるようにした。ローカル JDK 24 では Android Gradle Plugin の unit test task 生成が落ちるため、README には JDK 17 を使う注意も追記した。
+
+この時点の進捗見積もり: 70%。
+
 ## 2026-05-11 JST - Day 1, Milestone 1 Foundation
 
 今日は GlyphRay が、ただの構想から実際のリポジトリになった日。モノレポ構造、Rust の共有 crate、Android アプリの入口、Windows host、macOS shell、protocol 定義、最初のテスト、そして product/security/architecture docs を一気に敷いた。

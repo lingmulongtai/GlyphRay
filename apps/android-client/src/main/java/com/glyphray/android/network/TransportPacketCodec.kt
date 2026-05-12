@@ -22,7 +22,9 @@ enum class TransportChannel(val wireId: Int) {
 }
 
 object TransportMessageKind {
+    const val pairingRequest = 5
     const val stylusInputBatch = 11
+    const val latencyPing = 15
 }
 
 object TransportPacketCodec {
@@ -36,6 +38,19 @@ object TransportPacketCodec {
         sequence = sequence,
         timestampUs = timestampUs,
         payload = packet.payload,
+    )
+
+    fun encodeControl(
+        sequence: Long,
+        messageKind: Int,
+        payload: ByteArray,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): ByteArray = encode(
+        channel = TransportChannel.Control,
+        messageKind = messageKind,
+        sequence = sequence,
+        timestampUs = timestampUs,
+        payload = payload,
     )
 
     fun encode(

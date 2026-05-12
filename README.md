@@ -8,28 +8,28 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 69%**
+**Overall progress estimate: 70%**
 
-Last updated: 2026-05-11 JST
+Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 69
-  "Remaining product work" : 31
+  "Implemented foundation" : 70
+  "Remaining product work" : 30
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 86% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 63% |
+| Milestone 2 video and transport foundation | In progress | 87% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 65% |
 | Milestone 4 hardening and packaging | In progress | 46% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 35% |
 
 ```text
 M1 Foundation                 [####################] 100%
-M2 Video + Transport          [#################---]  86%
-M3 Stylus -> Windows Ink      [#############-------]  63%
+M2 Video + Transport          [#################---]  87%
+M3 Stylus -> Windows Ink      [#############-------]  65%
 M4 Security + Packaging       [#########-----------]  46%
 M5 macOS + Audio + Relay      [#######-------------]  35%
 ```
@@ -58,7 +58,7 @@ flowchart TB
 
 | Path | Purpose | Current State |
 | --- | --- | --- |
-| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
+| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake sender, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
 | `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, VideoToolbox encoder foundation |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
@@ -116,7 +116,7 @@ sequenceDiagram
   participant W as Windows Ink
 
   H->>A: GLYD LAN host advertisement
-  A->>H: Pairing/control packets
+  A->>H: GLYR PairingRequest / LatencyPing over GLYT control
   A->>T: GLYS stylus batch wrapped in GLYT
   T->>H: High-priority input datagram
   H->>W: CreateSyntheticPointerDevice / InjectSyntheticPointerInput
@@ -133,6 +133,7 @@ sequenceDiagram
 - Android Compose app with host list, pairing, connection, session, pen settings, video settings, security, and diagnostics screens.
 - Android raw stylus diagnostics for pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
+- Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
 - Android remote-session stylus bridge that captures drawing-surface input and sends compact stylus batches over UDP on a background worker.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, permission gating, and latency pong replies.
@@ -142,7 +143,7 @@ sequenceDiagram
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, and adaptive bitrate foundations.
 - macOS SwiftUI shell with ScreenCaptureKit, VideoToolbox, CGEvent, and audio permission foundations.
-- GitHub Actions CI for Rust tests and Android debug build.
+- GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
 
 ## Build And Run
 
@@ -186,6 +187,12 @@ Install Android Studio or Android SDK command-line tools, then run:
 
 The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a remote-session stylus UDP bridge, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
 
+Use JDK 17 for Gradle/Android work. Newer local JDKs can trip Android Gradle Plugin unit-test task creation even when assemble succeeds.
+
+```powershell
+.\gradlew.bat :apps:android-client:testDebugUnitTest
+```
+
 ### macOS Host
 
 On macOS 13+ with Xcode installed:
@@ -215,7 +222,7 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 
 ## Current Limits
 
-- Full local builds were not executed in this workspace because `cargo`, `gradle`, `swift`, and Android SDK tools are not installed on `PATH`.
+- Rust tests and Android debug builds have been exercised on Windows. Android unit tests should be run with JDK 17.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
 - A concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
@@ -236,7 +243,7 @@ flowchart LR
 
 Immediate engineering focus:
 
-- Wire Android-selected hosts into the real pairing/control channel.
+- Add host-side approval UI and PairingResult responses for Android control-channel requests.
 - Connect Android stylus UDP packets to the Windows native pen bridge in a full LAN smoke test.
 - Replace fallback capture with Windows Graphics Capture or Desktop Duplication.
 - Add a concrete low-latency H.264 encoder backend.

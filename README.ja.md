@@ -8,28 +8,28 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 69%**
+**全体進捗見積もり: 70%**
 
-最終更新: 2026-05-11 JST
+最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 69
-  "残りの製品化作業" : 31
+  "実装済みの基盤" : 70
+  "残りの製品化作業" : 30
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
-| Milestone 2 映像・transport 基盤 | 進行中 | 86% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 63% |
+| Milestone 2 映像・transport 基盤 | 進行中 | 87% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 65% |
 | Milestone 4 security hardening / packaging | 進行中 | 46% |
 | Milestone 5 macOS / audio / relay | 進行中 | 35% |
 
 ```text
 M1 基盤構築                  [####################] 100%
-M2 映像 + Transport          [#################---]  86%
-M3 Stylus -> Windows Ink     [#############-------]  63%
+M2 映像 + Transport          [#################---]  87%
+M3 Stylus -> Windows Ink     [#############-------]  65%
 M4 Security + Packaging      [#########-----------]  46%
 M5 macOS + Audio + Relay     [#######-------------]  35%
 ```
@@ -58,7 +58,7 @@ flowchart TB
 
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
-| `apps/android-client` | Android client | Compose UI、LAN host discovery、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
+| `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake sender、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
 | `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、VideoToolbox encoder foundation |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
@@ -116,7 +116,7 @@ sequenceDiagram
   participant W as Windows Ink
 
   H->>A: GLYD LAN host advertisement
-  A->>H: pairing / control packet
+  A->>H: GLYR PairingRequest / LatencyPing over GLYT control
   A->>T: GLYS stylus batch wrapped in GLYT
   T->>H: high-priority input datagram
   H->>W: CreateSyntheticPointerDevice / InjectSyntheticPointerInput
@@ -133,6 +133,7 @@ sequenceDiagram
 - Android Compose app の host list / pairing / connection / session / pen settings / video settings / security / diagnostics 画面。
 - Android の raw stylus diagnostics。pressure、tilt、orientation、hover、button、eraser、history、timestamp を表示。
 - Rust host の `GLYD` advertisement を読む Android LAN discovery。
+- `GLYT` control channel で `PairingRequest` と `LatencyPing` を送る Android control sender。
 - remote session の描画面から stylus input を拾い、background worker で compact stylus batch を UDP 送信する Android bridge。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、permission gate、latency pong。
@@ -142,7 +143,7 @@ sequenceDiagram
 - Windows monitor enumeration、GDI capture fallback、encoder abstraction、streaming pipeline の形。
 - ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate 基盤。
 - macOS SwiftUI shell、ScreenCaptureKit、VideoToolbox、CGEvent、audio permission の基盤。
-- Rust tests と Android debug build 用 GitHub Actions CI。
+- Rust tests、Android unit tests、Android debug build 用 GitHub Actions CI。
 
 ## ビルドと実行
 
@@ -186,6 +187,12 @@ Android Studio または Android SDK command-line tools を入れて実行しま
 
 現在の Android app には、LAN host discovery、stylus diagnostics、session UI、latency overlay、remote-session stylus UDP bridge、H.264 frame 受信用の MediaCodec-backed decoder surface が入っています。
 
+Gradle / Android 作業は JDK 17 を使ってください。ローカル JDK が新しすぎると、assemble は通っても Android Gradle Plugin の unit test task 生成で落ちることがあります。
+
+```powershell
+.\gradlew.bat :apps:android-client:testDebugUnitTest
+```
+
 ### macOS host
 
 macOS 13+ と Xcode がある環境で実行します。
@@ -215,7 +222,7 @@ macOS host はまだ Phase 2/5 の基盤です。native pen injection の主戦�
 
 ## 現在の制限
 
-- この作業環境では `cargo`、`gradle`、`swift`、Android SDK tools が `PATH` に無いため、ローカル full build は未実行です。
+- Rust tests と Android debug build は Windows 上で確認済みです。Android unit tests は JDK 17 で実行してください。
 - Windows capture は現在 GDI fallback を含みます。本番向けには Windows Graphics Capture または Desktop Duplication へ移行する必要があります。
 - H.264 hardware/software encoder backend は、まだ placeholder abstraction から実装へ進める必要があります。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。
@@ -236,7 +243,7 @@ flowchart LR
 
 直近の開発フォーカス:
 
-- Android で選択した host を実 pairing / control channel に接続する。
+- Android の control-channel request に対する host-side approval UI と PairingResult 応答を追加する。
 - Android stylus UDP packet を Windows native pen bridge まで通して LAN smoke test する。
 - fallback capture を Windows Graphics Capture または Desktop Duplication に置き換える。
 - low-latency H.264 encoder backend を実装する。

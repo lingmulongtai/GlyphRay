@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.input.StylusDiagnosticsController
 import com.glyphray.android.network.HostDiscoveryState
+import com.glyphray.android.network.SessionControlState
 import com.glyphray.android.network.StylusLanBridgeController
 import com.glyphray.android.ui.components.CalibrationPanel
 import com.glyphray.android.ui.components.CalibrationStep
@@ -119,7 +120,11 @@ fun PairingScreen(onDone: () -> Unit) {
 }
 
 @Composable
-fun ConnectionScreen(selectedHost: DiscoveredHost?, onConnected: () -> Unit) {
+fun ConnectionScreen(
+    selectedHost: DiscoveredHost?,
+    controlState: SessionControlState,
+    onConnected: () -> Unit,
+) {
     ScreenFrame(
         title = "Connect",
         subtitle = "Permission, display, and encoder negotiation",
@@ -129,6 +134,12 @@ fun ConnectionScreen(selectedHost: DiscoveredHost?, onConnected: () -> Unit) {
         MetricRow("Selected display", "Primary monitor")
         MetricRow("Video", "H.264 / low latency / 60 fps")
         MetricRow("Input", "Stylus priority channel")
+        MetricRow("Control", controlState.statusLabel)
+        MetricRow("Control packets", controlState.packetsSent.toString())
+        MetricRow("Last control action", controlState.lastAction)
+        controlState.lastError?.let { error ->
+            Text("Control error: $error", color = MaterialTheme.colorScheme.error)
+        }
         Spacer(Modifier.height(18.dp))
         PrimaryAction("Start session", onConnected)
     }
