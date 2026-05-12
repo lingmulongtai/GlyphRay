@@ -11,11 +11,15 @@ const MAX_DATAGRAM_PAYLOAD: usize = 60_000;
 pub struct UdpTransport {
     socket: UdpSocket,
     stats: ConnectionStats,
+    rx_buffer: Vec<u8>,
+    tx_buffer: Vec<u8>,
 }
 
 pub struct UdpServer {
     socket: UdpSocket,
     stats: ConnectionStats,
+    rx_buffer: Vec<u8>,
+    tx_buffer: Vec<u8>,
 }
 
 impl UdpServer {
@@ -30,6 +34,8 @@ impl UdpServer {
                 packet_loss_percent: 0.0,
                 estimated_bandwidth_kbps: 0,
             },
+            rx_buffer: vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD],
+            tx_buffer: Vec::with_capacity(HEADER_LEN + 1_500),
         })
     }
 
@@ -42,17 +48,20 @@ impl UdpServer {
         packet: &TransportPacket,
         peer: SocketAddr,
     ) -> Result<(), TransportError> {
-        let datagram = encode_packet(packet)?;
-        self.socket.send_to(&datagram, peer).map_err(io_error)?;
+        encode_packet_into(packet, &mut self.tx_buffer)?;
+        self.socket
+            .send_to(&self.tx_buffer, peer)
+            .map_err(io_error)?;
         Ok(())
     }
 
     pub fn poll_recv_from(
         &mut self,
     ) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
-        let mut buffer = vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD];
-        match self.socket.recv_from(&mut buffer) {
-            Ok((len, peer)) => decode_packet(&buffer[..len]).map(|packet| Some((packet, peer))),
+        match self.socket.recv_from(&mut self.rx_buffer) {
+            Ok((len, peer)) => {
+                decode_packet(&self.rx_buffer[..len]).map(|packet| Some((packet, peer)))
+            }
             Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
             Err(err) => Err(io_error(err)),
         }
@@ -77,21 +86,22 @@ impl UdpTransport {
                 packet_loss_percent: 0.0,
                 estimated_bandwidth_kbps: 0,
             },
+            rx_buffer: vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD],
+            tx_buffer: Vec::with_capacity(HEADER_LEN + 1_500),
         })
     }
 }
 
 impl RealtimeTransport for UdpTransport {
     fn send(&mut self, packet: TransportPacket) -> Result<(), TransportError> {
-        let datagram = encode_packet(&packet)?;
-        self.socket.send(&datagram).map_err(io_error)?;
+        encode_packet_into(&packet, &mut self.tx_buffer)?;
+        self.socket.send(&self.tx_buffer).map_err(io_error)?;
         Ok(())
     }
 
     fn poll_recv(&mut self) -> Result<Option<TransportPacket>, TransportError> {
-        let mut buffer = vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD];
-        match self.socket.recv(&mut buffer) {
-            Ok(len) => decode_packet(&buffer[..len]).map(Some),
+        match self.socket.recv(&mut self.rx_buffer) {
+            Ok(len) => decode_packet(&self.rx_buffer[..len]).map(Some),
             Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
             Err(err) => Err(io_error(err)),
         }
@@ -103,11 +113,21 @@ impl RealtimeTransport for UdpTransport {
 }
 
 pub fn encode_packet(packet: &TransportPacket) -> Result<Vec<u8>, TransportError> {
+    let mut out = Vec::with_capacity(HEADER_LEN + packet.payload.len());
+    encode_packet_into(packet, &mut out)?;
+    Ok(out)
+}
+
+pub fn encode_packet_into(
+    packet: &TransportPacket,
+    out: &mut Vec<u8>,
+) -> Result<(), TransportError> {
     if packet.payload.len() > MAX_DATAGRAM_PAYLOAD {
         return Err(TransportError::PayloadTooLarge);
     }
 
-    let mut out = Vec::with_capacity(HEADER_LEN + packet.payload.len());
+    out.clear();
+    out.reserve(HEADER_LEN + packet.payload.len());
     out.extend_from_slice(&DATAGRAM_MAGIC);
     out.extend_from_slice(&DATAGRAM_VERSION.to_le_bytes());
     out.push(channel_to_u8(packet.channel));
@@ -117,7 +137,7 @@ pub fn encode_packet(packet: &TransportPacket) -> Result<Vec<u8>, TransportError
     out.extend_from_slice(&(packet.payload.len() as u32).to_le_bytes());
     out.extend_from_slice(&crc32fast::hash(&packet.payload).to_le_bytes());
     out.extend_from_slice(&packet.payload);
-    Ok(out)
+    Ok(())
 }
 
 pub fn decode_packet(bytes: &[u8]) -> Result<TransportPacket, TransportError> {
@@ -227,5 +247,25 @@ mod tests {
             decode_packet(&encoded),
             Err(TransportError::Decode(_))
         ));
+    }
+
+    #[test]
+    fn datagram_encoding_can_reuse_output_buffer() {
+        let packet = TransportPacket {
+            sequence: 2,
+            channel: ChannelKind::Video,
+            message_kind: MessageKind::VideoFrame,
+            enqueue_timestamp_us: 99,
+            payload: vec![7; 1_024],
+        };
+        let mut buffer = Vec::with_capacity(HEADER_LEN + 2_048);
+
+        encode_packet_into(&packet, &mut buffer).expect("encode");
+        let first_capacity = buffer.capacity();
+        let decoded = decode_packet(&buffer).expect("decode");
+        assert_eq!(decoded, packet);
+
+        encode_packet_into(&packet, &mut buffer).expect("encode again");
+        assert_eq!(buffer.capacity(), first_capacity);
     }
 }
