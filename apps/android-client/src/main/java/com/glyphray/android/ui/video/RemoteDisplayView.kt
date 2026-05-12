@@ -33,6 +33,7 @@ fun RemoteDisplayView(
     modifier: Modifier = Modifier,
     onInputEvent: ((MotionEvent) -> Boolean)? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
+    onGenericMotionEvent: ((MotionEvent) -> Boolean)? = null,
 ) {
     var status by remember { mutableStateOf("Waiting for video") }
     var decoder by remember { mutableStateOf<RemoteVideoDecoder?>(null) }
@@ -94,6 +95,9 @@ fun RemoteDisplayView(
                 }
                 view.setOnKeyListener { _, _, event ->
                     onKeyEvent?.invoke(event) ?: false
+                }
+                view.setOnGenericMotionListener { _, event ->
+                    onGenericMotionEvent?.invoke(event) ?: false
                 }
             },
         )

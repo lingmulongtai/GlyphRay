@@ -15,6 +15,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -54,9 +55,11 @@ import com.glyphray.android.ui.video.RemoteDisplayView
 fun HostListScreen(
     discoveryState: HostDiscoveryState,
     onRefresh: () -> Unit,
+    onAddManualHost: (String) -> Unit,
     onPair: () -> Unit,
     onConnect: (DiscoveredHost) -> Unit,
 ) {
+    var manualHost by remember { mutableStateOf("") }
     ScreenFrame(
         title = "GlyphRay",
         subtitle = "Creative remote display hosts on your local network",
@@ -75,6 +78,26 @@ fun HostListScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextField(
+                value = manualHost,
+                onValueChange = { manualHost = it },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("Host IP / Tailscale") },
+            )
+            PrimaryAction("Add") {
+                if (manualHost.isNotBlank()) {
+                    onAddManualHost(manualHost)
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
 
         discoveryState.hosts.forEach { host ->
             HostRow(
@@ -168,6 +191,7 @@ fun RemoteSessionScreen(
     onVideoSettings: () -> Unit,
     onSpecialKey: (SpecialRemoteKey) -> Unit,
     onKeyEvent: (KeyEvent) -> Boolean,
+    onGenericMotionEvent: (android.view.MotionEvent) -> Boolean,
     onPenSettings: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
@@ -212,8 +236,9 @@ fun RemoteSessionScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(if (fullscreen) 620.dp else 320.dp),
-            onInputEvent = stylusBridge::onMotionEvent,
+            onInputEvent = { event -> stylusBridge.onMotionEvent(event, controlState.inputSettings) },
             onKeyEvent = onKeyEvent,
+            onGenericMotionEvent = onGenericMotionEvent,
         )
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -228,6 +253,8 @@ fun RemoteSessionScreen(
                 AssistChip(onClick = { onSpecialKey(SpecialRemoteKey.PrintScreen) }, label = { Text("PrtSc") })
             }
             AssistChip(onClick = {}, label = { Text(controlState.inputSettings.touchMode.label) })
+            AssistChip(onClick = {}, label = { Text("Mouse") })
+            AssistChip(onClick = {}, label = { Text("Gamepad") })
         }
         Spacer(Modifier.height(10.dp))
         MetricRow("Input stream", bridgeState.statusLabel)
@@ -355,6 +382,12 @@ fun VideoSettingsScreen(
         Spacer(Modifier.height(8.dp))
         ToggleRow("Bluetooth keyboard capture", input.bluetoothKeyboardEnabled) {
             onInputSettingsChange(input.copy(bluetoothKeyboardEnabled = it))
+        }
+        ToggleRow("Bluetooth mouse capture", input.bluetoothMouseEnabled) {
+            onInputSettingsChange(input.copy(bluetoothMouseEnabled = it))
+        }
+        ToggleRow("Game controller capture", input.gameControllerEnabled) {
+            onInputSettingsChange(input.copy(gameControllerEnabled = it))
         }
         ToggleRow("Special key overlay", input.specialKeyOverlay) {
             onInputSettingsChange(input.copy(specialKeyOverlay = it))

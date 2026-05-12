@@ -1,13 +1,14 @@
 use crate::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 use crate::config::HostConfig;
 use crate::input::{
-    InjectionReport, InputError, KeyboardInjector, KeyboardInputBridge, PenInjector,
-    StylusInputBridge,
+    InjectionReport, InputError, KeyboardInjector, KeyboardInputBridge, MouseInjector,
+    MouseInputBridge, PenInjector, StylusInputBridge, TouchInjector, TouchInputBridge,
 };
 use glyphray_protocol::stylus_wire::{decode_stylus_batch, StylusWireError};
 use glyphray_protocol::{
-    decode_frame, encode_frame, DisplayDescriptor, DisplayInfo, EncoderConfig, KeyboardInput,
-    LatencyPing, LatencyPong, Message, MessageKind, PairingResult,
+    decode_frame, encode_frame, DisplayDescriptor, DisplayInfo, EncoderConfig, GamepadInput,
+    KeyboardInput, LatencyPing, LatencyPong, Message, MessageKind, MouseInput, PairingResult,
+    TouchInputBatch,
 };
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
@@ -158,6 +159,27 @@ pub enum BackendEvent {
         virtual_key: u32,
         pressed: bool,
     },
+    TouchDecoded {
+        peer: SocketAddr,
+        samples: usize,
+    },
+    TouchInjected {
+        peer: SocketAddr,
+        samples: usize,
+    },
+    MouseDecoded {
+        peer: SocketAddr,
+        button_flags: u32,
+    },
+    MouseInjected {
+        peer: SocketAddr,
+        injected_events: usize,
+    },
+    GamepadDecoded {
+        peer: SocketAddr,
+        controller_id: u32,
+        buttons: u32,
+    },
     PermissionRequired {
         peer: SocketAddr,
     },
@@ -192,6 +214,8 @@ pub struct HostPacketRouter<I> {
     pub sessions: SessionRegistry,
     input_bridge: Option<StylusInputBridge<I>>,
     keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
+    touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
+    mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
     permission_policy: PermissionPolicy,
     next_outbound_sequence: u64,
 }
@@ -225,18 +249,22 @@ where
         input_bridge: Option<StylusInputBridge<I>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
-        Self::new_with_input_bridges(input_bridge, None, permission_policy)
+        Self::new_with_input_bridges(input_bridge, None, None, None, permission_policy)
     }
 
     pub fn new_with_input_bridges(
         input_bridge: Option<StylusInputBridge<I>>,
         keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
+        touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
+        mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
         Self {
             sessions: SessionRegistry::default(),
             input_bridge,
             keyboard_bridge,
+            touch_bridge,
+            mouse_bridge,
             permission_policy,
             next_outbound_sequence: 1,
         }
@@ -415,6 +443,41 @@ where
                     });
                 }
             }
+            MessageKind::TouchInputBatch => {
+                let batch = decode_touch_input_batch(&packet.payload)?;
+                let samples = batch.samples.len();
+                outcome
+                    .events
+                    .push(BackendEvent::TouchDecoded { peer, samples });
+                if let Some(bridge) = self.touch_bridge.as_mut() {
+                    bridge.inject_remote_touch_batch(&batch)?;
+                    outcome
+                        .events
+                        .push(BackendEvent::TouchInjected { peer, samples });
+                }
+            }
+            MessageKind::MouseInput => {
+                let mouse = decode_mouse_input(&packet.payload)?;
+                outcome.events.push(BackendEvent::MouseDecoded {
+                    peer,
+                    button_flags: mouse.button_flags,
+                });
+                if let Some(bridge) = self.mouse_bridge.as_mut() {
+                    let report = bridge.inject_remote_mouse(&mouse)?;
+                    outcome.events.push(BackendEvent::MouseInjected {
+                        peer,
+                        injected_events: report.injected_events,
+                    });
+                }
+            }
+            MessageKind::GamepadInput => {
+                let gamepad = decode_gamepad_input(&packet.payload)?;
+                outcome.events.push(BackendEvent::GamepadDecoded {
+                    peer,
+                    controller_id: gamepad.controller_id,
+                    buttons: gamepad.buttons,
+                });
+            }
             _ => outcome.events.push(BackendEvent::PacketRouted {
                 peer,
                 channel: packet.channel,
@@ -500,13 +563,15 @@ where
         input_bridge: Option<StylusInputBridge<I>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
-        Self::new_with_input_bridges(config, input_bridge, None, permission_policy)
+        Self::new_with_input_bridges(config, input_bridge, None, None, None, permission_policy)
     }
 
     pub fn new_with_input_bridges(
         config: HostConfig,
         input_bridge: Option<StylusInputBridge<I>>,
         keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
+        touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
+        mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
         let advertisement = HostAdvertisement {
@@ -526,6 +591,8 @@ where
             router: HostPacketRouter::new_with_input_bridges(
                 input_bridge,
                 keyboard_bridge,
+                touch_bridge,
+                mouse_bridge,
                 permission_policy,
             ),
         }
@@ -673,15 +740,49 @@ fn decode_keyboard_input(payload: &[u8]) -> Result<KeyboardInput, BackendError> 
     Ok(input)
 }
 
+fn decode_touch_input_batch(payload: &[u8]) -> Result<TouchInputBatch, BackendError> {
+    let frame = decode_frame(payload).map_err(|err| BackendError::Protocol(err.to_string()))?;
+    let Message::TouchInputBatch(batch) = frame.message else {
+        return Err(BackendError::Protocol(
+            "touch payload did not contain TouchInputBatch".to_string(),
+        ));
+    };
+    Ok(batch)
+}
+
+fn decode_mouse_input(payload: &[u8]) -> Result<MouseInput, BackendError> {
+    let frame = decode_frame(payload).map_err(|err| BackendError::Protocol(err.to_string()))?;
+    let Message::MouseInput(input) = frame.message else {
+        return Err(BackendError::Protocol(
+            "mouse payload did not contain MouseInput".to_string(),
+        ));
+    };
+    Ok(input)
+}
+
+fn decode_gamepad_input(payload: &[u8]) -> Result<GamepadInput, BackendError> {
+    let frame = decode_frame(payload).map_err(|err| BackendError::Protocol(err.to_string()))?;
+    let Message::GamepadInput(input) = frame.message else {
+        return Err(BackendError::Protocol(
+            "gamepad payload did not contain GamepadInput".to_string(),
+        ));
+    };
+    Ok(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{KeyboardInjectionReport, KeyboardInjector, PenInjector};
+    use crate::input::{
+        KeyboardInjectionReport, KeyboardInjector, MouseInjectionReport, MouseInjector,
+        PenInjector, TouchInjectionReport, TouchInjector,
+    };
     use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, SourceRect};
     use glyphray_protocol::stylus_wire::encode_stylus_batch;
     use glyphray_protocol::{
-        ColorSpace, EncoderConfig, KeyboardInput, PairingRequest, StylusAction, StylusInputBatch,
-        StylusSample, StylusToolType, VideoCodec,
+        ColorSpace, EncoderConfig, GamepadInput, KeyboardInput, MouseInput, PairingRequest,
+        StylusAction, StylusInputBatch, StylusSample, StylusToolType, TouchAction, TouchInputBatch,
+        TouchSample, VideoCodec,
     };
 
     #[derive(Default)]
@@ -710,6 +811,34 @@ mod tests {
             _input: &KeyboardInput,
         ) -> Result<KeyboardInjectionReport, InputError> {
             Ok(KeyboardInjectionReport { injected_events: 1 })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingTouchInjector;
+
+    impl TouchInjector for RecordingTouchInjector {
+        fn inject_touch_batch(
+            &mut self,
+            batch: &TouchInputBatch,
+            _mapper: &CoordinateMapper,
+        ) -> Result<TouchInjectionReport, InputError> {
+            Ok(TouchInjectionReport {
+                injected_samples: batch.samples.len(),
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingMouseInjector;
+
+    impl MouseInjector for RecordingMouseInjector {
+        fn inject_mouse(
+            &mut self,
+            _input: &MouseInput,
+            _mapper: &CoordinateMapper,
+        ) -> Result<MouseInjectionReport, InputError> {
+            Ok(MouseInjectionReport { injected_events: 1 })
         }
     }
 
@@ -941,6 +1070,8 @@ mod tests {
         let mut router = HostPacketRouter::<RecordingInjector>::new_with_input_bridges(
             None,
             Some(keyboard_bridge),
+            None,
+            None,
             PermissionPolicy::RequireApproval,
         );
         let peer: SocketAddr = "127.0.0.1:50007".parse().expect("peer");
@@ -973,6 +1104,105 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn approved_peer_touch_packet_can_be_injected() {
+        let mapper = test_mapper();
+        let touch_bridge = TouchInputBridge::new(
+            Box::new(RecordingTouchInjector) as Box<dyn TouchInjector>,
+            mapper,
+        );
+        let mut router = HostPacketRouter::<RecordingInjector>::new_with_input_bridges(
+            None,
+            None,
+            Some(touch_bridge),
+            None,
+            PermissionPolicy::RequireApproval,
+        );
+        let peer: SocketAddr = "127.0.0.1:50008".parse().expect("peer");
+        router.approve_peer(peer, "touch");
+        let message = Message::TouchInputBatch(sample_touch_batch());
+
+        let outcome = router
+            .route_packet(
+                peer,
+                framed_input_packet(MessageKind::TouchInputBatch, message),
+            )
+            .expect("route");
+
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::TouchInjected { peer, samples: 1 }));
+    }
+
+    #[test]
+    fn approved_peer_mouse_packet_can_be_injected() {
+        let mouse_bridge = MouseInputBridge::new(
+            Box::new(RecordingMouseInjector) as Box<dyn MouseInjector>,
+            test_mapper(),
+        );
+        let mut router = HostPacketRouter::<RecordingInjector>::new_with_input_bridges(
+            None,
+            None,
+            None,
+            Some(mouse_bridge),
+            PermissionPolicy::RequireApproval,
+        );
+        let peer: SocketAddr = "127.0.0.1:50009".parse().expect("peer");
+        router.approve_peer(peer, "mouse");
+        let message = Message::MouseInput(MouseInput {
+            sequence: 1,
+            timestamp_us: 22,
+            display_id: 0,
+            x: 44.0,
+            y: 55.0,
+            wheel_delta_x: 0.0,
+            wheel_delta_y: 1.0,
+            button_flags: 1,
+        });
+
+        let outcome = router
+            .route_packet(peer, framed_input_packet(MessageKind::MouseInput, message))
+            .expect("route");
+
+        assert!(outcome.events.contains(&BackendEvent::MouseInjected {
+            peer,
+            injected_events: 1,
+        }));
+    }
+
+    #[test]
+    fn approved_peer_gamepad_packet_is_decoded() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50010".parse().expect("peer");
+        router.approve_peer(peer, "gamepad");
+        let message = Message::GamepadInput(GamepadInput {
+            sequence: 1,
+            timestamp_us: 22,
+            controller_id: 7,
+            connected: true,
+            buttons: 0b11,
+            left_trigger: 0.0,
+            right_trigger: 1.0,
+            left_stick_x: 0.2,
+            left_stick_y: -0.3,
+            right_stick_x: 0.4,
+            right_stick_y: -0.5,
+        });
+
+        let outcome = router
+            .route_packet(
+                peer,
+                framed_input_packet(MessageKind::GamepadInput, message),
+            )
+            .expect("route");
+
+        assert!(outcome.events.contains(&BackendEvent::GamepadDecoded {
+            peer,
+            controller_id: 7,
+            buttons: 0b11,
+        }));
+    }
+
     fn input_packet(payload: Vec<u8>) -> TransportPacket {
         TransportPacket {
             sequence: 1,
@@ -980,6 +1210,45 @@ mod tests {
             message_kind: MessageKind::StylusInputBatch,
             enqueue_timestamp_us: 0,
             payload,
+        }
+    }
+
+    fn framed_input_packet(message_kind: MessageKind, message: Message) -> TransportPacket {
+        TransportPacket {
+            sequence: 1,
+            channel: ChannelKind::Input,
+            message_kind,
+            enqueue_timestamp_us: 0,
+            payload: encode_frame(1, &message).expect("encode"),
+        }
+    }
+
+    fn test_mapper() -> CoordinateMapper {
+        CoordinateMapper::new(
+            SourceRect::new(100.0, 100.0).expect("source"),
+            DisplayRect::new(0.0, 0.0, 100.0, 100.0, 0, 1.0).expect("display"),
+            MappingMode::Stretch,
+        )
+    }
+
+    fn sample_touch_batch() -> TouchInputBatch {
+        TouchInputBatch {
+            batch_sequence: 1,
+            monotonic_timestamp_us: 1,
+            display_id: 0,
+            samples: vec![TouchSample {
+                sequence: 1,
+                timestamp_us: 1,
+                pointer_id: 1,
+                action: TouchAction::Down,
+                x: 10.0,
+                y: 20.0,
+                pressure: 0.5,
+                major: 8.0,
+                minor: 8.0,
+                orientation_degrees: 0.0,
+                flags: 0,
+            }],
         }
     }
 

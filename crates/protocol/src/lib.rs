@@ -51,6 +51,8 @@ pub enum MessageKind {
     LatencyPong = 16,
     ErrorMessage = 17,
     Disconnect = 18,
+    TouchInputBatch = 19,
+    GamepadInput = 20,
 }
 
 impl TryFrom<u16> for MessageKind {
@@ -76,6 +78,8 @@ impl TryFrom<u16> for MessageKind {
             16 => Ok(Self::LatencyPong),
             17 => Ok(Self::ErrorMessage),
             18 => Ok(Self::Disconnect),
+            19 => Ok(Self::TouchInputBatch),
+            20 => Ok(Self::GamepadInput),
             _ => Err(ProtocolError::Serialization(format!(
                 "unknown message kind {value}"
             ))),
@@ -103,6 +107,8 @@ pub enum Message {
     LatencyPong(LatencyPong),
     ErrorMessage(ErrorMessage),
     Disconnect(Disconnect),
+    TouchInputBatch(TouchInputBatch),
+    GamepadInput(GamepadInput),
 }
 
 impl Message {
@@ -126,6 +132,8 @@ impl Message {
             Self::LatencyPong(_) => MessageKind::LatencyPong,
             Self::ErrorMessage(_) => MessageKind::ErrorMessage,
             Self::Disconnect(_) => MessageKind::Disconnect,
+            Self::TouchInputBatch(_) => MessageKind::TouchInputBatch,
+            Self::GamepadInput(_) => MessageKind::GamepadInput,
         }
     }
 }
@@ -390,6 +398,52 @@ pub struct KeyboardInput {
     pub modifiers: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TouchInputBatch {
+    pub batch_sequence: u64,
+    pub monotonic_timestamp_us: u64,
+    pub display_id: u32,
+    pub samples: Vec<TouchSample>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TouchSample {
+    pub sequence: u64,
+    pub timestamp_us: u64,
+    pub pointer_id: u32,
+    pub action: TouchAction,
+    pub x: f32,
+    pub y: f32,
+    pub pressure: f32,
+    pub major: f32,
+    pub minor: f32,
+    pub orientation_degrees: f32,
+    pub flags: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TouchAction {
+    Down,
+    Move,
+    Up,
+    Cancel,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GamepadInput {
+    pub sequence: u64,
+    pub timestamp_us: u64,
+    pub controller_id: u32,
+    pub connected: bool,
+    pub buttons: u32,
+    pub left_trigger: f32,
+    pub right_trigger: f32,
+    pub left_stick_x: f32,
+    pub left_stick_y: f32,
+    pub right_stick_x: f32,
+    pub right_stick_y: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClipboardMessage {
     pub sequence: u64,
@@ -526,5 +580,53 @@ mod tests {
 
         let decoded = decode_frame(&encode_frame(9, &message).expect("encode")).expect("decode");
         assert_eq!(decoded.message, message);
+    }
+
+    #[test]
+    fn touch_and_gamepad_inputs_round_trip() {
+        let touch = Message::TouchInputBatch(TouchInputBatch {
+            batch_sequence: 7,
+            monotonic_timestamp_us: 10,
+            display_id: 0,
+            samples: vec![TouchSample {
+                sequence: 1,
+                timestamp_us: 11,
+                pointer_id: 3,
+                action: TouchAction::Move,
+                x: 100.0,
+                y: 200.0,
+                pressure: 0.6,
+                major: 12.0,
+                minor: 10.0,
+                orientation_degrees: 0.0,
+                flags: 0,
+            }],
+        });
+        let gamepad = Message::GamepadInput(GamepadInput {
+            sequence: 8,
+            timestamp_us: 12,
+            controller_id: 1,
+            connected: true,
+            buttons: 0b101,
+            left_trigger: 0.1,
+            right_trigger: 0.9,
+            left_stick_x: -0.5,
+            left_stick_y: 0.5,
+            right_stick_x: 0.25,
+            right_stick_y: -0.25,
+        });
+
+        assert_eq!(
+            decode_frame(&encode_frame(10, &touch).expect("encode"))
+                .expect("decode")
+                .message,
+            touch
+        );
+        assert_eq!(
+            decode_frame(&encode_frame(11, &gamepad).expect("encode"))
+                .expect("decode")
+                .message,
+            gamepad
+        );
     }
 }

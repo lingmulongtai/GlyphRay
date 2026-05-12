@@ -80,7 +80,16 @@ class StylusLanBridgeController(
         }
     }
 
-    fun onMotionEvent(event: MotionEvent): Boolean {
+    fun onMotionEvent(event: MotionEvent, inputSettings: ClientInputSettings = ClientInputSettings()): Boolean {
+        val directInputKind = event.directInputKind()
+        if (directInputKind == DirectInputKind.Mouse && !inputSettings.bluetoothMouseEnabled) {
+            return false
+        }
+        if (directInputKind != DirectInputKind.Stylus) {
+            sendDirectInput(event, directInputKind)
+            return true
+        }
+
         val packet = runCatching {
             streamController.onMotionEvent(event)
         }.getOrElse { error ->
@@ -123,6 +132,39 @@ class StylusLanBridgeController(
         return true
     }
 
+    private fun sendDirectInput(event: MotionEvent, kind: DirectInputKind) {
+        execute {
+            val activeSender = sender
+            if (activeSender == null) {
+                postState { it.copy(lastError = "No host selected for input stream") }
+                return@execute
+            }
+
+            runCatching {
+                when (kind) {
+                    DirectInputKind.Touch -> activeSender.sendTouch(event)
+                    DirectInputKind.Mouse -> activeSender.sendMouse(event)
+                    DirectInputKind.Stylus -> 0
+                }
+            }.onSuccess { bytes ->
+                postState {
+                    it.copy(
+                        packetsSent = it.packetsSent + 1,
+                        bytesSent = it.bytesSent + bytes,
+                        lastError = null,
+                    )
+                }
+            }.onFailure { error ->
+                postState {
+                    it.copy(
+                        isConnected = false,
+                        lastError = error.message ?: error.javaClass.simpleName,
+                    )
+                }
+            }
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) {
             return
@@ -160,4 +202,19 @@ class StylusLanBridgeController(
             state = update(state)
         }
     }
+}
+
+private enum class DirectInputKind {
+    Stylus,
+    Touch,
+    Mouse,
+}
+
+private fun MotionEvent.directInputKind(): DirectInputKind {
+    val hasMouse = (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
+    if (hasMouse) {
+        return DirectInputKind.Mouse
+    }
+    val hasFinger = (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
+    return if (hasFinger) DirectInputKind.Touch else DirectInputKind.Stylus
 }

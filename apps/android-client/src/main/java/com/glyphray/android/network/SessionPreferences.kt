@@ -53,6 +53,8 @@ data class ClientVideoSettings(
 data class ClientInputSettings(
     val touchMode: ClientTouchMode = ClientTouchMode.Direct,
     val bluetoothKeyboardEnabled: Boolean = true,
+    val bluetoothMouseEnabled: Boolean = true,
+    val gameControllerEnabled: Boolean = true,
     val fullscreenMode: Boolean = false,
     val specialKeyOverlay: Boolean = true,
 )

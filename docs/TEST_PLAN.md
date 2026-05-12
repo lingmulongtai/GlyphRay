@@ -48,6 +48,9 @@ cargo test --workspace
 - Confirm the `SurfaceView` shows decoded video and the latency overlay remains responsive.
 - Confirm compact stylus packets decode correctly on the host.
 - Confirm calibration target flow can be operated without layout overlap.
+- Add a host manually by Tailscale IP or MagicDNS name and confirm pairing reaches the host.
+- Confirm Bluetooth mouse movement, buttons, and wheel produce `MouseInput` packets.
+- Confirm Android-connected gamepad buttons and sticks produce `GamepadInput` packets.
 
 ## Windows Manual Tests
 
@@ -64,11 +67,17 @@ cargo test --workspace
 - Confirm a pending Android peer cannot inject input until approved.
 - With `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1`, confirm an approved Android Bluetooth keyboard can inject a safe key sequence.
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
+- With `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`, confirm Android finger input is received by Windows as native touch input in a touch-aware app.
+- With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
+- Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
 
 ## Integration Tests To Add
 
 - Android-to-host stylus batch replay.
 - Android-to-host Bluetooth keyboard replay with Windows virtual-key mapping.
+- Android-to-host native touch replay.
+- Android-to-host Bluetooth mouse replay.
+- Android-to-host gamepad replay.
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.

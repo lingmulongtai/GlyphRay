@@ -3,8 +3,9 @@ use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
 use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy};
 use glyphray_windows_host::input::{
-    create_keyboard_injector, create_pen_injector, KeyboardInjector, KeyboardInputBridge,
-    PenInjector, StylusInputBridge,
+    create_keyboard_injector, create_mouse_injector, create_pen_injector, create_touch_injector,
+    KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
+    StylusInputBridge, TouchInjector, TouchInputBridge,
 };
 use glyphray_windows_host::HostConfig;
 use std::error::Error;
@@ -42,6 +43,8 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     let discovery = LanDiscoverySocket::bind(config.discovery_port)?;
     let input_bridge = create_runtime_input_bridge(&config);
     let keyboard_bridge = create_runtime_keyboard_bridge();
+    let touch_bridge = create_runtime_touch_bridge();
+    let mouse_bridge = create_runtime_mouse_bridge();
     let permission_policy = if std::env::var_os("GLYPHRAY_DEV_AUTO_APPROVE").is_some() {
         println!("Development auto-approval is enabled for incoming LAN clients.");
         PermissionPolicy::DevAutoApprove
@@ -52,6 +55,8 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         config,
         input_bridge,
         keyboard_bridge,
+        touch_bridge,
+        mouse_bridge,
         permission_policy,
     );
     let commands = spawn_console_command_reader();
@@ -97,6 +102,52 @@ fn create_runtime_keyboard_bridge() -> Option<KeyboardInputBridge<Box<dyn Keyboa
     Some(KeyboardInputBridge::new(injector))
 }
 
+fn create_runtime_touch_bridge() -> Option<TouchInputBridge<Box<dyn TouchInjector>>> {
+    if std::env::var_os("GLYPHRAY_ENABLE_TOUCH_INJECTION").is_none() {
+        println!(
+            "Native touch injection is disabled. Set GLYPHRAY_ENABLE_TOUCH_INJECTION=1 for LAN touch smoke tests."
+        );
+        return None;
+    }
+
+    let injector = match create_touch_injector() {
+        Ok(injector) => injector,
+        Err(err) => {
+            println!("Touch injector unavailable: {err}");
+            return None;
+        }
+    };
+
+    println!("Native touch injection is enabled with temporary 1920x1080 stretch mapping.");
+    Some(TouchInputBridge::new(injector, temporary_mapper()))
+}
+
+fn create_runtime_mouse_bridge() -> Option<MouseInputBridge<Box<dyn MouseInjector>>> {
+    if std::env::var_os("GLYPHRAY_ENABLE_MOUSE_INJECTION").is_none() {
+        println!(
+            "Native mouse injection is disabled. Set GLYPHRAY_ENABLE_MOUSE_INJECTION=1 for LAN mouse smoke tests."
+        );
+        return None;
+    }
+
+    let injector = match create_mouse_injector() {
+        Ok(injector) => injector,
+        Err(err) => {
+            println!("Mouse injector unavailable: {err}");
+            return None;
+        }
+    };
+
+    println!("Native mouse injection is enabled with temporary 1920x1080 stretch mapping.");
+    Some(MouseInputBridge::new(injector, temporary_mapper()))
+}
+
+fn temporary_mapper() -> CoordinateMapper {
+    let source = SourceRect::new(1920.0, 1080.0).expect("valid source rect");
+    let display = DisplayRect::new(0.0, 0.0, 1920.0, 1080.0, 0, 1.0).expect("valid display rect");
+    CoordinateMapper::new(source, display, MappingMode::Stretch)
+}
+
 fn create_runtime_input_bridge(
     _config: &HostConfig,
 ) -> Option<StylusInputBridge<Box<dyn PenInjector>>> {
@@ -115,14 +166,10 @@ fn create_runtime_input_bridge(
         }
     };
 
-    let source = SourceRect::new(1920.0, 1080.0).expect("valid source rect");
-    let display = DisplayRect::new(0.0, 0.0, 1920.0, 1080.0, 0, 1.0).expect("valid display rect");
-    let mapper = CoordinateMapper::new(source, display, MappingMode::Stretch);
-
     println!("Native pen injection is enabled with temporary 1920x1080 stretch mapping.");
     Some(StylusInputBridge::new(
         injector,
-        mapper,
+        temporary_mapper(),
         PressureMapper::default(),
     ))
 }
@@ -268,6 +315,28 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
             pressed,
         } => {
             println!("Keyboard injected for {peer}: vk={virtual_key} pressed={pressed}");
+        }
+        BackendEvent::TouchDecoded { peer, samples } => {
+            println!("Touch input from {peer}: {samples} sample(s)");
+        }
+        BackendEvent::TouchInjected { peer, samples } => {
+            println!("Touch injected for {peer}: {samples} sample(s)");
+        }
+        BackendEvent::MouseDecoded { peer, button_flags } => {
+            println!("Mouse input from {peer}: buttons={button_flags}");
+        }
+        BackendEvent::MouseInjected {
+            peer,
+            injected_events,
+        } => {
+            println!("Mouse injected for {peer}: {injected_events} event(s)");
+        }
+        BackendEvent::GamepadDecoded {
+            peer,
+            controller_id,
+            buttons,
+        } => {
+            println!("Gamepad input from {peer}: controller={controller_id} buttons={buttons}");
         }
         other => println!("backend event: {other:?}"),
     }

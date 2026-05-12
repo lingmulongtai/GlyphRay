@@ -27,9 +27,12 @@ object TransportMessageKind {
     const val displayInfo = 7
     const val encoderConfig = 8
     const val stylusInputBatch = 11
+    const val mouseInput = 12
     const val keyboardInput = 13
     const val latencyPing = 15
     const val latencyPong = 16
+    const val touchInputBatch = 19
+    const val gamepadInput = 20
 }
 
 data class DecodedTransportPacket(
@@ -60,6 +63,19 @@ object TransportPacketCodec {
         timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
     ): ByteArray = encode(
         channel = TransportChannel.Control,
+        messageKind = messageKind,
+        sequence = sequence,
+        timestampUs = timestampUs,
+        payload = payload,
+    )
+
+    fun encodeInput(
+        sequence: Long,
+        messageKind: Int,
+        payload: ByteArray,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): ByteArray = encode(
+        channel = TransportChannel.Input,
         messageKind = messageKind,
         sequence = sequence,
         timestampUs = timestampUs,
@@ -134,6 +150,7 @@ class StylusUdpSender : Closeable {
     private val socket = DatagramSocket()
     private var remote: InetSocketAddress? = null
     private var nextSequence = 1L
+    private var nextFrameSequence = 1L
 
     fun connect(host: DiscoveredHost) {
         remote = host.endpoint
@@ -145,6 +162,29 @@ class StylusUdpSender : Closeable {
         val datagram = TransportPacketCodec.encodeStylusInput(
             sequence = nextSequence++,
             packet = packet,
+        )
+        socket.send(DatagramPacket(datagram, datagram.size, target))
+        return datagram.size
+    }
+
+    fun sendMouse(event: android.view.MotionEvent): Int {
+        val frame = ProtocolFrameCodec.encodeMouseInput(nextFrameSequence++, event)
+            ?: return 0
+        return sendFramedInput(TransportMessageKind.mouseInput, frame)
+    }
+
+    fun sendTouch(event: android.view.MotionEvent): Int {
+        val frame = ProtocolFrameCodec.encodeTouchInputBatch(nextFrameSequence++, event)
+            ?: return 0
+        return sendFramedInput(TransportMessageKind.touchInputBatch, frame)
+    }
+
+    private fun sendFramedInput(messageKind: Int, frame: ByteArray): Int {
+        val target = remote ?: error("StylusUdpSender is not connected to a host")
+        val datagram = TransportPacketCodec.encodeInput(
+            sequence = nextSequence++,
+            messageKind = messageKind,
+            payload = frame,
         )
         socket.send(DatagramPacket(datagram, datagram.size, target))
         return datagram.size

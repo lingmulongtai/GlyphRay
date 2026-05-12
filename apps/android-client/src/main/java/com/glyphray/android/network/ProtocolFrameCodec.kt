@@ -1,7 +1,9 @@
 package com.glyphray.android.network
 
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
@@ -119,6 +121,72 @@ object ProtocolFrameCodec {
         )
     }
 
+    fun encodeMouseInput(sequence: Long, event: MotionEvent, displayId: Int = 0): ByteArray? {
+        if (!event.isMouseLike()) {
+            return null
+        }
+        return encodeFrame(
+            messageKind = TransportMessageKind.mouseInput,
+            sequence = sequence,
+            payload = BincodeMessageEncoder.mouseInput(
+                sequence = sequence,
+                timestampUs = event.eventTime * 1_000L,
+                displayId = displayId,
+                x = event.x,
+                y = event.y,
+                wheelDeltaX = event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+                wheelDeltaY = event.getAxisValue(MotionEvent.AXIS_VSCROLL),
+                buttonFlags = event.buttonState,
+            ),
+        )
+    }
+
+    fun encodeTouchInputBatch(sequence: Long, event: MotionEvent, displayId: Int = 0): ByteArray? {
+        if (!event.isFingerTouch()) {
+            return null
+        }
+        return encodeFrame(
+            messageKind = TransportMessageKind.touchInputBatch,
+            sequence = sequence,
+            payload = BincodeMessageEncoder.touchInputBatch(
+                batchSequence = sequence,
+                monotonicTimestampUs = SystemClock.elapsedRealtimeNanos() / 1_000L,
+                displayId = displayId,
+                event = event,
+            ),
+        )
+    }
+
+    fun encodeGamepadInput(
+        sequence: Long,
+        controllerId: Int,
+        buttons: Int,
+        leftTrigger: Float,
+        rightTrigger: Float,
+        leftStickX: Float,
+        leftStickY: Float,
+        rightStickX: Float,
+        rightStickY: Float,
+        connected: Boolean = true,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): ByteArray = encodeFrame(
+        messageKind = TransportMessageKind.gamepadInput,
+        sequence = sequence,
+        payload = BincodeMessageEncoder.gamepadInput(
+            sequence = sequence,
+            timestampUs = timestampUs,
+            controllerId = controllerId,
+            connected = connected,
+            buttons = buttons,
+            leftTrigger = leftTrigger,
+            rightTrigger = rightTrigger,
+            leftStickX = leftStickX,
+            leftStickY = leftStickY,
+            rightStickX = rightStickX,
+            rightStickY = rightStickY,
+        ),
+    )
+
     private fun encodeFrame(
         messageKind: Int,
         sequence: Long,
@@ -175,9 +243,12 @@ private object BincodeMessageEncoder {
     private const val pairingResultVariant = 5
     private const val displayInfoVariant = 6
     private const val encoderConfigVariant = 7
+    private const val mouseInputVariant = 11
     private const val keyboardInputVariant = 12
     private const val latencyPingVariant = 14
     private const val latencyPongVariant = 15
+    private const val touchInputBatchVariant = 18
+    private const val gamepadInputVariant = 19
 
     fun pairingRequest(
         deviceName: String,
@@ -236,6 +307,91 @@ private object BincodeMessageEncoder {
         .putInt(virtualKey)
         .put(if (pressed) 1.toByte() else 0.toByte())
         .putInt(modifiers)
+        .array()
+
+    fun mouseInput(
+        sequence: Long,
+        timestampUs: Long,
+        displayId: Int,
+        x: Float,
+        y: Float,
+        wheelDeltaX: Float,
+        wheelDeltaY: Float,
+        buttonFlags: Int,
+    ): ByteArray = ByteBuffer
+        .allocate(4 + 8 + 8 + 4 + 4 + 4 + 4 + 4 + 4)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(mouseInputVariant)
+        .putLong(sequence)
+        .putLong(timestampUs)
+        .putInt(displayId)
+        .putFloat(x)
+        .putFloat(y)
+        .putFloat(wheelDeltaX)
+        .putFloat(wheelDeltaY)
+        .putInt(buttonFlags)
+        .array()
+
+    fun touchInputBatch(
+        batchSequence: Long,
+        monotonicTimestampUs: Long,
+        displayId: Int,
+        event: MotionEvent,
+    ): ByteArray {
+        val samples = event.touchSamples()
+        val sampleSize = 8 + 8 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4
+        val buffer = ByteBuffer
+            .allocate(4 + 8 + 8 + 4 + 8 + samples.size * sampleSize)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(touchInputBatchVariant)
+            .putLong(batchSequence)
+            .putLong(monotonicTimestampUs)
+            .putInt(displayId)
+            .putLong(samples.size.toLong())
+        samples.forEach { sample ->
+            buffer
+                .putLong(sample.sequence)
+                .putLong(sample.timestampUs)
+                .putInt(sample.pointerId)
+                .putInt(sample.actionWireIndex)
+                .putFloat(sample.x)
+                .putFloat(sample.y)
+                .putFloat(sample.pressure)
+                .putFloat(sample.major)
+                .putFloat(sample.minor)
+                .putFloat(sample.orientationDegrees)
+                .putInt(sample.flags)
+        }
+        return buffer.array()
+    }
+
+    fun gamepadInput(
+        sequence: Long,
+        timestampUs: Long,
+        controllerId: Int,
+        connected: Boolean,
+        buttons: Int,
+        leftTrigger: Float,
+        rightTrigger: Float,
+        leftStickX: Float,
+        leftStickY: Float,
+        rightStickX: Float,
+        rightStickY: Float,
+    ): ByteArray = ByteBuffer
+        .allocate(4 + 8 + 8 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 4 + 4)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(gamepadInputVariant)
+        .putLong(sequence)
+        .putLong(timestampUs)
+        .putInt(controllerId)
+        .put(if (connected) 1.toByte() else 0.toByte())
+        .putInt(buttons)
+        .putFloat(leftTrigger)
+        .putFloat(rightTrigger)
+        .putFloat(leftStickX)
+        .putFloat(leftStickY)
+        .putFloat(rightStickX)
+        .putFloat(rightStickY)
         .array()
 
     fun decodePairingResult(payload: ByteArray): ControlProtocolMessage.PairingResult {
@@ -313,6 +469,81 @@ private object BincodeMessageEncoder {
         )
     }
 }
+
+private data class TouchWireSample(
+    val sequence: Long,
+    val timestampUs: Long,
+    val pointerId: Int,
+    val actionWireIndex: Int,
+    val x: Float,
+    val y: Float,
+    val pressure: Float,
+    val major: Float,
+    val minor: Float,
+    val orientationDegrees: Float,
+    val flags: Int,
+)
+
+private fun MotionEvent.isMouseLike(): Boolean =
+    (source and InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE ||
+        (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }
+
+private fun MotionEvent.isFingerTouch(): Boolean =
+    (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
+
+private fun MotionEvent.touchSamples(): List<TouchWireSample> {
+    val action = touchActionWireIndex()
+    val samples = ArrayList<TouchWireSample>((historySize + 1) * pointerCount)
+    var sequence = 1L
+    for (historyIndex in 0 until historySize) {
+        for (pointerIndex in 0 until pointerCount) {
+            if (getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_FINGER) {
+                samples += touchSample(pointerIndex, action, getHistoricalEventTime(historyIndex) * 1_000L, sequence++, historyIndex)
+            }
+        }
+    }
+    for (pointerIndex in 0 until pointerCount) {
+        if (getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_FINGER) {
+            samples += touchSample(pointerIndex, action, eventTime * 1_000L, sequence++, null)
+        }
+    }
+    return samples
+}
+
+private fun MotionEvent.touchSample(
+    pointerIndex: Int,
+    actionWireIndex: Int,
+    timestampUs: Long,
+    sequence: Long,
+    historyIndex: Int?,
+): TouchWireSample {
+    val xValue = historyIndex?.let { getHistoricalX(pointerIndex, it) } ?: getX(pointerIndex)
+    val yValue = historyIndex?.let { getHistoricalY(pointerIndex, it) } ?: getY(pointerIndex)
+    return TouchWireSample(
+        sequence = sequence,
+        timestampUs = timestampUs,
+        pointerId = getPointerId(pointerIndex),
+        actionWireIndex = actionWireIndex,
+        x = xValue,
+        y = yValue,
+        pressure = historyIndex?.let { getHistoricalPressure(pointerIndex, it) } ?: getPressure(pointerIndex),
+        major = historyIndex?.let { getHistoricalTouchMajor(pointerIndex, it) } ?: getTouchMajor(pointerIndex),
+        minor = historyIndex?.let { getHistoricalTouchMinor(pointerIndex, it) } ?: getTouchMinor(pointerIndex),
+        orientationDegrees = (historyIndex?.let { getHistoricalOrientation(pointerIndex, it) } ?: getOrientation(pointerIndex)) *
+            180f / kotlin.math.PI.toFloat(),
+        flags = 0,
+    )
+}
+
+private fun MotionEvent.touchActionWireIndex(): Int =
+    when (actionMasked) {
+        MotionEvent.ACTION_DOWN,
+        MotionEvent.ACTION_POINTER_DOWN -> 0
+        MotionEvent.ACTION_UP,
+        MotionEvent.ACTION_POINTER_UP -> 2
+        MotionEvent.ACTION_CANCEL -> 3
+        else -> 1
+    }
 
 private fun ByteArray.crc32(): Int {
     val crc = CRC32()

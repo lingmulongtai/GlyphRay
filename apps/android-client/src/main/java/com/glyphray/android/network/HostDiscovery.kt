@@ -114,6 +114,40 @@ class HostDiscoveryController(
         }
     }
 
+    fun addManualHost(addressText: String, controlPort: Int = 44_999, videoPort: Int = 45_000) {
+        Thread {
+            runCatching {
+                val address = InetAddress.getByName(addressText.trim())
+                DiscoveredHost(
+                    hostId = "manual-${address.hostAddress}:$controlPort",
+                    hostName = "Manual ${address.hostAddress}",
+                    address = address,
+                    protocolVersion = 1,
+                    controlPort = controlPort,
+                    videoPort = videoPort,
+                    supportsWindowsInk = true,
+                    supportsH264 = true,
+                    pairingRequired = true,
+                    loadPercent = 0,
+                    lastSeenElapsedMs = SystemClock.elapsedRealtime(),
+                )
+            }.onSuccess { host ->
+                mergeHosts(listOf(host))
+            }.onFailure { error ->
+                postState {
+                    it.copy(
+                        isScanning = false,
+                        lastError = error.message ?: error.javaClass.simpleName,
+                    )
+                }
+            }
+        }.apply {
+            name = "GlyphRayManualHostAdd"
+            isDaemon = true
+            start()
+        }
+    }
+
     override fun close() {
         running.set(false)
         client.close()

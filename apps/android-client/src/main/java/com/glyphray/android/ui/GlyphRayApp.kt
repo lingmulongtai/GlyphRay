@@ -109,6 +109,7 @@ fun GlyphRayApp() {
                 GlyphRayScreen.Hosts -> HostListScreen(
                     discoveryState = hostDiscoveryController.state,
                     onRefresh = hostDiscoveryController::refreshOnce,
+                    onAddManualHost = hostDiscoveryController::addManualHost,
                     onPair = { screen = GlyphRayScreen.Pair },
                     onConnect = { host ->
                         selectedHost = host
@@ -141,6 +142,7 @@ fun GlyphRayApp() {
                     onVideoSettings = { screen = GlyphRayScreen.Video },
                     onSpecialKey = sessionControlController::sendSpecialKey,
                     onKeyEvent = sessionControlController::onKeyEvent,
+                    onGenericMotionEvent = sessionControlController::onGenericMotionEvent,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
                 )

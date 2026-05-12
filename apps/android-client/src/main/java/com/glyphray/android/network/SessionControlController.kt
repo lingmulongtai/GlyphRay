@@ -2,6 +2,7 @@ package com.glyphray.android.network
 
 import android.os.Build
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -38,6 +39,7 @@ class SessionControlController : Closeable {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val receiverExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: ControlUdpClient? = null
+    private var gamepadButtons: Int = 0
     @Volatile private var receiving = false
 
     var state by mutableStateOf(SessionControlState())
@@ -100,6 +102,9 @@ class SessionControlController : Closeable {
     }
 
     fun onKeyEvent(event: KeyEvent): Boolean {
+        if (RemoteGamepadMapper.isGamepadEvent(event.source)) {
+            return onGamepadKeyEvent(event)
+        }
         if (!state.inputSettings.bluetoothKeyboardEnabled) {
             return false
         }
@@ -117,12 +122,65 @@ class SessionControlController : Closeable {
         return true
     }
 
+    fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (!RemoteGamepadMapper.isGamepadEvent(event.source)) {
+            return false
+        }
+        if (!state.inputSettings.gameControllerEnabled) {
+            return false
+        }
+        executor.execute {
+            sendControl("Gamepad input") { client ->
+                client.sendGamepadInput(
+                    controllerId = event.deviceId,
+                    buttons = gamepadButtons,
+                    leftTrigger = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_LTRIGGER, MotionEvent.AXIS_BRAKE),
+                    rightTrigger = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_RTRIGGER, MotionEvent.AXIS_GAS),
+                    leftStickX = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_X),
+                    leftStickY = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_Y),
+                    rightStickX = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_Z, MotionEvent.AXIS_RX),
+                    rightStickY = RemoteGamepadMapper.axis(event, MotionEvent.AXIS_RZ, MotionEvent.AXIS_RY),
+                )
+            }
+        }
+        return true
+    }
+
     fun sendSpecialKey(key: SpecialRemoteKey) {
         executor.execute {
             sendControl("${key.label} key") { client ->
                 client.sendSpecialKey(key)
             }
         }
+    }
+
+    private fun onGamepadKeyEvent(event: KeyEvent): Boolean {
+        if (!state.inputSettings.gameControllerEnabled) {
+            return false
+        }
+        val bit = RemoteGamepadMapper.buttonBit(event.keyCode) ?: return false
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            gamepadButtons = gamepadButtons or bit
+        } else if (event.action == KeyEvent.ACTION_UP) {
+            gamepadButtons = gamepadButtons and bit.inv()
+        } else {
+            return false
+        }
+        executor.execute {
+            sendControl("Gamepad button") { client ->
+                client.sendGamepadInput(
+                    controllerId = event.deviceId,
+                    buttons = gamepadButtons,
+                    leftTrigger = 0f,
+                    rightTrigger = 0f,
+                    leftStickX = 0f,
+                    leftStickY = 0f,
+                    rightStickX = 0f,
+                    rightStickY = 0f,
+                )
+            }
+        }
+        return true
     }
 
     fun disconnect() {
@@ -279,6 +337,30 @@ private class ControlUdpClient : Closeable {
         )
         return sendInput(TransportMessageKind.keyboardInput, down) +
             sendInput(TransportMessageKind.keyboardInput, up)
+    }
+
+    fun sendGamepadInput(
+        controllerId: Int,
+        buttons: Int,
+        leftTrigger: Float,
+        rightTrigger: Float,
+        leftStickX: Float,
+        leftStickY: Float,
+        rightStickX: Float,
+        rightStickY: Float,
+    ): Int {
+        val frame = ProtocolFrameCodec.encodeGamepadInput(
+            sequence = nextFrameSequence++,
+            controllerId = controllerId,
+            buttons = buttons,
+            leftTrigger = leftTrigger,
+            rightTrigger = rightTrigger,
+            leftStickX = leftStickX,
+            leftStickY = leftStickY,
+            rightStickX = rightStickX,
+            rightStickY = rightStickY,
+        )
+        return sendInput(TransportMessageKind.gamepadInput, frame)
     }
 
     private fun sendControl(messageKind: Int, frame: ByteArray): Int {

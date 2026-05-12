@@ -1,5 +1,17 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Touch, Mouse, Gamepad, Tailscale, Packaging
+
+今日は入力まわりを Parsec 的な広さに寄せた。Android finger touch を stylus 代替で流すだけでは Windows touch 対応デバイスと同じ挙動にはならないため、protocol に `TouchInputBatch` を追加した。Android は finger touch を native touch packet として送り、Windows host は `GLYPHRAY_ENABLE_TOUCH_INJECTION=1` のとき `PT_TOUCH` として注入できる smoke-test path を持つようになった。まだ temporary 1920x1080 mapping なので、完全に「Windows touch device と同じ」と言うには calibration / monitor negotiation / multi-touch validation が残っている。
+
+Bluetooth mouse は `MouseInput` として分離し、Windows host は `GLYPHRAY_ENABLE_MOUSE_INJECTION=1` で cursor / buttons / wheel を注入できるようにした。Game controller は Android の gamepad buttons / axes を `GamepadInput` で送れるようにし、Windows host は decode まで対応した。実際に Windows に Xbox controller として見せるには ViGEm などの virtual gamepad backend が必要なので、roadmap に入れた。
+
+Tailscale は broadcast discovery が届かない前提で、Android host list に manual host entry を追加した。Tailscale IP や MagicDNS name を入れれば、同じ UDP control/input ports で接続できる。installer / release については Windows WiX MSI script、macOS pkgbuild script、Play Store internal testing に向けた release document を追加した。
+
+検証として Rust workspace tests と Android debug build を通した。
+
+この時点の進捗見積もり: 77%。
+
 ## 2026-05-12 JST - Client And Host Control Audit
 
 今日は、解像度、refresh rate、bitrate、color space、codec、touch、Bluetooth keyboard、fullscreen、Win/PrintScreen 補助キー、host startup / pre-login 接続について棚卸しした。結論として、video protocol は一部あったが色空間と client 設定送信が足りず、touch/keyboard/fullscreen/special keys はまだ入口だった。pre-login 接続は Windows の interactive desktop / secure desktop 制約があるため、サービス化しても慎重な設計が必要。

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GlyphRay Host" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="GlyphRayHostComponents" Directory="INSTALLFOLDER">
+      <Component Id="GlyphRayHostExe">
+        <File
+          Id="GlyphRayHostExeFile"
+          Source="$(var.PayloadDir)\glyphray-windows-host.exe"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

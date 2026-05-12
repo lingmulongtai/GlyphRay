@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 75%**
+**Overall progress estimate: 77%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 75
-  "Remaining product work" : 25
+  "Implemented foundation" : 77
+  "Remaining product work" : 23
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 74% |
-| Milestone 4 hardening and packaging | In progress | 50% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 78% |
+| Milestone 4 hardening and packaging | In progress | 54% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 36% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink      [###############-----]  74%
-M4 Security + Packaging       [##########----------]  50%
+M3 Stylus -> Windows Ink      [################----]  78%
+M4 Security + Packaging       [###########---------]  54%
 M5 macOS + Audio + Relay      [#######-------------]  36%
 ```
 
@@ -139,10 +139,11 @@ sequenceDiagram
 - Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
 - Android control response receiver for `PairingResult` and `LatencyPong`.
 - Android display-info receiver for host monitor geometry after pairing.
-- Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard capture, and special-key overlay.
-- Android remote-session stylus bridge that captures drawing-surface input and sends compact stylus batches over UDP on a background worker.
+- Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard/mouse capture, game controller capture, and special-key overlay.
+- Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use.
+- Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on background workers.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
-- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard injection, permission gating, and latency pong replies.
+- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
@@ -181,6 +182,9 @@ For local input-path smoke testing before the host approval UI exists:
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
 $env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
+$env:GLYPHRAY_ENABLE_TOUCH_INJECTION='1'
+$env:GLYPHRAY_ENABLE_MOUSE_INJECTION='1'
+$env:GLYPHRAY_ENABLE_KEYBOARD_INJECTION='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
@@ -226,6 +230,8 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | Validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | Latency and telemetry targets |
 | [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | Implementation status for video, input, fullscreen, special keys, and host startup |
+| [docs/NETWORK_COMPATIBILITY.md](docs/NETWORK_COMPATIBILITY.md) | LAN, Tailscale, and overlay VPN notes |
+| [docs/RELEASE_DISTRIBUTION.md](docs/RELEASE_DISTRIBUTION.md) | Windows/macOS installers and Play Store release path |
 | [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md) | Running development diary |
 
 ## Website
@@ -246,6 +252,8 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
 - Host approval UI is not wired yet; `GLYPHRAY_DEV_AUTO_APPROVE` is only for local smoke tests.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.
+- `GLYPHRAY_ENABLE_TOUCH_INJECTION`, `GLYPHRAY_ENABLE_MOUSE_INJECTION`, and `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` are explicit smoke-test flags until host-side permission UI exists.
+- Gamepad packets are decoded on Windows, but virtual controller injection still needs a ViGEm/virtual HID backend.
 - Native Windows Ink pressure/tilt/hover must still be validated in real creative apps.
 
 ## Next Focus

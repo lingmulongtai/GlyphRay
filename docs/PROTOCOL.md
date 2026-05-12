@@ -68,7 +68,7 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 - Pairing: `PairingRequest`, `PairingResult`
 - Display and encoder: `DisplayInfo`, `EncoderConfig`
 - Media: `VideoFrame`, `AudioFrame`
-- Input: `StylusInputBatch`, `MouseInput`, `KeyboardInput`
+- Input: `StylusInputBatch`, `TouchInputBatch`, `MouseInput`, `KeyboardInput`, `GamepadInput`
 - Control: `LatencyPing`, `LatencyPong`, `ErrorMessage`, `Disconnect`
 - Optional later: `ClipboardMessage`
 
@@ -122,6 +122,51 @@ Input channel packets must be prioritized over video when congestion appears.
 - modifier bitfield
 
 The Android client maps common `KeyEvent` codes to Windows virtual keys before transmission. The Windows host can decode these packets and, when explicitly enabled for smoke testing, inject them through `SendInput`. Layout-aware text input and IME behavior remain future work.
+
+## TouchInputBatch
+
+`TouchInputBatch` exists so Android finger input can become native Windows `PT_TOUCH` input rather than stylus or mouse emulation:
+
+- batch sequence
+- monotonic timestamp
+- display id
+- sample sequence and timestamp
+- pointer id
+- action: down, move, up, cancel
+- x/y
+- pressure
+- major/minor contact size
+- orientation
+- flags
+
+The Windows host has an opt-in smoke-test injector behind `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`. It still uses temporary 1920x1080 mapping until selected-monitor negotiation and calibration are fully wired.
+
+## MouseInput
+
+`MouseInput` carries Bluetooth/USB mouse motion from the Android client:
+
+- sequence
+- timestamp
+- display id
+- x/y
+- horizontal and vertical wheel deltas
+- button flags
+
+The Windows host can opt-in inject cursor movement, primary/secondary/middle buttons, and wheel events with `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`.
+
+## GamepadInput
+
+`GamepadInput` carries Android-connected controller state:
+
+- sequence
+- timestamp
+- controller id
+- connected flag
+- button bitset
+- left/right triggers
+- left/right stick axes
+
+The Windows host currently decodes these reports. Actual Windows controller presentation still needs a virtual gamepad backend such as ViGEm or a virtual HID driver.
 
 ## Compact Stylus Wire Packet
 

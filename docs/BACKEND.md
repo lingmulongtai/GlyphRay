@@ -10,6 +10,9 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Host monitor `DisplayInfo` response after accepted pairing.
 - Client `EncoderConfig` intake for resolution, refresh rate, bitrate, color space, codec, and low-latency settings.
 - Keyboard packet decode and opt-in `SendInput` injection for Bluetooth keyboard and special-key smoke tests.
+- Native touch packet decode and opt-in `PT_TOUCH` injection for Android finger input smoke tests.
+- Bluetooth mouse packet decode and opt-in native cursor/button/wheel injection.
+- Gamepad packet decode for Android-connected controllers.
 - Permission gating before input packets are accepted.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
@@ -66,6 +69,9 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once approval UI exists.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
 - `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` is for explicit keyboard smoke tests only until the host permission UI exists.
+- `GLYPHRAY_ENABLE_TOUCH_INJECTION` is for explicit native touch smoke tests only until monitor mapping/calibration is negotiated.
+- `GLYPHRAY_ENABLE_MOUSE_INJECTION` is for explicit mouse smoke tests only until the host permission UI exists.
+- Gamepad reports are decoded, but Windows virtual-controller injection needs a ViGEm or virtual HID backend.
 - Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.
 - Production Windows secret storage still needs DPAPI or Credential Manager.
 - Real app validation for Windows Ink input is still required.
