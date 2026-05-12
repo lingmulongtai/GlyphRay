@@ -107,6 +107,13 @@ flowchart LR
 
 Backend notes live in `docs/BACKEND.md`.
 
+Runtime resilience rules:
+
+- Unknown UDP peers may create pending sessions only up to a bounded cap; oldest pending peers are evicted before memory can grow without limit.
+- Approved input packets are accepted only if their transport sequence and input timestamp are newer than the session watermark.
+- Control responses use a bounded nonblocking send queue so packet receive/poll work is not coupled to temporary socket send pressure.
+- Host discovery IDs use a stable CRC-based hash rather than ad hoc byte folding.
+
 ## Audio And Relay
 
 Audio packetization and relay candidate selection exist as code-level foundations. Capture/playback and relay server/client implementations remain future work.

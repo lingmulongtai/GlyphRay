@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Host Router Hardening
+
+今日は host backend の守りと低遅延性を補強した。未知 peer からの packet を無制限に `SessionRegistry` へ積むと、送信元 port を変えた spam で pending session が増え続けるため、pending session を最大 50 件に制限し、超過時は最古の pending peer を破棄するようにした。approved/rejected session は保持し、未承認の掃除だけに絞っている。
+
+UDP の順序逆転対策として、approved session ごとに最新 input sequence と timestamp を記録し、それより古い stylus/touch/mouse/keyboard/gamepad packet は injection 前に drop するようにした。絵を描く用途では「遅れて届いた古い座標で一瞬戻る」ほうが破壊的なので、遅延 packet の救済より現在位置の安定を優先した。
+
+control response 送信は `poll_control` の hot loop から bounded queue に逃がし、`try_send_to` で nonblocking flush する短期対策を入れた。専用 send worker や mio/tokio event loop はまだ次段階だが、受信 loop が送信詰まりで長く止まるリスクは下げた。あわせて discovery host id は独自 hash から `crc32fast` ベースの stable id に置き換えた。
+
+検証として Rust workspace tests と Android unit tests を通した。Gradle wrapper は Java 24 対応のため 8.14.3 に更新済み。
+
 ## 2026-05-12 JST - Touch, Mouse, Gamepad, Tailscale, Packaging
 
 今日は入力まわりを Parsec 的な広さに寄せた。Android finger touch を stylus 代替で流すだけでは Windows touch 対応デバイスと同じ挙動にはならないため、protocol に `TouchInputBatch` を追加した。Android は finger touch を native touch packet として送り、Windows host は `GLYPHRAY_ENABLE_TOUCH_INJECTION=1` のとき `PT_TOUCH` として注入できる smoke-test path を持つようになった。まだ temporary 1920x1080 mapping なので、完全に「Windows touch device と同じ」と言うには calibration / monitor negotiation / multi-touch validation が残っている。

@@ -13,9 +13,13 @@ use glyphray_protocol::{
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::{ChannelKind, TransportError, TransportPacket};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+const MAX_PENDING_SESSIONS: usize = 50;
+const MAX_OUTBOUND_CONTROL_QUEUE: usize = 128;
+const OUTBOUND_FLUSH_BUDGET: usize = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
@@ -50,6 +54,8 @@ pub struct ClientSession {
     pub packets_received: u64,
     pub last_seen: Instant,
     pub encoder_config: Option<EncoderConfig>,
+    pub last_input_sequence: Option<u64>,
+    pub last_input_timestamp_us: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +65,8 @@ pub struct SessionSnapshot {
     pub permission: PermissionState,
     pub packets_received: u64,
     pub encoder_config: Option<EncoderConfig>,
+    pub last_input_sequence: Option<u64>,
+    pub last_input_timestamp_us: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -68,6 +76,10 @@ pub struct SessionRegistry {
 
 impl SessionRegistry {
     pub fn ensure_pending(&mut self, peer: SocketAddr) -> &mut ClientSession {
+        if !self.sessions.contains_key(&peer) {
+            self.evict_oldest_pending_if_needed();
+        }
+
         self.sessions.entry(peer).or_insert_with(|| ClientSession {
             peer,
             device_id: None,
@@ -75,6 +87,8 @@ impl SessionRegistry {
             packets_received: 0,
             last_seen: Instant::now(),
             encoder_config: None,
+            last_input_sequence: None,
+            last_input_timestamp_us: None,
         })
     }
 
@@ -99,6 +113,38 @@ impl SessionRegistry {
         self.sessions.len()
     }
 
+    pub fn pending_count(&self) -> usize {
+        self.sessions
+            .values()
+            .filter(|session| session.permission == PermissionState::Pending)
+            .count()
+    }
+
+    pub fn accept_input_watermark(
+        &mut self,
+        peer: SocketAddr,
+        sequence: u64,
+        timestamp_us: u64,
+    ) -> bool {
+        let Some(session) = self.sessions.get_mut(&peer) else {
+            return false;
+        };
+
+        if session
+            .last_input_sequence
+            .is_some_and(|last| sequence <= last)
+            || session
+                .last_input_timestamp_us
+                .is_some_and(|last| timestamp_us < last)
+        {
+            return false;
+        }
+
+        session.last_input_sequence = Some(sequence);
+        session.last_input_timestamp_us = Some(timestamp_us);
+        true
+    }
+
     pub fn snapshots(&self) -> Vec<SessionSnapshot> {
         let mut snapshots = self
             .sessions
@@ -109,10 +155,28 @@ impl SessionRegistry {
                 permission: session.permission,
                 packets_received: session.packets_received,
                 encoder_config: session.encoder_config.clone(),
+                last_input_sequence: session.last_input_sequence,
+                last_input_timestamp_us: session.last_input_timestamp_us,
             })
             .collect::<Vec<_>>();
         snapshots.sort_by_key(|session| session.peer);
         snapshots
+    }
+
+    fn evict_oldest_pending_if_needed(&mut self) {
+        if self.pending_count() < MAX_PENDING_SESSIONS {
+            return;
+        }
+
+        let oldest = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.permission == PermissionState::Pending)
+            .min_by_key(|(_, session)| session.last_seen)
+            .map(|(peer, _)| *peer);
+        if let Some(peer) = oldest {
+            self.sessions.remove(&peer);
+        }
     }
 }
 
@@ -197,6 +261,14 @@ pub enum BackendEvent {
     },
     LatencyPongQueued {
         peer: SocketAddr,
+    },
+    OutboundQueued {
+        peer: SocketAddr,
+        packets: usize,
+    },
+    OutboundBackpressure {
+        peer: SocketAddr,
+        queued_packets: usize,
     },
     PacketRouted {
         peer: SocketAddr,
@@ -393,6 +465,14 @@ where
             MessageKind::StylusInputBatch => {
                 let batch = decode_stylus_batch(&packet.payload)?;
                 let samples = batch.samples.len();
+                if !self.sessions.accept_input_watermark(
+                    peer,
+                    packet.sequence,
+                    batch.monotonic_timestamp_us,
+                ) {
+                    outcome.events.push(late_packet_event(peer));
+                    return Ok(outcome);
+                }
                 if let Some(bridge) = self.input_bridge.as_mut() {
                     let report = bridge.inject_remote_batch(&batch)?;
                     outcome.events.push(BackendEvent::StylusInjected {
@@ -429,6 +509,14 @@ where
             }
             MessageKind::KeyboardInput => {
                 let keyboard = decode_keyboard_input(&packet.payload)?;
+                if !self.sessions.accept_input_watermark(
+                    peer,
+                    packet.sequence,
+                    keyboard.timestamp_us,
+                ) {
+                    outcome.events.push(late_packet_event(peer));
+                    return Ok(outcome);
+                }
                 outcome.events.push(BackendEvent::KeyboardDecoded {
                     peer,
                     virtual_key: keyboard.virtual_key,
@@ -446,6 +534,14 @@ where
             MessageKind::TouchInputBatch => {
                 let batch = decode_touch_input_batch(&packet.payload)?;
                 let samples = batch.samples.len();
+                if !self.sessions.accept_input_watermark(
+                    peer,
+                    packet.sequence,
+                    batch.monotonic_timestamp_us,
+                ) {
+                    outcome.events.push(late_packet_event(peer));
+                    return Ok(outcome);
+                }
                 outcome
                     .events
                     .push(BackendEvent::TouchDecoded { peer, samples });
@@ -458,6 +554,13 @@ where
             }
             MessageKind::MouseInput => {
                 let mouse = decode_mouse_input(&packet.payload)?;
+                if !self
+                    .sessions
+                    .accept_input_watermark(peer, packet.sequence, mouse.timestamp_us)
+                {
+                    outcome.events.push(late_packet_event(peer));
+                    return Ok(outcome);
+                }
                 outcome.events.push(BackendEvent::MouseDecoded {
                     peer,
                     button_flags: mouse.button_flags,
@@ -472,6 +575,14 @@ where
             }
             MessageKind::GamepadInput => {
                 let gamepad = decode_gamepad_input(&packet.payload)?;
+                if !self.sessions.accept_input_watermark(
+                    peer,
+                    packet.sequence,
+                    gamepad.timestamp_us,
+                ) {
+                    outcome.events.push(late_packet_event(peer));
+                    return Ok(outcome);
+                }
                 outcome.events.push(BackendEvent::GamepadDecoded {
                     peer,
                     controller_id: gamepad.controller_id,
@@ -548,6 +659,7 @@ pub struct HostBackendRuntime<I> {
     config: HostConfig,
     advertisement: HostAdvertisement,
     router: HostPacketRouter<I>,
+    outbound_control: VecDeque<(SocketAddr, TransportPacket)>,
 }
 
 impl<I> HostBackendRuntime<I>
@@ -595,6 +707,7 @@ where
                 mouse_bridge,
                 permission_policy,
             ),
+            outbound_control: VecDeque::with_capacity(MAX_OUTBOUND_CONTROL_QUEUE),
         }
     }
 
@@ -652,8 +765,9 @@ where
         &mut self,
         server: &mut UdpServer,
     ) -> Result<Vec<BackendEvent>, BackendError> {
+        let mut events = self.flush_outbound_control(server)?;
         let Some((packet, peer)) = server.poll_recv_from()? else {
-            return Ok(Vec::new());
+            return Ok(events);
         };
 
         let mut outcome = self.router.route_packet(peer, packet)?;
@@ -667,10 +781,17 @@ where
                 displays: display_count,
             });
         }
-        for (peer, packet) in outcome.outbound {
-            server.send_to(&packet, peer)?;
+        let outbound_count = outcome.outbound.len();
+        if outbound_count > 0 {
+            self.enqueue_outbound(outcome.outbound);
+            outcome.events.push(BackendEvent::OutboundQueued {
+                peer,
+                packets: outbound_count,
+            });
         }
-        Ok(outcome.events)
+        events.extend(outcome.events);
+        events.extend(self.flush_outbound_control(server)?);
+        Ok(events)
     }
 
     pub fn session_count(&self) -> usize {
@@ -684,13 +805,46 @@ where
     pub fn config(&self) -> &HostConfig {
         &self.config
     }
+
+    fn enqueue_outbound(&mut self, packets: Vec<(SocketAddr, TransportPacket)>) {
+        for packet in packets {
+            if self.outbound_control.len() == MAX_OUTBOUND_CONTROL_QUEUE {
+                self.outbound_control.pop_front();
+            }
+            self.outbound_control.push_back(packet);
+        }
+    }
+
+    fn flush_outbound_control(
+        &mut self,
+        server: &mut UdpServer,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let mut events = Vec::new();
+        for _ in 0..OUTBOUND_FLUSH_BUDGET {
+            let Some((peer, packet)) = self.outbound_control.pop_front() else {
+                break;
+            };
+            if server.try_send_to(&packet, peer)? {
+                continue;
+            }
+            self.outbound_control.push_front((peer, packet));
+            events.push(BackendEvent::OutboundBackpressure {
+                peer,
+                queued_packets: self.outbound_control.len(),
+            });
+            break;
+        }
+        Ok(events)
+    }
 }
 
 fn host_id_from_name(name: &str) -> [u8; 16] {
     let mut id = [0_u8; 16];
-    for (index, byte) in name.as_bytes().iter().enumerate() {
-        id[index % 16] = id[index % 16].wrapping_mul(31).wrapping_add(*byte);
-    }
+    let hash = crc32fast::hash(name.as_bytes());
+    id[0..4].copy_from_slice(&hash.to_le_bytes());
+    id[4..12].copy_from_slice(&(name.len() as u64).to_le_bytes());
+    let checksum = crc32fast::hash(&id[0..12]);
+    id[12..16].copy_from_slice(&checksum.to_le_bytes());
     id
 }
 
@@ -703,6 +857,13 @@ fn now_us() -> u64 {
 
 fn trusted_device_id(peer: SocketAddr) -> String {
     format!("trusted-{}", peer).replace([':', '.'], "-")
+}
+
+fn late_packet_event(peer: SocketAddr) -> BackendEvent {
+    BackendEvent::PacketIgnored {
+        peer,
+        reason: "late input packet".to_string(),
+    }
 }
 
 fn should_send_display_info(events: &[BackendEvent]) -> bool {
@@ -855,6 +1016,25 @@ mod tests {
     }
 
     #[test]
+    fn pending_sessions_are_capped_by_evicting_oldest_pending_peer() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let first_peer: SocketAddr = "127.0.0.1:51000".parse().expect("peer");
+
+        for port in 51000..51051 {
+            let peer: SocketAddr = format!("127.0.0.1:{port}").parse().expect("peer");
+            router
+                .route_packet(peer, input_packet(vec![1, 2, 3]))
+                .expect("route");
+        }
+
+        assert_eq!(router.sessions.pending_count(), MAX_PENDING_SESSIONS);
+        assert!(!router
+            .session_snapshots()
+            .iter()
+            .any(|session| session.peer == first_peer));
+    }
+
+    #[test]
     fn approved_stylus_packet_reaches_injector() {
         let mapper = CoordinateMapper::new(
             SourceRect::new(100.0, 100.0).expect("source"),
@@ -872,6 +1052,28 @@ mod tests {
         assert!(outcome
             .events
             .contains(&BackendEvent::StylusInjected { peer, samples: 1 }));
+    }
+
+    #[test]
+    fn late_stylus_packet_is_dropped_before_injection() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50011".parse().expect("peer");
+        router.approve_peer(peer, "tablet");
+
+        let first = router
+            .route_packet(peer, input_packet_with_sequence(2, sample_batch_at(20)))
+            .expect("route first");
+        assert!(first
+            .events
+            .contains(&BackendEvent::StylusDecoded { peer, samples: 1 }));
+
+        let late = router
+            .route_packet(peer, input_packet_with_sequence(1, sample_batch_at(10)))
+            .expect("route late");
+        assert!(late.events.contains(&BackendEvent::PacketIgnored {
+            peer,
+            reason: "late input packet".to_string(),
+        }));
     }
 
     #[test]
@@ -1203,6 +1405,16 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn host_id_uses_crc_based_hashing() {
+        let first = host_id_from_name("GlyphRay Host A");
+        let second = host_id_from_name("GlyphRay Host B");
+
+        assert_ne!(first, [0_u8; 16]);
+        assert_ne!(first, second);
+        assert_eq!(first, host_id_from_name("GlyphRay Host A"));
+    }
+
     fn input_packet(payload: Vec<u8>) -> TransportPacket {
         TransportPacket {
             sequence: 1,
@@ -1210,6 +1422,16 @@ mod tests {
             message_kind: MessageKind::StylusInputBatch,
             enqueue_timestamp_us: 0,
             payload,
+        }
+    }
+
+    fn input_packet_with_sequence(sequence: u64, batch: StylusInputBatch) -> TransportPacket {
+        TransportPacket {
+            sequence,
+            channel: ChannelKind::Input,
+            message_kind: MessageKind::StylusInputBatch,
+            enqueue_timestamp_us: 0,
+            payload: encode_stylus_batch(&batch).expect("encode"),
         }
     }
 
@@ -1253,12 +1475,16 @@ mod tests {
     }
 
     fn sample_batch() -> StylusInputBatch {
+        sample_batch_at(1)
+    }
+
+    fn sample_batch_at(monotonic_timestamp_us: u64) -> StylusInputBatch {
         StylusInputBatch {
             batch_sequence: 1,
-            monotonic_timestamp_us: 1,
+            monotonic_timestamp_us,
             samples: vec![StylusSample {
                 sequence: 1,
-                timestamp_us: 1,
+                timestamp_us: monotonic_timestamp_us,
                 display_id: 0,
                 pointer_id: 1,
                 tool_type: StylusToolType::Stylus,

@@ -14,6 +14,9 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Bluetooth mouse packet decode and opt-in native cursor/button/wheel injection.
 - Gamepad packet decode for Android-connected controllers.
 - Permission gating before input packets are accepted.
+- Pending-session cap of 50 unapproved peers, with oldest pending peer eviction to limit UDP spam memory growth.
+- Late input packet dropping based on per-session transport sequence and input timestamp watermarks.
+- Bounded nonblocking outbound control queue for pairing, display-info, and latency responses.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
 - Latency ping/pong routing.
@@ -45,6 +48,10 @@ reject 192.168.1.20:44999
 
 Approval and rejection both send a protocol-level `PairingResult` back to the Android control channel. Accepted pairing also queues `DisplayInfo` so the client can see available monitor geometry.
 
+The backend drops out-of-order input packets after approval if the incoming transport sequence is not newer than the last accepted input packet, or if the input timestamp moves backward. This intentionally prefers a stable current pen/cursor position over replaying late UDP arrivals.
+
+Control responses are queued into a bounded in-memory queue and flushed with nonblocking UDP sends. If the OS send buffer is temporarily full, the receive path keeps ownership of the packet and retries on a later poll instead of blocking the whole control loop. A dedicated send worker or event loop is still planned before beta.
+
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
 The backend binds:
@@ -61,6 +68,7 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 ## Current Limits
 
 - The backend loop is still console-driven.
+- The outbound control queue is a short-term nonblocking guard, not a full transport scheduler.
 - Peer approval is console-driven and still needs a native host UI prompt.
 - DisplayInfo uses current monitor enumeration and should later feed selected-monitor mapping and calibration.
 - Client encoder config is stored on the session but is not yet wired into the live capture/encode loop.

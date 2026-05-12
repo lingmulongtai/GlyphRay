@@ -55,6 +55,19 @@ impl UdpServer {
         Ok(())
     }
 
+    pub fn try_send_to(
+        &mut self,
+        packet: &TransportPacket,
+        peer: SocketAddr,
+    ) -> Result<bool, TransportError> {
+        encode_packet_into(packet, &mut self.tx_buffer)?;
+        match self.socket.send_to(&self.tx_buffer, peer) {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(false),
+            Err(err) => Err(io_error(err)),
+        }
+    }
+
     pub fn poll_recv_from(
         &mut self,
     ) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {

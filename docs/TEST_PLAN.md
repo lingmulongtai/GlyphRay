@@ -17,6 +17,9 @@ Rust tests cover:
 - Encoded video access-unit packetization and reassembly.
 - LAN discovery advertisement encode/decode.
 - Backend session permission gate and pairing request routing.
+- Backend pending-session cap and oldest-pending eviction.
+- Backend late input packet drop before injection.
+- Backend stable CRC-based host id generation.
 - Backend stylus packet routing into the input bridge.
 - Transport packet-loss simulation.
 - Telemetry p95 and latency totals.
@@ -65,6 +68,8 @@ cargo test --workspace
 - Run `cargo run -p glyphray-windows-host -- serve`.
 - Confirm GDI fallback captures the selected monitor before replacing it with Windows Graphics Capture or Desktop Duplication.
 - Confirm a pending Android peer cannot inject input until approved.
+- Confirm spoofed/random source ports cannot grow pending sessions beyond the configured cap.
+- Confirm delayed lower-sequence stylus/touch/mouse/keyboard packets are dropped instead of injected.
 - With `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1`, confirm an approved Android Bluetooth keyboard can inject a safe key sequence.
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
 - With `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`, confirm Android finger input is received by Windows as native touch input in a touch-aware app.
@@ -82,3 +87,4 @@ cargo test --workspace
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
 - Transport reconnect under packet loss.
+- Outbound control queue backpressure behavior with a saturated UDP send buffer.

@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+crc32fast.workspace = true
 glyphray-core = { path = "../../crates/core" }
 glyphray-protocol = { path = "../../crates/protocol" }
 glyphray-security = { path = "../../crates/security" }

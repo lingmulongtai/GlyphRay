@@ -82,6 +82,9 @@ Current overall progress estimate: 77%.
 - [x] Add Android Keystore device identity foundation.
 - [x] Add Windows platform secret-store boundary.
 - [x] Add reconnect and adaptive bitrate controllers.
+- [x] Add pending-session cap and late input packet dropping in the host router.
+- [x] Add bounded nonblocking control-packet send queue for the host polling loop.
+- [x] Replace ad hoc host discovery ID hashing with CRC-based stable hashing.
 - [x] Add host diagnostics CLI.
 - [x] Add console backend runtime entry point.
 - [x] Add development-only backend auto-approval mode for LAN input smoke tests.
@@ -89,6 +92,7 @@ Current overall progress estimate: 77%.
 - [x] Add installer packaging foundation.
 - [x] Add Windows WiX MSI build script and macOS pkgbuild script.
 - [ ] Add Windows startup-at-login and service/agent architecture plan.
+- [ ] Move control/video packet transmission onto a dedicated send worker or mio/tokio event loop with explicit backpressure metrics.
 - [ ] Validate and document lock-screen/pre-login limitations for capture and input.
 - [x] Add GitHub Pages deployment workflow for the download site.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.

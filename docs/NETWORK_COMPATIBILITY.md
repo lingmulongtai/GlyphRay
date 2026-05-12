@@ -26,3 +26,9 @@ Risks to validate:
 ## Other Overlay VPNs
 
 WireGuard-style overlays should behave similarly if UDP is allowed. Broadcast discovery should be treated as LAN-only unless the overlay explicitly forwards broadcast or multicast traffic.
+
+## UDP Ordering And Backpressure
+
+GlyphRay treats input as real-time state, not reliable history. The host router records the latest accepted input sequence and timestamp for each approved session. Older stylus, touch, mouse, keyboard, or gamepad packets are dropped before injection so packet reordering does not move the pen or pointer backward.
+
+Control responses are queued and flushed with nonblocking UDP sends. This is a short-term guard for pairing/display/latency messages; a dedicated send worker or event loop with backpressure metrics is still planned for sustained video and relay traffic.

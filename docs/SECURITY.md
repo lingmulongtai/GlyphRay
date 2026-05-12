@@ -39,9 +39,13 @@ The Rust `SecretStore` trait is intentionally abstract so platform storage is im
 - Host privilege boundary mistakes.
 - Sensitive data leakage through logs.
 - Clipboard leakage if clipboard sync is added later.
+- Memory exhaustion from malicious LAN peers that rotate UDP source ports.
+- Host responsiveness loss from synchronous sends blocking the receive path.
 
 ## Current Implementation
 
 Current code includes pairing code generation, salted pairing-code hashing, challenge-response helpers, session-token type, pairing rate limiting, a ChaCha20-Poly1305 session cipher, replay protection, and a secure datagram codec foundation. Android device identity keys use Android Keystore.
+
+The Windows host router also limits pending unapproved sessions, evicts the oldest pending peer when the cap is reached, drops late input packets before native injection, and queues outbound control packets through a bounded nonblocking path.
 
 Windows DPAPI/Credential Manager and macOS Keychain are still required before beta.

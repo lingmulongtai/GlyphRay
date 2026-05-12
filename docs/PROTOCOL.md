@@ -34,6 +34,8 @@ Payloads are currently encoded with `bincode` over Rust schema types in `crates/
 
 The datagram layer is intentionally smaller than the session protocol frame. It is suitable for input/control packets now and will need video frame chunking before large encoded frames are sent over UDP.
 
+The input channel is ordered as real-time state. Receivers should treat older sequence numbers or backward-moving input timestamps as late packets and drop them before OS injection. This avoids visible cursor or pen jitter when UDP packets arrive out of order.
+
 ## Video Fragment Payload
 
 Large encoded frames can be split with the transport-level `GLYF` fragment payload:
