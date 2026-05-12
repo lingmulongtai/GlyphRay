@@ -14,12 +14,25 @@ use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::{ChannelKind, TransportError, TransportPacket};
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::net::{IpAddr, SocketAddr};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MAX_PENDING_SESSIONS: usize = 50;
-const MAX_OUTBOUND_CONTROL_QUEUE: usize = 128;
+const MAX_PENDING_ATTEMPTS_PER_IP: usize = 12;
+const PENDING_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
+const MAX_OUTBOUND_QUEUE_PER_CHANNEL: usize = 128;
 const OUTBOUND_FLUSH_BUDGET: usize = 8;
+const OUTBOUND_QOS_SCHEDULE: [ChannelKind; 8] = [
+    ChannelKind::Input,
+    ChannelKind::Control,
+    ChannelKind::Input,
+    ChannelKind::Audio,
+    ChannelKind::Control,
+    ChannelKind::Video,
+    ChannelKind::Input,
+    ChannelKind::Control,
+];
+const LATE_INPUT_PACKET_REASON: &str = "late input packet";
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
@@ -69,12 +82,62 @@ pub struct SessionSnapshot {
     pub last_input_timestamp_us: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BackendMetrics {
+    pub received_packets: u64,
+    pub queued_outbound_packets: u64,
+    pub sent_outbound_packets: u64,
+    pub backpressure_events: u64,
+    pub pending_rate_limited_packets: u64,
+    pub late_input_dropped_packets: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OutboundQueueSnapshot {
+    pub input: usize,
+    pub control: usize,
+    pub audio: usize,
+    pub video: usize,
+    pub total: usize,
+    pub capacity_per_channel: usize,
+    pub dropped_packets_total: u64,
+    pub high_watermark: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BackendHealthSnapshot {
+    pub sessions_total: usize,
+    pub pending_sessions: usize,
+    pub outbound: OutboundQueueSnapshot,
+    pub metrics: BackendMetrics,
+}
+
 #[derive(Debug, Default)]
 pub struct SessionRegistry {
     sessions: HashMap<SocketAddr, ClientSession>,
+    pending_attempts_by_ip: HashMap<IpAddr, VecDeque<Instant>>,
 }
 
 impl SessionRegistry {
+    pub fn contains_peer(&self, peer: SocketAddr) -> bool {
+        self.sessions.contains_key(&peer)
+    }
+
+    pub fn allow_new_pending_peer(&mut self, peer: SocketAddr, now: Instant) -> bool {
+        let attempts = self.pending_attempts_by_ip.entry(peer.ip()).or_default();
+        while attempts
+            .front()
+            .is_some_and(|attempt| now.duration_since(*attempt) > PENDING_ATTEMPT_WINDOW)
+        {
+            attempts.pop_front();
+        }
+        if attempts.len() >= MAX_PENDING_ATTEMPTS_PER_IP {
+            return false;
+        }
+        attempts.push_back(now);
+        true
+    }
+
     pub fn ensure_pending(&mut self, peer: SocketAddr) -> &mut ClientSession {
         if !self.sessions.contains_key(&peer) {
             self.evict_oldest_pending_if_needed();
@@ -251,6 +314,9 @@ pub enum BackendEvent {
         peer: SocketAddr,
         reason: String,
     },
+    PendingRateLimited {
+        peer: SocketAddr,
+    },
     StylusInjected {
         peer: SocketAddr,
         samples: usize,
@@ -394,8 +460,20 @@ where
         packet: TransportPacket,
     ) -> Result<RouteOutcome, BackendError> {
         let mut outcome = RouteOutcome::default();
+        let now = Instant::now();
+        if !self.sessions.contains_peer(peer) && !self.sessions.allow_new_pending_peer(peer, now) {
+            outcome
+                .events
+                .push(BackendEvent::PendingRateLimited { peer });
+            outcome.events.push(BackendEvent::PacketIgnored {
+                peer,
+                reason: "pending peer rate limited".to_string(),
+            });
+            return Ok(outcome);
+        }
+
         let session = self.sessions.ensure_pending(peer);
-        session.last_seen = Instant::now();
+        session.last_seen = now;
         session.packets_received += 1;
         if session.packets_received == 1 {
             outcome
@@ -659,7 +737,8 @@ pub struct HostBackendRuntime<I> {
     config: HostConfig,
     advertisement: HostAdvertisement,
     router: HostPacketRouter<I>,
-    outbound_control: VecDeque<(SocketAddr, TransportPacket)>,
+    outbound: OutboundPacketQueues,
+    metrics: BackendMetrics,
 }
 
 impl<I> HostBackendRuntime<I>
@@ -707,7 +786,8 @@ where
                 mouse_bridge,
                 permission_policy,
             ),
-            outbound_control: VecDeque::with_capacity(MAX_OUTBOUND_CONTROL_QUEUE),
+            outbound: OutboundPacketQueues::default(),
+            metrics: BackendMetrics::default(),
         }
     }
 
@@ -769,6 +849,7 @@ where
         let Some((packet, peer)) = server.poll_recv_from()? else {
             return Ok(events);
         };
+        self.metrics.received_packets += 1;
 
         let mut outcome = self.router.route_packet(peer, packet)?;
         if should_send_display_info(&outcome.events) {
@@ -784,11 +865,13 @@ where
         let outbound_count = outcome.outbound.len();
         if outbound_count > 0 {
             self.enqueue_outbound(outcome.outbound);
+            self.metrics.queued_outbound_packets += outbound_count as u64;
             outcome.events.push(BackendEvent::OutboundQueued {
                 peer,
                 packets: outbound_count,
             });
         }
+        self.record_route_events(&outcome.events);
         events.extend(outcome.events);
         events.extend(self.flush_outbound_control(server)?);
         Ok(events)
@@ -806,12 +889,34 @@ where
         &self.config
     }
 
+    pub fn health_snapshot(&self) -> BackendHealthSnapshot {
+        BackendHealthSnapshot {
+            sessions_total: self.router.sessions.len(),
+            pending_sessions: self.router.sessions.pending_count(),
+            outbound: self.outbound.snapshot(),
+            metrics: self.metrics,
+        }
+    }
+
     fn enqueue_outbound(&mut self, packets: Vec<(SocketAddr, TransportPacket)>) {
         for packet in packets {
-            if self.outbound_control.len() == MAX_OUTBOUND_CONTROL_QUEUE {
-                self.outbound_control.pop_front();
+            self.outbound.push(packet);
+        }
+    }
+
+    fn record_route_events(&mut self, events: &[BackendEvent]) {
+        for event in events {
+            match event {
+                BackendEvent::PendingRateLimited { .. } => {
+                    self.metrics.pending_rate_limited_packets += 1;
+                }
+                BackendEvent::PacketIgnored { reason, .. }
+                    if reason == LATE_INPUT_PACKET_REASON =>
+                {
+                    self.metrics.late_input_dropped_packets += 1;
+                }
+                _ => {}
             }
-            self.outbound_control.push_back(packet);
         }
     }
 
@@ -821,20 +926,109 @@ where
     ) -> Result<Vec<BackendEvent>, BackendError> {
         let mut events = Vec::new();
         for _ in 0..OUTBOUND_FLUSH_BUDGET {
-            let Some((peer, packet)) = self.outbound_control.pop_front() else {
+            let Some((peer, packet)) = self.outbound.pop_next() else {
                 break;
             };
             if server.try_send_to(&packet, peer)? {
+                self.metrics.sent_outbound_packets += 1;
                 continue;
             }
-            self.outbound_control.push_front((peer, packet));
+            self.outbound.push_front((peer, packet));
+            self.metrics.backpressure_events += 1;
             events.push(BackendEvent::OutboundBackpressure {
                 peer,
-                queued_packets: self.outbound_control.len(),
+                queued_packets: self.outbound.len(),
             });
             break;
         }
         Ok(events)
+    }
+}
+
+#[derive(Debug, Default)]
+struct OutboundPacketQueues {
+    input: VecDeque<(SocketAddr, TransportPacket)>,
+    control: VecDeque<(SocketAddr, TransportPacket)>,
+    audio: VecDeque<(SocketAddr, TransportPacket)>,
+    video: VecDeque<(SocketAddr, TransportPacket)>,
+    qos_cursor: usize,
+    dropped_packets_total: u64,
+    high_watermark: usize,
+}
+
+impl OutboundPacketQueues {
+    fn push(&mut self, packet: (SocketAddr, TransportPacket)) {
+        let dropped = {
+            let queue = self.queue_mut(packet.1.channel);
+            let dropped = queue.len() == MAX_OUTBOUND_QUEUE_PER_CHANNEL;
+            if dropped {
+                queue.pop_front();
+            }
+            queue.push_back(packet);
+            dropped
+        };
+        if dropped {
+            self.dropped_packets_total += 1;
+        }
+        self.update_high_watermark();
+    }
+
+    fn push_front(&mut self, packet: (SocketAddr, TransportPacket)) {
+        let dropped = {
+            let queue = self.queue_mut(packet.1.channel);
+            let dropped = queue.len() == MAX_OUTBOUND_QUEUE_PER_CHANNEL;
+            if dropped {
+                queue.pop_back();
+            }
+            queue.push_front(packet);
+            dropped
+        };
+        if dropped {
+            self.dropped_packets_total += 1;
+        }
+        self.update_high_watermark();
+    }
+
+    fn pop_next(&mut self) -> Option<(SocketAddr, TransportPacket)> {
+        for offset in 0..OUTBOUND_QOS_SCHEDULE.len() {
+            let index = (self.qos_cursor + offset) % OUTBOUND_QOS_SCHEDULE.len();
+            let channel = OUTBOUND_QOS_SCHEDULE[index];
+            if let Some(packet) = self.queue_mut(channel).pop_front() {
+                self.qos_cursor = (index + 1) % OUTBOUND_QOS_SCHEDULE.len();
+                return Some(packet);
+            }
+        }
+        None
+    }
+
+    fn len(&self) -> usize {
+        self.input.len() + self.control.len() + self.audio.len() + self.video.len()
+    }
+
+    fn snapshot(&self) -> OutboundQueueSnapshot {
+        OutboundQueueSnapshot {
+            input: self.input.len(),
+            control: self.control.len(),
+            audio: self.audio.len(),
+            video: self.video.len(),
+            total: self.len(),
+            capacity_per_channel: MAX_OUTBOUND_QUEUE_PER_CHANNEL,
+            dropped_packets_total: self.dropped_packets_total,
+            high_watermark: self.high_watermark,
+        }
+    }
+
+    fn update_high_watermark(&mut self) {
+        self.high_watermark = self.high_watermark.max(self.len());
+    }
+
+    fn queue_mut(&mut self, channel: ChannelKind) -> &mut VecDeque<(SocketAddr, TransportPacket)> {
+        match channel {
+            ChannelKind::Input => &mut self.input,
+            ChannelKind::Control => &mut self.control,
+            ChannelKind::Audio => &mut self.audio,
+            ChannelKind::Video => &mut self.video,
+        }
     }
 }
 
@@ -862,7 +1056,7 @@ fn trusted_device_id(peer: SocketAddr) -> String {
 fn late_packet_event(peer: SocketAddr) -> BackendEvent {
     BackendEvent::PacketIgnored {
         peer,
-        reason: "late input packet".to_string(),
+        reason: LATE_INPUT_PACKET_REASON.to_string(),
     }
 }
 
@@ -1018,10 +1212,10 @@ mod tests {
     #[test]
     fn pending_sessions_are_capped_by_evicting_oldest_pending_peer() {
         let mut router = HostPacketRouter::<RecordingInjector>::new(None);
-        let first_peer: SocketAddr = "127.0.0.1:51000".parse().expect("peer");
+        let first_peer: SocketAddr = "10.0.0.1:51000".parse().expect("peer");
 
-        for port in 51000..51051 {
-            let peer: SocketAddr = format!("127.0.0.1:{port}").parse().expect("peer");
+        for host in 1..52 {
+            let peer: SocketAddr = format!("10.0.0.{host}:51000").parse().expect("peer");
             router
                 .route_packet(peer, input_packet(vec![1, 2, 3]))
                 .expect("route");
@@ -1032,6 +1226,31 @@ mod tests {
             .session_snapshots()
             .iter()
             .any(|session| session.peer == first_peer));
+    }
+
+    #[test]
+    fn pending_attempts_are_rate_limited_per_ip() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+
+        for port in 52000..52012 {
+            let peer: SocketAddr = format!("127.0.0.1:{port}").parse().expect("peer");
+            let outcome = router
+                .route_packet(peer, input_packet(vec![1, 2, 3]))
+                .expect("route");
+            assert!(outcome
+                .events
+                .contains(&BackendEvent::PermissionRequired { peer }));
+        }
+
+        let limited_peer: SocketAddr = "127.0.0.1:52012".parse().expect("peer");
+        let outcome = router
+            .route_packet(limited_peer, input_packet(vec![1, 2, 3]))
+            .expect("route");
+
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::PendingRateLimited { peer: limited_peer }));
+        assert_eq!(router.sessions.pending_count(), MAX_PENDING_ATTEMPTS_PER_IP);
     }
 
     #[test]
@@ -1415,6 +1634,79 @@ mod tests {
         assert_eq!(first, host_id_from_name("GlyphRay Host A"));
     }
 
+    #[test]
+    fn outbound_qos_prefers_control_over_video_backlog() {
+        let peer: SocketAddr = "127.0.0.1:53000".parse().expect("peer");
+        let mut queue = OutboundPacketQueues::default();
+
+        for sequence in 1..5 {
+            queue.push((peer, packet_with_channel(sequence, ChannelKind::Video)));
+        }
+        queue.push((peer, packet_with_channel(99, ChannelKind::Control)));
+
+        let (_, first) = queue.pop_next().expect("first packet");
+        assert_eq!(first.channel, ChannelKind::Control);
+        assert_eq!(first.sequence, 99);
+    }
+
+    #[test]
+    fn outbound_queue_snapshot_tracks_lengths_and_drops() {
+        let peer: SocketAddr = "127.0.0.1:53001".parse().expect("peer");
+        let mut queue = OutboundPacketQueues::default();
+
+        for sequence in 0..(MAX_OUTBOUND_QUEUE_PER_CHANNEL as u64 + 2) {
+            queue.push((peer, packet_with_channel(sequence, ChannelKind::Video)));
+        }
+
+        let snapshot = queue.snapshot();
+        assert_eq!(snapshot.video, MAX_OUTBOUND_QUEUE_PER_CHANNEL);
+        assert_eq!(snapshot.total, MAX_OUTBOUND_QUEUE_PER_CHANNEL);
+        assert_eq!(
+            snapshot.capacity_per_channel,
+            MAX_OUTBOUND_QUEUE_PER_CHANNEL
+        );
+        assert_eq!(snapshot.dropped_packets_total, 2);
+        assert_eq!(snapshot.high_watermark, MAX_OUTBOUND_QUEUE_PER_CHANNEL);
+    }
+
+    #[test]
+    fn runtime_health_snapshot_reports_pending_sessions_and_queue_state() {
+        let mut runtime = HostBackendRuntime::<RecordingInjector>::new(HostConfig::default(), None);
+        let peer: SocketAddr = "127.0.0.1:53002".parse().expect("peer");
+
+        runtime
+            .router
+            .route_packet(peer, input_packet(vec![1, 2, 3]))
+            .expect("route");
+        runtime
+            .outbound
+            .push((peer, packet_with_channel(1, ChannelKind::Control)));
+
+        let snapshot = runtime.health_snapshot();
+        assert_eq!(snapshot.sessions_total, 1);
+        assert_eq!(snapshot.pending_sessions, 1);
+        assert_eq!(snapshot.outbound.control, 1);
+        assert_eq!(snapshot.outbound.total, 1);
+    }
+
+    #[test]
+    fn runtime_metrics_count_hardening_events() {
+        let mut runtime = HostBackendRuntime::<RecordingInjector>::new(HostConfig::default(), None);
+        let peer: SocketAddr = "127.0.0.1:53003".parse().expect("peer");
+
+        runtime.record_route_events(&[
+            BackendEvent::PendingRateLimited { peer },
+            BackendEvent::PacketIgnored {
+                peer,
+                reason: LATE_INPUT_PACKET_REASON.to_string(),
+            },
+        ]);
+
+        let snapshot = runtime.health_snapshot();
+        assert_eq!(snapshot.metrics.pending_rate_limited_packets, 1);
+        assert_eq!(snapshot.metrics.late_input_dropped_packets, 1);
+    }
+
     fn input_packet(payload: Vec<u8>) -> TransportPacket {
         TransportPacket {
             sequence: 1,
@@ -1422,6 +1714,16 @@ mod tests {
             message_kind: MessageKind::StylusInputBatch,
             enqueue_timestamp_us: 0,
             payload,
+        }
+    }
+
+    fn packet_with_channel(sequence: u64, channel: ChannelKind) -> TransportPacket {
+        TransportPacket {
+            sequence,
+            channel,
+            message_kind: MessageKind::LatencyPing,
+            enqueue_timestamp_us: 0,
+            payload: vec![sequence as u8],
         }
     }
 

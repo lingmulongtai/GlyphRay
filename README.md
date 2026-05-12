@@ -8,14 +8,14 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 77%**
+**Overall progress estimate: 79%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 77
-  "Remaining product work" : 23
+  "Implemented foundation" : 79
+  "Remaining product work" : 21
 ```
 
 | Area | Status | Progress |
@@ -23,14 +23,14 @@ pie title Overall Completion
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 78% |
-| Milestone 4 hardening and packaging | In progress | 54% |
+| Milestone 4 hardening and packaging | In progress | 61% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 36% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
 M3 Stylus -> Windows Ink      [################----]  78%
-M4 Security + Packaging       [###########---------]  54%
+M4 Security + Packaging       [############--------]  61%
 M5 macOS + Audio + Relay      [#######-------------]  36%
 ```
 
@@ -61,11 +61,11 @@ flowchart TB
 | Path | Purpose | Current State |
 | --- | --- | --- |
 | `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
-| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, health/status metrics, pending-peer hardening, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, VideoToolbox encoder foundation |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
-| `crates/transport` | Real-time packet layer | UDP `GLYT`, LAN discovery `GLYD`, video fragmentation, secure datagram wrapper, reconnect, bitrate logic |
+| `crates/transport` | Real-time packet layer | UDP `GLYT`, LAN discovery `GLYD`, video fragmentation, reusable UDP buffers, secure datagram wrapper, reconnect, bitrate/keyframe adaptation logic |
 | `crates/security` | Pairing/session primitives | Pairing codes, HMAC challenge response, session cipher, replay guard, secret-store traits |
 | `crates/telemetry` | Local diagnostics | Latency breakdowns and rolling metrics |
 | `crates/audio` | Audio foundation | Audio packetization primitives |
@@ -144,11 +144,12 @@ sequenceDiagram
 - Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on background workers.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
+- Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, and console-visible queue/backpressure health metrics.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
-- ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, and adaptive bitrate foundations.
+- ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, adaptive bitrate decisions, and packet-loss keyframe recovery signaling foundations.
 - macOS SwiftUI shell with ScreenCaptureKit, VideoToolbox, CGEvent, and audio permission foundations.
 - GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
 - GitHub Pages static download site with setup command generator and original hero artwork.
@@ -198,7 +199,7 @@ Install Android Studio or Android SDK command-line tools, then run:
 
 The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a remote-session stylus UDP bridge, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
 
-Use JDK 17 for Gradle/Android work. Newer local JDKs can trip Android Gradle Plugin unit-test task creation even when assemble succeeds.
+JDK 17 remains the safest baseline for Gradle/Android work. The wrapper is pinned to Gradle 8.14.3 so Java 24 local test runs are also supported, though the JVM may print native-access warnings.
 
 ```powershell
 .\gradlew.bat :apps:android-client:testDebugUnitTest
@@ -247,6 +248,7 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 ## Current Limits
 
 - Rust tests and Android debug builds have been exercised on Windows. Android unit tests should be run with JDK 17.
+- The host router now has in-memory DoS guards and console-visible health counters for pending peer spam and outbound backpressure, but production pairing still needs persistent trust storage and UI-driven approvals.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
 - A concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.

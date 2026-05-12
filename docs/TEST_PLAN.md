@@ -18,7 +18,10 @@ Rust tests cover:
 - LAN discovery advertisement encode/decode.
 - Backend session permission gate and pairing request routing.
 - Backend pending-session cap and oldest-pending eviction.
+- Backend per-IP pending attempt rate limiting.
 - Backend late input packet drop before injection.
+- Backend outbound QoS queue priority for control over video backlog.
+- Backend outbound queue snapshot lengths, drop counters, and high watermark.
 - Backend stable CRC-based host id generation.
 - Backend stylus packet routing into the input bridge.
 - Transport packet-loss simulation.
@@ -69,6 +72,8 @@ cargo test --workspace
 - Confirm GDI fallback captures the selected monitor before replacing it with Windows Graphics Capture or Desktop Duplication.
 - Confirm a pending Android peer cannot inject input until approved.
 - Confirm spoofed/random source ports cannot grow pending sessions beyond the configured cap.
+- Confirm one source IP rotating ports is rate-limited before it can evict all other pending peers.
+- Run `status` in the host console and confirm pending sessions, outbound queue depth, drops, and backpressure counters are visible.
 - Confirm delayed lower-sequence stylus/touch/mouse/keyboard packets are dropped instead of injected.
 - With `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1`, confirm an approved Android Bluetooth keyboard can inject a safe key sequence.
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
@@ -87,4 +92,4 @@ cargo test --workspace
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
 - Transport reconnect under packet loss.
-- Outbound control queue backpressure behavior with a saturated UDP send buffer.
+- Outbound QoS queue backpressure behavior with a saturated UDP send buffer.

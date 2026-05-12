@@ -5,6 +5,9 @@ const commands = {
       body: [
         "$env:GLYPHRAY_DEV_AUTO_APPROVE='1'",
         "$env:GLYPHRAY_ENABLE_PEN_INJECTION='1'",
+        "$env:GLYPHRAY_ENABLE_TOUCH_INJECTION='1'",
+        "$env:GLYPHRAY_ENABLE_MOUSE_INJECTION='1'",
+        "$env:GLYPHRAY_ENABLE_KEYBOARD_INJECTION='1'",
         "cargo run -p glyphray-windows-host -- serve",
       ].join("\n"),
     },

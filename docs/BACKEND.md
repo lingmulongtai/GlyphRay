@@ -15,8 +15,10 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Gamepad packet decode for Android-connected controllers.
 - Permission gating before input packets are accepted.
 - Pending-session cap of 50 unapproved peers, with oldest pending peer eviction to limit UDP spam memory growth.
+- Per-IP new pending attempt rate limiting to prevent one host from starving other pending peers by rotating source ports.
 - Late input packet dropping based on per-session transport sequence and input timestamp watermarks.
-- Bounded nonblocking outbound control queue for pairing, display-info, and latency responses.
+- Bounded nonblocking outbound queues split by channel, with a small QoS schedule that favors input/control over audio/video.
+- Backend health snapshots and a console `status` command for session counts, queue depth, drops, late input drops, pending rate limits, and backpressure events.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
 - Latency ping/pong routing.
@@ -42,6 +44,7 @@ Without development auto-approval, the console loop prints incoming pairing requ
 
 ```powershell
 sessions
+status
 approve 192.168.1.20:44999
 reject 192.168.1.20:44999
 ```
@@ -50,7 +53,11 @@ Approval and rejection both send a protocol-level `PairingResult` back to the An
 
 The backend drops out-of-order input packets after approval if the incoming transport sequence is not newer than the last accepted input packet, or if the input timestamp moves backward. This intentionally prefers a stable current pen/cursor position over replaying late UDP arrivals.
 
-Control responses are queued into a bounded in-memory queue and flushed with nonblocking UDP sends. If the OS send buffer is temporarily full, the receive path keeps ownership of the packet and retries on a later poll instead of blocking the whole control loop. A dedicated send worker or event loop is still planned before beta.
+Control responses are queued into bounded in-memory queues and flushed with nonblocking UDP sends. The queues are split by `ChannelKind`, and the current QoS schedule favors input and control packets over audio/video so future media backlog cannot delay pairing, latency, or input-critical control traffic. If the OS send buffer is temporarily full, the receive path keeps ownership of the packet and retries on a later poll instead of blocking the whole control loop. A dedicated send worker or event loop is still planned before beta.
+
+Pending eviction currently scans pending sessions to find the oldest entry. This is intentionally simple because the host cap is 50. If the same logic is reused for relay-scale workloads, replace it with an indexed queue, timer heap, or equivalent O(log N)/O(1) structure.
+
+`status` prints a compact local health snapshot. The most useful early fields are outbound channel depths, queue high watermark, dropped outbound packets, late input drops, and pending rate-limited packets. This is intentionally local-only console output; it does not send telemetry to external services.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
@@ -69,6 +76,7 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 
 - The backend loop is still console-driven.
 - The outbound control queue is a short-term nonblocking guard, not a full transport scheduler.
+- Per-IP rate limits are in-memory only and are visible through console `status`; they still need richer diagnostics UI before beta.
 - Peer approval is console-driven and still needs a native host UI prompt.
 - DisplayInfo uses current monitor enumeration and should later feed selected-monitor mapping and calibration.
 - Client encoder config is stored on the session but is not yet wired into the live capture/encode loop.

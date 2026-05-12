@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 77%.
+Current overall progress estimate: 79%.
 
 ## Milestone 1
 
@@ -83,7 +83,9 @@ Current overall progress estimate: 77%.
 - [x] Add Windows platform secret-store boundary.
 - [x] Add reconnect and adaptive bitrate controllers.
 - [x] Add pending-session cap and late input packet dropping in the host router.
-- [x] Add bounded nonblocking control-packet send queue for the host polling loop.
+- [x] Add per-IP pending attempt rate limiting for UDP source-port churn.
+- [x] Add bounded nonblocking QoS send queues for the host polling loop.
+- [x] Expose backend health snapshots and console status output for queue/backpressure/late-drop counters.
 - [x] Replace ad hoc host discovery ID hashing with CRC-based stable hashing.
 - [x] Add host diagnostics CLI.
 - [x] Add console backend runtime entry point.
@@ -93,6 +95,7 @@ Current overall progress estimate: 77%.
 - [x] Add Windows WiX MSI build script and macOS pkgbuild script.
 - [ ] Add Windows startup-at-login and service/agent architecture plan.
 - [ ] Move control/video packet transmission onto a dedicated send worker or mio/tokio event loop with explicit backpressure metrics.
+- [ ] Replace O(N) pending-session eviction with heap/indexed eviction if reused for relay-scale workloads.
 - [ ] Validate and document lock-screen/pre-login limitations for capture and input.
 - [x] Add GitHub Pages deployment workflow for the download site.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.

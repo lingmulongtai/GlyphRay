@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Backend Health Visibility
+
+今日は、入れてもらった backend hardening を確認し、その上に「見える化」を足した。pending session cap、IPごとの pending attempt rate limit、late input drop、channel-aware QoS outbound queue は良い方向にまとまっていたので、そこを壊さずに `BackendHealthSnapshot` と console の `status` command を追加した。
+
+`status` では session 数、pending 数、input/control/audio/video 別 queue depth、queue high watermark、outbound drop、late input drop、pending rate limit、backpressure event を見られる。まだ専用 send worker / event loop ではないが、LAN smoke test 中に「詰まっているのか、落としているのか、rate limit が効いているのか」をホスト側で確認できるようになった。
+
+検証として Rust workspace tests を通した。Android 側のコードは今回は触っていないが、後続で Android debug build も再確認する。
+
+この時点の進捗見積もり: 79%。
+
 ## 2026-05-12 JST - Host Router Hardening
 
 今日は host backend の守りと低遅延性を補強した。未知 peer からの packet を無制限に `SessionRegistry` へ積むと、送信元 port を変えた spam で pending session が増え続けるため、pending session を最大 50 件に制限し、超過時は最古の pending peer を破棄するようにした。approved/rejected session は保持し、未承認の掃除だけに絞っている。
@@ -8,7 +18,11 @@ UDP の順序逆転対策として、approved session ごとに最新 input sequ
 
 control response 送信は `poll_control` の hot loop から bounded queue に逃がし、`try_send_to` で nonblocking flush する短期対策を入れた。専用 send worker や mio/tokio event loop はまだ次段階だが、受信 loop が送信詰まりで長く止まるリスクは下げた。あわせて discovery host id は独自 hash から `crc32fast` ベースの stable id に置き換えた。
 
+追加で、単一IPが送信元portを変え続けて正規pending peerを追い出す starvation を抑えるため、IPごとの新規pending attempt rate limit を入れた。outbound queue も単一 `VecDeque` から channel 別 queue + QoS schedule に変え、control/input が video backlog に埋もれない形へ寄せた。pending eviction は今は上限50なので O(N) scan のままで十分だが、Relay server など大規模用途へ転用する場合は heap / indexed map へ移す。
+
 検証として Rust workspace tests と Android unit tests を通した。Gradle wrapper は Java 24 対応のため 8.14.3 に更新済み。
+
+この時点の進捗見積もり: 78%。
 
 ## 2026-05-12 JST - Touch, Mouse, Gamepad, Tailscale, Packaging
 

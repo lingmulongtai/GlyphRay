@@ -110,8 +110,11 @@ Backend notes live in `docs/BACKEND.md`.
 Runtime resilience rules:
 
 - Unknown UDP peers may create pending sessions only up to a bounded cap; oldest pending peers are evicted before memory can grow without limit.
+- New pending peers are rate limited per source IP so one address cannot starve other pending devices by rotating ports.
 - Approved input packets are accepted only if their transport sequence and input timestamp are newer than the session watermark.
-- Control responses use a bounded nonblocking send queue so packet receive/poll work is not coupled to temporary socket send pressure.
+- Outbound packets use channel-specific bounded queues and a QoS schedule that prioritizes input/control over audio/video.
+- Sends are flushed nonblocking so packet receive/poll work is not coupled to temporary socket send pressure.
+- Backend health snapshots expose session counts, queue depths, drops, late input drops, rate limits, and backpressure counters to the local host console.
 - Host discovery IDs use a stable CRC-based hash rather than ad hoc byte folding.
 
 ## Audio And Relay

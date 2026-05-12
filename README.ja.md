@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 77%**
+**全体進捗見積もり: 79%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 77
-  "残りの製品化作業" : 23
+  "実装済みの基盤" : 79
+  "残りの製品化作業" : 21
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -23,14 +23,14 @@ pie title 全体進捗
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 87% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 78% |
-| Milestone 4 security hardening / packaging | 進行中 | 54% |
+| Milestone 4 security hardening / packaging | 進行中 | 61% |
 | Milestone 5 macOS / audio / relay | 進行中 | 36% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [#################---]  87%
 M3 Stylus -> Windows Ink     [################----]  78%
-M4 Security + Packaging      [###########---------]  54%
+M4 Security + Packaging      [############--------]  61%
 M5 macOS + Audio + Relay     [#######-------------]  36%
 ```
 
@@ -61,11 +61,11 @@ flowchart TB
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
 | `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
-| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、health/status metrics、pending peer hardening、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、VideoToolbox encoder foundation |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
-| `crates/transport` | realtime packet layer | UDP `GLYT`、LAN discovery `GLYD`、video fragmentation、secure datagram、reconnect、bitrate logic |
+| `crates/transport` | realtime packet layer | UDP `GLYT`、LAN discovery `GLYD`、video fragmentation、reusable UDP buffers、secure datagram、reconnect、bitrate / keyframe adaptation logic |
 | `crates/security` | pairing / session security | pairing code、HMAC challenge response、session cipher、replay guard、secret-store trait |
 | `crates/telemetry` | local diagnostics | latency breakdown、rolling metrics |
 | `crates/audio` | audio 基盤 | audio packetization primitives |
@@ -144,11 +144,12 @@ sequenceDiagram
 - remote session の描画面から stylus、native touch、Bluetooth mouse、keyboard、gamepad input を拾い、background worker で UDP 送信する Android bridge。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
+- Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、console-visible queue/backpressure health metrics。
 - LAN stylus path の smoke test 用 development auto-approval mode。
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
 - Windows monitor enumeration、GDI capture fallback、encoder abstraction、streaming pipeline の形。
-- ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate 基盤。
+- ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate decision、packet loss 時の keyframe recovery signaling 基盤。
 - macOS SwiftUI shell、ScreenCaptureKit、VideoToolbox、CGEvent、audio permission の基盤。
 - Rust tests、Android unit tests、Android debug build 用 GitHub Actions CI。
 - GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。
@@ -198,7 +199,7 @@ Android Studio または Android SDK command-line tools を入れて実行しま
 
 現在の Android app には、LAN host discovery、stylus diagnostics、session UI、latency overlay、remote-session stylus UDP bridge、H.264 frame 受信用の MediaCodec-backed decoder surface が入っています。
 
-Gradle / Android 作業は JDK 17 を使ってください。ローカル JDK が新しすぎると、assemble は通っても Android Gradle Plugin の unit test task 生成で落ちることがあります。
+Gradle / Android 作業は JDK 17 が一番安全な基準です。wrapper は Gradle 8.14.3 に固定しているため Java 24 のローカル test も通りますが、JVM の native-access warning が出る場合があります。
 
 ```powershell
 .\gradlew.bat :apps:android-client:testDebugUnitTest
@@ -247,6 +248,7 @@ Start-Process .\website\index.html
 ## 現在の制限
 
 - Rust tests と Android debug build は Windows 上で確認済みです。Android unit tests は JDK 17 で実行してください。
+- host router には pending peer spam と outbound backpressure 向けの in-memory DoS guard / console-visible health counters が入りましたが、本番 pairing には persistent trust storage と UI-driven approval がまだ必要です。
 - Windows capture は現在 GDI fallback を含みます。本番向けには Windows Graphics Capture または Desktop Duplication へ移行する必要があります。
 - H.264 hardware/software encoder backend は、まだ placeholder abstraction から実装へ進める必要があります。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。

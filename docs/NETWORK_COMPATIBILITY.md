@@ -31,4 +31,6 @@ WireGuard-style overlays should behave similarly if UDP is allowed. Broadcast di
 
 GlyphRay treats input as real-time state, not reliable history. The host router records the latest accepted input sequence and timestamp for each approved session. Older stylus, touch, mouse, keyboard, or gamepad packets are dropped before injection so packet reordering does not move the pen or pointer backward.
 
-Control responses are queued and flushed with nonblocking UDP sends. This is a short-term guard for pairing/display/latency messages; a dedicated send worker or event loop with backpressure metrics is still planned for sustained video and relay traffic.
+Outbound packets are queued by channel and flushed with a small QoS schedule. Input and control get more send opportunities than audio/video so a future video backlog does not delay latency, pairing, or input-critical control messages. The host console `status` command exposes queue depth, drops, and backpressure counters. This is still a short-term guard; a dedicated send worker or event loop is planned for sustained video and relay traffic.
+
+New pending peers are also rate limited per source IP. This reduces starvation when one bad client rotates UDP source ports and would otherwise evict legitimate pending sessions.

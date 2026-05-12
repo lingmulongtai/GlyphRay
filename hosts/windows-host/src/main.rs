@@ -63,7 +63,7 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     let mut last_announce = Instant::now() - Duration::from_secs(2);
 
     println!("GlyphRay backend listening on {}", server.local_addr()?);
-    println!("Type `sessions`, `approve <peer>`, `reject <peer>`, or `help`.");
+    println!("Type `status`, `sessions`, `approve <peer>`, `reject <peer>`, or `help`.");
     loop {
         if last_announce.elapsed() >= Duration::from_secs(1) {
             discovery.announce(runtime.advertisement())?;
@@ -178,6 +178,7 @@ fn create_runtime_input_bridge(
 enum HostCommand {
     Approve(SocketAddr),
     Reject(SocketAddr),
+    Status,
     Sessions,
     Help,
 }
@@ -214,6 +215,7 @@ fn parse_host_command(line: &str) -> Option<HostCommand> {
             .next()
             .and_then(|peer| peer.parse().ok())
             .map(HostCommand::Reject),
+        "status" => Some(HostCommand::Status),
         "sessions" => Some(HostCommand::Sessions),
         "help" => Some(HostCommand::Help),
         _ => None,
@@ -237,6 +239,9 @@ fn drain_console_commands(
                     peer,
                     "Rejected by host operator",
                 )?);
+            }
+            HostCommand::Status => {
+                print_backend_status(runtime.health_snapshot());
             }
             HostCommand::Sessions => {
                 let sessions = runtime.session_snapshots();
@@ -269,6 +274,7 @@ fn drain_console_commands(
             }
             HostCommand::Help => {
                 println!("Commands:");
+                println!("  status");
                 println!("  sessions");
                 println!("  approve <ip:port>");
                 println!("  reject <ip:port>");
@@ -276,6 +282,33 @@ fn drain_console_commands(
         }
     }
     Ok(events)
+}
+
+fn print_backend_status(snapshot: glyphray_windows_host::backend::BackendHealthSnapshot) {
+    println!(
+        "status sessions={} pending={} outbound_total={} input={} control={} audio={} video={}",
+        snapshot.sessions_total,
+        snapshot.pending_sessions,
+        snapshot.outbound.total,
+        snapshot.outbound.input,
+        snapshot.outbound.control,
+        snapshot.outbound.audio,
+        snapshot.outbound.video,
+    );
+    println!(
+        "status metrics received={} queued={} sent={} backpressure={} dropped_outbound={} late_input_drops={} pending_rate_limited={}",
+        snapshot.metrics.received_packets,
+        snapshot.metrics.queued_outbound_packets,
+        snapshot.metrics.sent_outbound_packets,
+        snapshot.metrics.backpressure_events,
+        snapshot.outbound.dropped_packets_total,
+        snapshot.metrics.late_input_dropped_packets,
+        snapshot.metrics.pending_rate_limited_packets,
+    );
+    println!(
+        "status queue_high_watermark={} capacity_per_channel={}",
+        snapshot.outbound.high_watermark, snapshot.outbound.capacity_per_channel,
+    );
 }
 
 fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
