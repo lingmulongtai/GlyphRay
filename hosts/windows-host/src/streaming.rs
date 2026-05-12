@@ -1,5 +1,5 @@
 use crate::capture::{CaptureError, ScreenCapture};
-use crate::encoder::{EncoderError, VideoEncoder};
+use crate::encoder::{EncodedVideoFrame, EncoderError, VideoEncoder};
 use glyphray_transport::video::{EncodedVideoAccessUnit, VideoPacketizer};
 use glyphray_transport::{RealtimeTransport, TransportError, TransportPacket};
 
@@ -19,6 +19,39 @@ pub struct VideoStreamPipeline<C, E, T> {
     transport: T,
     packetizer: VideoPacketizer,
     display_id: u32,
+}
+
+pub struct VideoPacketPipeline<C, E> {
+    capture: C,
+    encoder: E,
+    packetizer: VideoPacketizer,
+    display_id: u32,
+}
+
+impl<C, E> VideoPacketPipeline<C, E>
+where
+    C: ScreenCapture,
+    E: VideoEncoder,
+{
+    pub fn new(capture: C, encoder: E, packetizer: VideoPacketizer, display_id: u32) -> Self {
+        Self {
+            capture,
+            encoder,
+            packetizer,
+            display_id,
+        }
+    }
+
+    pub fn start(&mut self) -> Result<(), StreamError> {
+        self.encoder.start()?;
+        Ok(())
+    }
+
+    pub fn capture_encode_packetize(&mut self) -> Result<Vec<TransportPacket>, StreamError> {
+        let frame = self.capture.capture_frame(self.display_id)?;
+        let encoded = self.encoder.encode(&frame)?;
+        packetize_encoded_frame(&self.packetizer, encoded)
+    }
 }
 
 impl<C, E, T> VideoStreamPipeline<C, E, T>
@@ -51,15 +84,7 @@ where
     pub fn capture_encode_packetize(&mut self) -> Result<Vec<TransportPacket>, StreamError> {
         let frame = self.capture.capture_frame(self.display_id)?;
         let encoded = self.encoder.encode(&frame)?;
-        let access_unit = EncodedVideoAccessUnit {
-            sequence: encoded.sequence,
-            codec: encoded.codec,
-            presentation_time_us: encoded.capture_timestamp_us,
-            is_keyframe: encoded.is_keyframe,
-            payload: encoded.payload,
-        };
-
-        Ok(self.packetizer.packetize(&access_unit)?)
+        packetize_encoded_frame(&self.packetizer, encoded)
     }
 
     pub fn send_one_frame(&mut self) -> Result<usize, StreamError> {
@@ -70,4 +95,19 @@ where
         }
         Ok(packet_count)
     }
+}
+
+fn packetize_encoded_frame(
+    packetizer: &VideoPacketizer,
+    encoded: EncodedVideoFrame,
+) -> Result<Vec<TransportPacket>, StreamError> {
+    let access_unit = EncodedVideoAccessUnit {
+        sequence: encoded.sequence,
+        codec: encoded.codec,
+        presentation_time_us: encoded.capture_timestamp_us,
+        is_keyframe: encoded.is_keyframe,
+        payload: encoded.payload,
+    };
+
+    Ok(packetizer.packetize(&access_unit)?)
 }

@@ -8,29 +8,29 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 80%**
+**全体進捗見積もり: 82%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 80
-  "残りの製品化作業" : 20
+  "実装済みの基盤" : 82
+  "残りの製品化作業" : 18
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
-| Milestone 2 映像・transport 基盤 | 進行中 | 87% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 78% |
-| Milestone 4 security hardening / packaging | 進行中 | 63% |
+| Milestone 2 映像・transport 基盤 | 進行中 | 90% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 82% |
+| Milestone 4 security hardening / packaging | 進行中 | 64% |
 | Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
-M2 映像 + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink     [################----]  78%
-M4 Security + Packaging      [#############-------]  63%
+M2 映像 + Transport          [##################--]  90%
+M3 Stylus -> Windows Ink     [################----]  82%
+M4 Security + Packaging      [#############-------]  64%
 M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
@@ -61,7 +61,7 @@ flowchart TB
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
 | `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
-| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、health/status metrics、pending peer hardening、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、approved-peer video fragment queueing、health/status metrics、pending peer hardening、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、permission readiness UI、Keychain smoke test、VideoToolbox encoder smoke test |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
@@ -141,10 +141,12 @@ sequenceDiagram
 - pairing 後に host monitor geometry を受け取る Android display-info receiver。
 - resolution、refresh rate、bitrate、color space、codec、touch mode、fullscreen mode、Bluetooth keyboard / mouse capture、game controller capture、special-key overlay の Android video/session settings。
 - Tailscale IP / MagicDNS / direct endpoint 用の Android manual host entry。
-- remote session の描画面から stylus、native touch、Bluetooth mouse、keyboard、gamepad input を拾い、background worker で UDP 送信する Android bridge。
+- remote session の描画面から stylus、native touch、Bluetooth mouse、keyboard、gamepad input を拾い、QoS-aware background worker で UDP 送信する Android bridge。
+- Android の realtime receive path は、transport socket で受けた `VideoFrame` packet を `RemoteVideoStreamController` と MediaCodec decoder へ流せるようになった。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
-- Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、console-visible queue/backpressure health metrics。
+- Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、approved-peer video fragment queueing、console-visible queue/backpressure health metrics。
+- Windows stylus bridge は Win32 synthetic pen injector に渡す前に pen axis を正規化し、pressure を平滑化する。
 - LAN stylus path の smoke test 用 development auto-approval mode。
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
@@ -186,6 +188,7 @@ $env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
 $env:GLYPHRAY_ENABLE_TOUCH_INJECTION='1'
 $env:GLYPHRAY_ENABLE_MOUSE_INJECTION='1'
 $env:GLYPHRAY_ENABLE_KEYBOARD_INJECTION='1'
+$env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
@@ -250,7 +253,7 @@ Start-Process .\website\index.html
 - Rust tests と Android debug build は Windows 上で確認済みです。Android unit tests は JDK 17 で実行してください。
 - host router には pending peer spam と outbound backpressure 向けの in-memory DoS guard / console-visible health counters が入りましたが、本番 pairing には persistent trust storage と UI-driven approval がまだ必要です。
 - Windows capture は現在 GDI fallback を含みます。本番向けには Windows Graphics Capture または Desktop Duplication へ移行する必要があります。
-- H.264 hardware/software encoder backend は、まだ placeholder abstraction から実装へ進める必要があります。
+- Video fragment は approved client へ Video channel で queue できるようになりましたが、実用的な desktop video には concrete H.264 hardware/software encoder backend がまだ必要です。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。
 - host approval UI は未接続です。`GLYPHRAY_DEV_AUTO_APPROVE` は local smoke test 専用です。
 - `GLYPHRAY_ENABLE_PEN_INJECTION` は display negotiation / calibration が完全接続されるまで、一時的な 1920x1080 stretch mapping を使います。

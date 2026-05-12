@@ -34,6 +34,7 @@ fun RemoteDisplayView(
     onInputEvent: ((MotionEvent) -> Boolean)? = null,
     onKeyEvent: ((KeyEvent) -> Boolean)? = null,
     onGenericMotionEvent: ((MotionEvent) -> Boolean)? = null,
+    onVideoStreamController: ((RemoteVideoStreamController?) -> Unit)? = null,
 ) {
     var status by remember { mutableStateOf("Waiting for video") }
     var decoder by remember { mutableStateOf<RemoteVideoDecoder?>(null) }
@@ -43,6 +44,7 @@ fun RemoteDisplayView(
         onDispose {
             decoder?.close()
             streamController.detachDecoder()
+            onVideoStreamController?.invoke(null)
             decoder = null
         }
     }
@@ -65,6 +67,7 @@ fun RemoteDisplayView(
                             runCatching {
                                 decoder?.configure(VideoDecoderConfig(width = 1920, height = 1080))
                                 decoder?.let(streamController::attachDecoder)
+                                onVideoStreamController?.invoke(streamController)
                             }.onSuccess {
                                 status = "Decoder ready"
                             }.onFailure { error ->
@@ -82,6 +85,7 @@ fun RemoteDisplayView(
                         override fun surfaceDestroyed(holder: SurfaceHolder) {
                             decoder?.close()
                             streamController.detachDecoder()
+                            onVideoStreamController?.invoke(null)
                             decoder = null
                             status = "Surface closed"
                         }

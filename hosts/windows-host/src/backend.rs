@@ -86,6 +86,7 @@ pub struct SessionSnapshot {
 pub struct BackendMetrics {
     pub received_packets: u64,
     pub queued_outbound_packets: u64,
+    pub queued_video_packets: u64,
     pub sent_outbound_packets: u64,
     pub backpressure_events: u64,
     pub pending_rate_limited_packets: u64,
@@ -226,6 +227,17 @@ impl SessionRegistry {
         snapshots
     }
 
+    pub fn approved_peers(&self) -> Vec<SocketAddr> {
+        let mut peers = self
+            .sessions
+            .values()
+            .filter(|session| session.permission == PermissionState::Approved)
+            .map(|session| session.peer)
+            .collect::<Vec<_>>();
+        peers.sort();
+        peers
+    }
+
     fn evict_oldest_pending_if_needed(&mut self) {
         if self.pending_count() < MAX_PENDING_SESSIONS {
             return;
@@ -330,6 +342,10 @@ pub enum BackendEvent {
     },
     OutboundQueued {
         peer: SocketAddr,
+        packets: usize,
+    },
+    VideoFrameQueued {
+        peers: usize,
         packets: usize,
     },
     OutboundBackpressure {
@@ -885,8 +901,40 @@ where
         self.router.session_snapshots()
     }
 
+    pub fn approved_peers(&self) -> Vec<SocketAddr> {
+        self.router.sessions.approved_peers()
+    }
+
     pub fn config(&self) -> &HostConfig {
         &self.config
+    }
+
+    pub fn queue_video_packets_for_approved_peers(
+        &mut self,
+        packets: Vec<TransportPacket>,
+    ) -> Vec<BackendEvent> {
+        if packets.is_empty() {
+            return Vec::new();
+        }
+
+        let peers = self.approved_peers();
+        if peers.is_empty() {
+            return Vec::new();
+        }
+
+        let packet_count = packets.len();
+        for peer in &peers {
+            for packet in &packets {
+                self.outbound.push((*peer, packet.clone()));
+            }
+        }
+        let queued = peers.len() * packet_count;
+        self.metrics.queued_outbound_packets += queued as u64;
+        self.metrics.queued_video_packets += queued as u64;
+        vec![BackendEvent::VideoFrameQueued {
+            peers: peers.len(),
+            packets: queued,
+        }]
     }
 
     pub fn health_snapshot(&self) -> BackendHealthSnapshot {
@@ -896,6 +944,13 @@ where
             outbound: self.outbound.snapshot(),
             metrics: self.metrics,
         }
+    }
+
+    pub fn flush_outbound(
+        &mut self,
+        server: &mut UdpServer,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        self.flush_outbound_control(server)
     }
 
     fn enqueue_outbound(&mut self, packets: Vec<(SocketAddr, TransportPacket)>) {
@@ -1687,6 +1742,34 @@ mod tests {
         assert_eq!(snapshot.pending_sessions, 1);
         assert_eq!(snapshot.outbound.control, 1);
         assert_eq!(snapshot.outbound.total, 1);
+    }
+
+    #[test]
+    fn runtime_queues_video_packets_for_approved_peers_only() {
+        let mut runtime = HostBackendRuntime::<RecordingInjector>::new(HostConfig::default(), None);
+        let approved: SocketAddr = "127.0.0.1:53004".parse().expect("peer");
+        let pending: SocketAddr = "127.0.0.1:53005".parse().expect("peer");
+        runtime.approve_peer(approved, "tablet");
+        runtime
+            .router
+            .route_packet(pending, input_packet(vec![1, 2, 3]))
+            .expect("route");
+
+        let events = runtime.queue_video_packets_for_approved_peers(vec![
+            packet_with_channel(10, ChannelKind::Video),
+            packet_with_channel(11, ChannelKind::Video),
+        ]);
+        let snapshot = runtime.health_snapshot();
+
+        assert_eq!(
+            events,
+            vec![BackendEvent::VideoFrameQueued {
+                peers: 1,
+                packets: 2,
+            }]
+        );
+        assert_eq!(snapshot.outbound.video, 2);
+        assert_eq!(snapshot.metrics.queued_video_packets, 2);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 80%.
+Current overall progress estimate: 82%.
 
 ## Milestone 1
 
@@ -44,7 +44,9 @@ Current overall progress estimate: 80%.
 - [x] Add Windows capture diagnostic CLI.
 - [x] Add server-side UDP socket for host backend.
 - [x] Add LAN host discovery advertisement.
-- [ ] Stream video over LAN using the transport abstraction.
+- [x] Queue H.264 access-unit fragments on the Video channel for approved clients.
+- [x] Route Android Video channel packets into the video reassembler and MediaCodec feed path.
+- [ ] Stream real encoded desktop video over LAN using a concrete H.264 backend.
 - [x] Add secure datagram codec foundation for encrypted transport.
 - [x] Add latency overlay prepared for `glyphray-telemetry`.
 
@@ -56,6 +58,7 @@ Current overall progress estimate: 80%.
 - [x] Add Rust compact stylus packet decoder/encoder.
 - [x] Add Android protocol-frame unit coverage and wire it into CI.
 - [x] Add Windows host stylus input bridge.
+- [x] Add stylus pressure smoothing and pen-axis normalization before Win32 injection.
 - [x] Add opt-in native pen injection bridge to Windows backend serve runtime.
 - [x] Add backend session registry and input packet routing.
 - [x] Add backend permission gate for input packets.

@@ -19,6 +19,7 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Late input packet dropping based on per-session transport sequence and input timestamp watermarks.
 - Bounded nonblocking outbound queues split by channel, with a small QoS schedule that favors input/control over audio/video.
 - Backend health snapshots and a console `status` command for session counts, queue depth, drops, late input drops, pending rate limits, and backpressure events.
+- Approved-peer video fragment queueing. `GLYPHRAY_ENABLE_VIDEO_STREAM=1` drives the capture/encode/packetize loop and queues `VideoFrame` packets on the Video channel for approved clients.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
 - Latency ping/pong routing.
@@ -35,6 +36,7 @@ For early LAN input testing before the host approval UI exists:
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
 $env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
+$env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
@@ -58,6 +60,8 @@ Control responses are queued into bounded in-memory queues and flushed with nonb
 Pending eviction currently scans pending sessions to find the oldest entry. This is intentionally simple because the host cap is 50. If the same logic is reused for relay-scale workloads, replace it with an indexed queue, timer heap, or equivalent O(log N)/O(1) structure.
 
 `status` prints a compact local health snapshot. The most useful early fields are outbound channel depths, queue high watermark, dropped outbound packets, late input drops, and pending rate-limited packets. This is intentionally local-only console output; it does not send telemetry to external services.
+
+The video pump currently uses the existing capture/encoder abstraction and queues fragmented encoded access units to approved peers. The queueing path is real, but the default `PendingHardwareEncoder` is still a placeholder; production video still needs a concrete H.264 hardware/software encoder backend.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 

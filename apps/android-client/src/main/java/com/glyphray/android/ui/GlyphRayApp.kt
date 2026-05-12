@@ -143,6 +143,7 @@ fun GlyphRayApp() {
                     onSpecialKey = sessionControlController::sendSpecialKey,
                     onKeyEvent = sessionControlController::onKeyEvent,
                     onGenericMotionEvent = sessionControlController::onGenericMotionEvent,
+                    onVideoStreamController = sessionControlController::attachVideoStreamController,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
                 )

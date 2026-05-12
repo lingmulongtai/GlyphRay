@@ -22,6 +22,7 @@ enum class TransportChannel(val wireId: Int) {
 }
 
 object TransportMessageKind {
+    const val videoFrame = 9
     const val pairingRequest = 5
     const val pairingResult = 6
     const val displayInfo = 7
@@ -42,6 +43,63 @@ data class DecodedTransportPacket(
     val timestampUs: Long,
     val payload: ByteArray,
 )
+
+data class QueuedTransportDatagram(
+    val channel: TransportChannel,
+    val bytes: ByteArray,
+)
+
+class RealtimeTransportSendQueue(
+    private val capacityPerChannel: Int = 128,
+) {
+    private val queues = TransportChannel.entries.associateWith { ArrayDeque<ByteArray>() }
+    private var qosCursor = 0
+    var droppedPackets: Long = 0
+        private set
+    var highWatermark: Int = 0
+        private set
+
+    fun offer(channel: TransportChannel, datagram: ByteArray) {
+        val queue = queues.getValue(channel)
+        if (queue.size == capacityPerChannel) {
+            queue.removeFirst()
+            droppedPackets += 1
+        }
+        queue.addLast(datagram)
+        highWatermark = maxOf(highWatermark, size)
+    }
+
+    fun poll(): QueuedTransportDatagram? {
+        repeat(qosSchedule.size) { offset ->
+            val index = (qosCursor + offset) % qosSchedule.size
+            val channel = qosSchedule[index]
+            val queue = queues.getValue(channel)
+            if (queue.isNotEmpty()) {
+                qosCursor = (index + 1) % qosSchedule.size
+                return QueuedTransportDatagram(channel, queue.removeFirst())
+            }
+        }
+        return null
+    }
+
+    fun depth(channel: TransportChannel): Int = queues.getValue(channel).size
+
+    val size: Int
+        get() = queues.values.sumOf { it.size }
+
+    companion object {
+        private val qosSchedule = listOf(
+            TransportChannel.Input,
+            TransportChannel.Control,
+            TransportChannel.Input,
+            TransportChannel.Audio,
+            TransportChannel.Control,
+            TransportChannel.Video,
+            TransportChannel.Input,
+            TransportChannel.Control,
+        )
+    }
+}
 
 object TransportPacketCodec {
     fun encodeStylusInput(
@@ -67,6 +125,18 @@ object TransportPacketCodec {
         sequence = sequence,
         timestampUs = timestampUs,
         payload = payload,
+    )
+
+    fun encodeVideoFrame(
+        sequence: Long,
+        fragmentPayload: ByteArray,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): ByteArray = encode(
+        channel = TransportChannel.Video,
+        messageKind = TransportMessageKind.videoFrame,
+        sequence = sequence,
+        timestampUs = timestampUs,
+        payload = fragmentPayload,
     )
 
     fun encodeInput(
@@ -148,6 +218,7 @@ object TransportPacketCodec {
 
 class StylusUdpSender : Closeable {
     private val socket = DatagramSocket()
+    private val sendQueue = RealtimeTransportSendQueue()
     private var remote: InetSocketAddress? = null
     private var nextSequence = 1L
     private var nextFrameSequence = 1L
@@ -163,8 +234,7 @@ class StylusUdpSender : Closeable {
             sequence = nextSequence++,
             packet = packet,
         )
-        socket.send(DatagramPacket(datagram, datagram.size, target))
-        return datagram.size
+        return sendQueued(target, TransportChannel.Input, datagram)
     }
 
     fun sendMouse(event: android.view.MotionEvent): Int {
@@ -186,8 +256,18 @@ class StylusUdpSender : Closeable {
             messageKind = messageKind,
             payload = frame,
         )
-        socket.send(DatagramPacket(datagram, datagram.size, target))
-        return datagram.size
+        return sendQueued(target, TransportChannel.Input, datagram)
+    }
+
+    private fun sendQueued(target: InetSocketAddress, channel: TransportChannel, datagram: ByteArray): Int {
+        sendQueue.offer(channel, datagram)
+        var bytesSent = 0
+        repeat(8) {
+            val next = sendQueue.poll() ?: return@repeat
+            socket.send(DatagramPacket(next.bytes, next.bytes.size, target))
+            bytesSent += next.bytes.size
+        }
+        return bytesSent
     }
 
     override fun close() {

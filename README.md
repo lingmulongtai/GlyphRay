@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 80%**
+**Overall progress estimate: 82%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 80
-  "Remaining product work" : 20
+  "Implemented foundation" : 82
+  "Remaining product work" : 18
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 87% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 78% |
-| Milestone 4 hardening and packaging | In progress | 63% |
+| Milestone 2 video and transport foundation | In progress | 90% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 82% |
+| Milestone 4 hardening and packaging | In progress | 64% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
-M2 Video + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink      [################----]  78%
-M4 Security + Packaging       [#############-------]  63%
+M2 Video + Transport          [##################--]  90%
+M3 Stylus -> Windows Ink      [################----]  82%
+M4 Security + Packaging       [#############-------]  64%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -61,7 +61,7 @@ flowchart TB
 | Path | Purpose | Current State |
 | --- | --- | --- |
 | `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
-| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, health/status metrics, pending-peer hardening, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, permission readiness UI, Keychain smoke test, VideoToolbox encoder smoke test |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
@@ -141,10 +141,12 @@ sequenceDiagram
 - Android display-info receiver for host monitor geometry after pairing.
 - Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard/mouse capture, game controller capture, and special-key overlay.
 - Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use.
-- Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on background workers.
+- Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on QoS-aware background workers.
+- Android realtime receive path can route `VideoFrame` packets from the transport socket into `RemoteVideoStreamController` and the MediaCodec decoder.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
-- Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, and console-visible queue/backpressure health metrics.
+- Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
+- Windows stylus bridge now normalizes pen axes and smooths pressure before calling the native Win32 synthetic pen injector.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
@@ -186,6 +188,7 @@ $env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
 $env:GLYPHRAY_ENABLE_TOUCH_INJECTION='1'
 $env:GLYPHRAY_ENABLE_MOUSE_INJECTION='1'
 $env:GLYPHRAY_ENABLE_KEYBOARD_INJECTION='1'
+$env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
@@ -250,7 +253,7 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 - Rust tests and Android debug builds have been exercised on Windows. Android unit tests should be run with JDK 17.
 - The host router now has in-memory DoS guards and console-visible health counters for pending peer spam and outbound backpressure, but production pairing still needs persistent trust storage and UI-driven approvals.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
-- A concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction.
+- Video fragments can now be queued to approved clients on the Video channel, but a concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction before real desktop video is useful.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
 - Host approval UI is not wired yet; `GLYPHRAY_DEV_AUTO_APPROVE` is only for local smoke tests.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.

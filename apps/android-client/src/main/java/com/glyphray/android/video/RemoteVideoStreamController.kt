@@ -31,6 +31,13 @@ class RemoteVideoStreamController {
                 frameSequence = accessUnit.sequence,
             )
         }
+        if (accessUnit.payload.isEmpty()) {
+            return VideoFeedResult(
+                completedFrame = true,
+                queuedToDecoder = false,
+                frameSequence = accessUnit.sequence,
+            )
+        }
 
         val queued = decoder?.queueAccessUnit(
             data = accessUnit.payload,
@@ -45,4 +52,3 @@ class RemoteVideoStreamController {
         )
     }
 }
-

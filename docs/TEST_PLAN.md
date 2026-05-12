@@ -22,7 +22,9 @@ Rust tests cover:
 - Backend late input packet drop before injection.
 - Backend outbound QoS queue priority for control over video backlog.
 - Backend outbound queue snapshot lengths, drop counters, and high watermark.
+- Backend approved-peer video fragment queueing on the Video channel.
 - Backend stable CRC-based host id generation.
+- Stylus bridge pressure smoothing and pen-axis normalization before native injection.
 - Backend stylus packet routing into the input bridge.
 - Transport packet-loss simulation.
 - Telemetry p95 and latency totals.
@@ -52,6 +54,8 @@ cargo test --workspace
 - Confirm button state changes with barrel/side button.
 - Feed a known H.264 Annex B access-unit sequence through `RemoteVideoStreamController`.
 - Confirm the `SurfaceView` shows decoded video and the latency overlay remains responsive.
+- Confirm Video-channel `VideoFrame` datagrams are routed into `RemoteVideoStreamController` while control responses still update pairing/latency state.
+- Confirm the Android QoS queue prioritizes input/control ahead of a video backlog.
 - Confirm compact stylus packets decode correctly on the host.
 - Confirm calibration target flow can be operated without layout overlap.
 - Add a host manually by Tailscale IP or MagicDNS name and confirm pairing reaches the host.

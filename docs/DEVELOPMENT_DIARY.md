@@ -1,5 +1,17 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Video Channel And Ink Smoothing Push
+
+今日は video / pen / Android transport を一気に前へ押した。Rust 側では capture -> encode -> packetize の既存部品に `VideoPacketPipeline` を足し、Windows backend runtime から approved peer に `VideoFrame` packet を Video channel で queue できるようにした。`GLYPHRAY_ENABLE_VIDEO_STREAM=1` で video pump が動き、H.264 access unit envelope を `GLYF` fragment に分割して outbound QoS queue に載せる。まだ default encoder は placeholder なので、実デスクトップ映像には concrete H.264 backend が必要。
+
+Windows Ink 側は `StylusInputBridge` に pressure smoothing と pen axis normalization を入れた。Android の historical samples が一気に届いても、Win32 synthetic pen injection に渡す pressure が急に跳ねにくくなる。tilt は -90..90 に clamp、orientation は 0..360 に正規化する。unit test では smoothing と axis normalization を検証した。
+
+Android 側は transport codec に Video channel `VideoFrame` encode/decode と QoS send queue を追加し、control receiver が Video packet を `RemoteVideoStreamController` に流せるようにした。Remote display surface が decoder を作ったら session controller に接続し、Video fragment -> access unit -> MediaCodec の入口までつながる。これで video/control/input が同じ transport shape を共有し始めた。
+
+検証として Rust workspace tests、Android unit tests、Android debug build を通した。
+
+この時点の進捗見積もり: 82%。
+
 ## 2026-05-12 JST - macOS Host Readiness Push
 
 今日は macOS host の進み具合を確認した。現状は SwiftUI shell、ScreenCaptureKit display listing、VideoToolbox encoder setup、CGEvent mouse posting、audio permission plumbing までは入っていたが、Windows backend ほど runtime 化は進んでいない。なので、今回は macOS の実機検証を進めやすくする readiness 層を追加した。

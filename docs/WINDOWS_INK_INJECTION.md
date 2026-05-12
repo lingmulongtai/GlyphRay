@@ -30,6 +30,8 @@ From Android stylus samples, the injector maps:
 - down/move/up/cancel
 - pointer id
 
+`StylusInputBridge` smooths abrupt pressure jumps per pointer and clamps tilt/orientation before the Win32 call. This keeps high-frequency Android batches from producing jagged pressure spikes when UDP delivery bunches historical samples together.
+
 Barrel button and eraser flags are represented in the protocol and need final mapping validation against Windows creative apps.
 
 ## Diagnostic Tool

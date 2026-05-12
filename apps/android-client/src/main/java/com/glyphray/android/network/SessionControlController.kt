@@ -13,6 +13,7 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.glyphray.android.video.RemoteVideoStreamController
 
 data class SessionControlState(
     val isConnected: Boolean = false,
@@ -23,6 +24,10 @@ data class SessionControlState(
     val trustedDeviceId: String? = null,
     val lastRoundTripMs: Long? = null,
     val displays: List<RemoteDisplayDescriptor> = emptyList(),
+    val videoPacketsReceived: Long = 0,
+    val videoFramesCompleted: Long = 0,
+    val videoFramesQueuedToDecoder: Long = 0,
+    val lastVideoSequence: Long? = null,
     val videoSettings: ClientVideoSettings = ClientVideoSettings(),
     val inputSettings: ClientInputSettings = ClientInputSettings(),
     val lastAction: String = "Idle",
@@ -41,6 +46,7 @@ class SessionControlController : Closeable {
     private var client: ControlUdpClient? = null
     private var gamepadButtons: Int = 0
     @Volatile private var receiving = false
+    @Volatile private var videoStreamController: RemoteVideoStreamController? = null
 
     var state by mutableStateOf(SessionControlState())
         private set
@@ -154,6 +160,10 @@ class SessionControlController : Closeable {
         }
     }
 
+    fun attachVideoStreamController(controller: RemoteVideoStreamController?) {
+        videoStreamController = controller
+    }
+
     private fun onGamepadKeyEvent(event: KeyEvent): Boolean {
         if (!state.inputSettings.gameControllerEnabled) {
             return false
@@ -219,18 +229,47 @@ class SessionControlController : Closeable {
         receiving = true
         receiverExecutor.execute {
             while (receiving && activeClient.isOpen) {
-                val response = runCatching {
-                    activeClient.receiveControlResponse(timeoutMs = 250)
+                val packet = runCatching {
+                    activeClient.receiveTransportPacket(timeoutMs = 250)
                 }.onFailure { error ->
                     if (activeClient.isOpen) {
                         state = state.copy(lastAction = "Control receive failed", lastError = error.message)
                     }
                 }.getOrNull()
 
-                if (response != null) {
-                    handleControlMessage(response)
+                if (packet != null) {
+                    handleTransportPacket(packet)
                 }
             }
+        }
+    }
+
+    private fun handleTransportPacket(packet: DecodedTransportPacket) {
+        when (packet.channel) {
+            TransportChannel.Control -> {
+                handleControlMessage(ProtocolFrameCodec.decodeFrame(packet.payload).message)
+            }
+            TransportChannel.Video -> {
+                if (packet.messageKind != TransportMessageKind.videoFrame) {
+                    return
+                }
+                val result = runCatching {
+                    videoStreamController?.onVideoFragment(packet.payload)
+                }.getOrElse { error ->
+                    state = state.copy(lastAction = "Video receive failed", lastError = error.message)
+                    return
+                }
+                state = state.copy(
+                    videoPacketsReceived = state.videoPacketsReceived + 1,
+                    videoFramesCompleted = state.videoFramesCompleted + if (result?.completedFrame == true) 1 else 0,
+                    videoFramesQueuedToDecoder = state.videoFramesQueuedToDecoder + if (result?.queuedToDecoder == true) 1 else 0,
+                    lastVideoSequence = result?.frameSequence ?: state.lastVideoSequence,
+                    lastAction = if (result?.completedFrame == true) "Video frame received" else "Video fragment received",
+                    lastError = null,
+                )
+            }
+            TransportChannel.Audio,
+            TransportChannel.Input -> Unit
         }
     }
 
@@ -387,17 +426,13 @@ private class ControlUdpClient : Closeable {
         return datagram.size
     }
 
-    fun receiveControlResponse(timeoutMs: Int): ControlProtocolMessage? {
+    fun receiveTransportPacket(timeoutMs: Int): DecodedTransportPacket? {
         socket.soTimeout = timeoutMs
         val buffer = ByteArray(65_536)
         val packet = DatagramPacket(buffer, buffer.size)
         return try {
             socket.receive(packet)
-            val transportPacket = TransportPacketCodec.decode(buffer, packet.length)
-            if (transportPacket.channel != TransportChannel.Control) {
-                return null
-            }
-            ProtocolFrameCodec.decodeFrame(transportPacket.payload).message
+            TransportPacketCodec.decode(buffer, packet.length)
         } catch (_: SocketTimeoutException) {
             null
         }

@@ -2,6 +2,7 @@ use glyphray_core::{CoordinateMapper, PressureMapper};
 use glyphray_protocol::{
     KeyboardInput, MouseInput, StylusAction, StylusInputBatch, StylusSample, TouchInputBatch,
 };
+use std::collections::HashMap;
 
 #[cfg(all(windows))]
 mod win32_keyboard;
@@ -166,6 +167,29 @@ pub struct StylusInputBridge<I> {
     injector: I,
     mapper: CoordinateMapper,
     pressure: PressureMapper,
+    smoothing: StylusSmoothingConfig,
+    pressure_state: HashMap<u32, f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StylusSmoothingConfig {
+    pub pressure_alpha: f32,
+}
+
+impl StylusSmoothingConfig {
+    pub fn disabled() -> Self {
+        Self {
+            pressure_alpha: 1.0,
+        }
+    }
+}
+
+impl Default for StylusSmoothingConfig {
+    fn default() -> Self {
+        Self {
+            pressure_alpha: 0.45,
+        }
+    }
 }
 
 impl<I> StylusInputBridge<I>
@@ -173,10 +197,21 @@ where
     I: PenInjector,
 {
     pub fn new(injector: I, mapper: CoordinateMapper, pressure: PressureMapper) -> Self {
+        Self::with_smoothing(injector, mapper, pressure, StylusSmoothingConfig::default())
+    }
+
+    pub fn with_smoothing(
+        injector: I,
+        mapper: CoordinateMapper,
+        pressure: PressureMapper,
+        smoothing: StylusSmoothingConfig,
+    ) -> Self {
         Self {
             injector,
             mapper,
             pressure,
+            smoothing,
+            pressure_state: HashMap::new(),
         }
     }
 
@@ -184,8 +219,34 @@ where
         &mut self,
         batch: &StylusInputBatch,
     ) -> Result<InjectionReport, InputError> {
+        let prepared = self.prepare_batch(batch);
         self.injector
-            .inject_batch(batch, &self.mapper, &self.pressure)
+            .inject_batch(&prepared, &self.mapper, &self.pressure)
+    }
+
+    fn prepare_batch(&mut self, batch: &StylusInputBatch) -> StylusInputBatch {
+        let mut prepared = batch.clone();
+        for sample in &mut prepared.samples {
+            sample.pressure = self.smoothed_pressure(sample);
+            sample.tilt_x_degrees = sample.tilt_x_degrees.clamp(-90.0, 90.0);
+            sample.tilt_y_degrees = sample.tilt_y_degrees.clamp(-90.0, 90.0);
+            sample.orientation_degrees = sample.orientation_degrees.rem_euclid(360.0);
+        }
+        prepared
+    }
+
+    fn smoothed_pressure(&mut self, sample: &StylusSample) -> f32 {
+        let raw = sample.pressure.clamp(0.0, 1.0);
+        if !map_action_to_contact(sample.action, sample) {
+            self.pressure_state.remove(&sample.pointer_id);
+            return raw;
+        }
+
+        let alpha = self.smoothing.pressure_alpha.clamp(0.0, 1.0);
+        let previous = self.pressure_state.entry(sample.pointer_id).or_insert(raw);
+        let smoothed = *previous + (raw - *previous) * alpha;
+        *previous = smoothed;
+        smoothed
     }
 }
 
@@ -270,6 +331,9 @@ mod tests {
     #[derive(Default)]
     struct RecordingInjector {
         samples: usize,
+        observed_pressures: Vec<f32>,
+        observed_tilt_x: Vec<f32>,
+        observed_orientation: Vec<f32>,
     }
 
     impl PenInjector for RecordingInjector {
@@ -280,6 +344,16 @@ mod tests {
             _pressure: &PressureMapper,
         ) -> Result<InjectionReport, InputError> {
             self.samples += batch.samples.len();
+            self.observed_pressures
+                .extend(batch.samples.iter().map(|sample| sample.pressure));
+            self.observed_tilt_x
+                .extend(batch.samples.iter().map(|sample| sample.tilt_x_degrees));
+            self.observed_orientation.extend(
+                batch
+                    .samples
+                    .iter()
+                    .map(|sample| sample.orientation_degrees),
+            );
             Ok(InjectionReport {
                 injected_samples: batch.samples.len(),
                 used_pen_path: true,
@@ -374,6 +448,38 @@ mod tests {
     }
 
     #[test]
+    fn stylus_bridge_smooths_pressure_and_clamps_pen_axes() {
+        let mapper = CoordinateMapper::new(
+            SourceRect::new(100.0, 100.0).expect("source"),
+            DisplayRect::new(0.0, 0.0, 100.0, 100.0, 0, 1.0).expect("display"),
+            MappingMode::Stretch,
+        );
+        let injector = RecordingInjector::default();
+        let mut bridge = StylusInputBridge::with_smoothing(
+            injector,
+            mapper,
+            PressureMapper::default(),
+            StylusSmoothingConfig {
+                pressure_alpha: 0.5,
+            },
+        );
+        let batch = StylusInputBatch {
+            batch_sequence: 1,
+            monotonic_timestamp_us: 1,
+            samples: vec![
+                stylus_sample(1, StylusAction::Down, 0.0, 120.0, -45.0),
+                stylus_sample(2, StylusAction::Move, 1.0, 30.0, 725.0),
+            ],
+        };
+
+        bridge.inject_remote_batch(&batch).expect("inject");
+
+        assert_eq!(bridge.injector.observed_pressures, vec![0.0, 0.5]);
+        assert_eq!(bridge.injector.observed_tilt_x, vec![90.0, 30.0]);
+        assert_eq!(bridge.injector.observed_orientation, vec![315.0, 5.0]);
+    }
+
+    #[test]
     fn keyboard_bridge_forwards_remote_keys_to_injector() {
         let injector = RecordingKeyboardInjector::default();
         let mut bridge = KeyboardInputBridge::new(injector);
@@ -445,5 +551,32 @@ mod tests {
         let report = bridge.inject_remote_mouse(&input).expect("inject");
 
         assert_eq!(report.injected_events, 1);
+    }
+
+    fn stylus_sample(
+        sequence: u64,
+        action: StylusAction,
+        pressure: f32,
+        tilt_x_degrees: f32,
+        orientation_degrees: f32,
+    ) -> StylusSample {
+        StylusSample {
+            sequence,
+            timestamp_us: sequence,
+            display_id: 0,
+            pointer_id: 1,
+            tool_type: StylusToolType::Stylus,
+            action,
+            x: 50.0,
+            y: 50.0,
+            pressure,
+            tilt_x_degrees,
+            tilt_y_degrees: 0.0,
+            orientation_degrees,
+            button_flags: 0,
+            hover: false,
+            eraser: false,
+            predicted: false,
+        }
     }
 }

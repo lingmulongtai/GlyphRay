@@ -35,6 +35,8 @@ Palm rejection is currently represented as a settings surface. Milestone 3 shoul
 
 `StylusPacketEncoder` writes the compact `GLYS` packet format documented in `docs/PROTOCOL.md`.
 
-`TransportPacketCodec` wraps those `GLYS` payloads in the UDP `GLYT` datagram shape used by the Rust host backend. `StylusUdpSender` is the Android-side sender boundary for the Milestone 3 LAN input stream.
+`TransportPacketCodec` wraps those `GLYS` payloads in the UDP `GLYT` datagram shape used by the Rust host backend. It also understands Video-channel `VideoFrame` datagrams and exposes a small QoS send queue that mirrors the host's input/control-heavy schedule.
 
-`StylusLanBridgeController` connects a discovered host to the remote-session drawing surface. It converts `MotionEvent` data into compact stylus packets immediately, then sends UDP datagrams on a background worker so Android never performs network I/O on the UI thread.
+`StylusLanBridgeController` connects a discovered host to the remote-session drawing surface. It converts `MotionEvent` data into compact stylus packets immediately, then sends UDP datagrams through the QoS-aware background worker so Android never performs network I/O on the UI thread.
+
+The session receiver can route incoming Video-channel fragments into `RemoteVideoStreamController`, which reassembles H.264 access units and feeds MediaCodec when a decoder surface is attached.

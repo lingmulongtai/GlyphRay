@@ -50,6 +50,7 @@ import com.glyphray.android.ui.PrimaryAction
 import com.glyphray.android.ui.ScreenFrame
 import com.glyphray.android.ui.ToggleRow
 import com.glyphray.android.ui.video.RemoteDisplayView
+import com.glyphray.android.video.RemoteVideoStreamController
 
 @Composable
 fun HostListScreen(
@@ -192,6 +193,7 @@ fun RemoteSessionScreen(
     onSpecialKey: (SpecialRemoteKey) -> Unit,
     onKeyEvent: (KeyEvent) -> Boolean,
     onGenericMotionEvent: (android.view.MotionEvent) -> Boolean,
+    onVideoStreamController: (RemoteVideoStreamController?) -> Unit,
     onPenSettings: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
@@ -239,6 +241,7 @@ fun RemoteSessionScreen(
             onInputEvent = { event -> stylusBridge.onMotionEvent(event, controlState.inputSettings) },
             onKeyEvent = onKeyEvent,
             onGenericMotionEvent = onGenericMotionEvent,
+            onVideoStreamController = onVideoStreamController,
         )
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -263,6 +266,9 @@ fun RemoteSessionScreen(
         MetricRow("Fullscreen", if (fullscreen) "On" else "Off")
         MetricRow("Stylus packets", bridgeState.packetsSent.toString())
         MetricRow("Stylus samples", bridgeState.samplesSent.toString())
+        MetricRow("Video packets", controlState.videoPacketsReceived.toString())
+        MetricRow("Video frames", controlState.videoFramesCompleted.toString())
+        MetricRow("Decoder queued", controlState.videoFramesQueuedToDecoder.toString())
         bridgeState.lastError?.let { error ->
             Text("Input stream error: $error", color = MaterialTheme.colorScheme.error)
         }

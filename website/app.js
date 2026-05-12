@@ -8,6 +8,7 @@ const commands = {
         "$env:GLYPHRAY_ENABLE_TOUCH_INJECTION='1'",
         "$env:GLYPHRAY_ENABLE_MOUSE_INJECTION='1'",
         "$env:GLYPHRAY_ENABLE_KEYBOARD_INJECTION='1'",
+        "$env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'",
         "cargo run -p glyphray-windows-host -- serve",
       ].join("\n"),
     },

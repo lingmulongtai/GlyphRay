@@ -1,12 +1,16 @@
 use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, SourceRect};
 use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
+use glyphray_transport::video::VideoPacketizer;
 use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy};
+use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
+use glyphray_windows_host::encoder::{EncoderSettings, PendingHardwareEncoder};
 use glyphray_windows_host::input::{
     create_keyboard_injector, create_mouse_injector, create_pen_injector, create_touch_injector,
     KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
     StylusInputBridge, TouchInjector, TouchInputBridge,
 };
+use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -59,8 +63,10 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         mouse_bridge,
         permission_policy,
     );
+    let mut video_pump = create_runtime_video_pump(&runtime);
     let commands = spawn_console_command_reader();
     let mut last_announce = Instant::now() - Duration::from_secs(2);
+    let mut last_video_frame = Instant::now();
 
     println!("GlyphRay backend listening on {}", server.local_addr()?);
     println!("Type `status`, `sessions`, `approve <peer>`, `reject <peer>`, or `help`.");
@@ -74,11 +80,77 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
             print_backend_event(&event);
         }
 
+        if let Some(pump) = video_pump.as_mut() {
+            if last_video_frame.elapsed() >= Duration::from_millis(16) {
+                match pump.capture_encode_packetize() {
+                    Ok(packets) => {
+                        for event in runtime.queue_video_packets_for_approved_peers(packets) {
+                            print_backend_event(&event);
+                        }
+                        for event in runtime.flush_outbound(&mut server)? {
+                            print_backend_event(&event);
+                        }
+                    }
+                    Err(error) => {
+                        println!("Video pump failed: {error}");
+                        video_pump = None;
+                    }
+                }
+                last_video_frame = Instant::now();
+            }
+        }
+
         for event in drain_console_commands(&commands, &mut runtime, &mut server)? {
             print_backend_event(&event);
         }
 
         thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn create_runtime_video_pump(
+    runtime: &HostBackendRuntime<Box<dyn PenInjector>>,
+) -> Option<VideoPacketPipeline<WindowsGraphicsCaptureBackend, PendingHardwareEncoder>> {
+    if std::env::var_os("GLYPHRAY_ENABLE_VIDEO_STREAM").is_none() {
+        println!(
+            "Video stream pump is disabled. Set GLYPHRAY_ENABLE_VIDEO_STREAM=1 to queue H.264 video fragments for approved clients."
+        );
+        return None;
+    }
+
+    let capture = WindowsGraphicsCaptureBackend;
+    let display = match capture.list_displays() {
+        Ok(displays) => displays
+            .iter()
+            .find(|display| display.id == runtime.config().default_display_id)
+            .cloned()
+            .or_else(|| displays.into_iter().next()),
+        Err(error) => {
+            println!("Video stream unavailable: {error}");
+            None
+        }
+    }?;
+
+    let settings = EncoderSettings::low_latency_h264(display.width_px, display.height_px, 60);
+    let encoder = PendingHardwareEncoder::new(settings);
+    let mut pump = VideoPacketPipeline::new(
+        WindowsGraphicsCaptureBackend,
+        encoder,
+        VideoPacketizer::default(),
+        display.id,
+    );
+    match pump.start() {
+        Ok(()) => {
+            println!(
+                "Video stream pump is enabled for display {} ({}x{}). Encoder backend is still the placeholder abstraction until a concrete H.264 backend lands.",
+                display.id, display.width_px, display.height_px
+            );
+            Some(pump)
+        }
+        Err(error) => {
+            println!("Video stream unavailable: {error}");
+            None
+        }
     }
 }
 
