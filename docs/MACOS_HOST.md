@@ -21,4 +21,15 @@ cd hosts/macos-host
 swift build
 ```
 
-Current code includes a SwiftUI shell, ScreenCaptureKit display listing, VideoToolbox encoder setup, CGEvent mouse posting, and audio permission status plumbing. Live streaming is still pending.
+Current code includes:
+
+- SwiftUI shell with local readiness diagnostics.
+- ScreenCaptureKit display listing with display geometry labels.
+- Screen Recording and Accessibility permission checks/prompts.
+- Input Monitoring status note for manual review.
+- Audio permission status plumbing.
+- VideoToolbox H.264 low-latency encoder smoke test.
+- CGEvent mouse, click, and keyboard posting foundation.
+- Keychain-backed secret store boundary with UI smoke test.
+
+Live capture-to-encode-to-transport streaming is still pending. The next macOS-specific step is to turn the ScreenCaptureKit display listing into an `SCStream`, feed frames into `VideoToolboxEncoder`, and send encoded access units through the shared transport.

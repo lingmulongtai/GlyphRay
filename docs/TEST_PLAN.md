@@ -81,6 +81,16 @@ cargo test --workspace
 - With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
 - Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
 
+## macOS Manual Tests
+
+- Build the SwiftPM host on macOS 13+ with `swift build`.
+- Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
+- Use the Screen Recording and Accessibility request buttons and confirm macOS opens the expected permission prompts.
+- Confirm ScreenCaptureKit display listing shows each available display with geometry.
+- Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
+- Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
+- Post a safe CGEvent mouse move/click and keyboard test only after Accessibility permission is granted.
+
 ## Integration Tests To Add
 
 - Android-to-host stylus batch replay.
@@ -91,5 +101,7 @@ cargo test --workspace
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
+- macOS SCStream-to-VideoToolbox encode loopback.
+- macOS Keychain device identity persistence.
 - Transport reconnect under packet loss.
 - Outbound QoS queue backpressure behavior with a saturated UDP send buffer.

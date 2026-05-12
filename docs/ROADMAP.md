@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 79%.
+Current overall progress estimate: 80%.
 
 ## Milestone 1
 
@@ -99,7 +99,7 @@ Current overall progress estimate: 79%.
 - [ ] Validate and document lock-screen/pre-login limitations for capture and input.
 - [x] Add GitHub Pages deployment workflow for the download site.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.
-- [ ] Add macOS Keychain implementation.
+- [x] Add macOS Keychain implementation.
 - [ ] Add signed production installers.
 - [ ] Add Android Play Store internal testing release track checklist and signing workflow.
 
@@ -108,6 +108,8 @@ Current overall progress estimate: 79%.
 - [x] Add macOS ScreenCaptureKit display enumeration foundation.
 - [x] Add macOS VideoToolbox encoder foundation.
 - [x] Add macOS CGEvent input foundation.
+- [x] Add macOS permission/readiness diagnostics for Screen Recording, Accessibility, Input Monitoring, and audio.
+- [x] Add macOS VideoToolbox low-latency encoder smoke-test path.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.

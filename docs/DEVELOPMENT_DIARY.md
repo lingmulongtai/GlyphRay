@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - macOS Host Readiness Push
+
+今日は macOS host の進み具合を確認した。現状は SwiftUI shell、ScreenCaptureKit display listing、VideoToolbox encoder setup、CGEvent mouse posting、audio permission plumbing までは入っていたが、Windows backend ほど runtime 化は進んでいない。なので、今回は macOS の実機検証を進めやすくする readiness 層を追加した。
+
+実装として、Screen Recording / Accessibility / Input Monitoring / audio の permission 状態を UI に出し、Screen Recording と Accessibility は request button から prompt できるようにした。ScreenCaptureKit の display listing は geometry 付き descriptor に変え、VideoToolbox は H.264 low-latency encoder session の smoke test を UI から走らせられる。CGEvent は mouse move / click / keyboard foundation まで広げた。
+
+さらに macOS Keychain 用の `KeychainSecretStore` を追加し、UI から save / load / delete の smoke test を走らせられるようにした。まだ device identity や trusted host list に完全接続していないが、長期secretを平文保存しないための platform boundary はできた。次は `SCStream` から frame を受けて VideoToolbox encoder に入れ、shared transport へ流す macOS live stream path に進む。
+
+この時点の進捗見積もり: 80%。
+
 ## 2026-05-12 JST - Backend Health Visibility
 
 今日は、入れてもらった backend hardening を確認し、その上に「見える化」を足した。pending session cap、IPごとの pending attempt rate limit、late input drop、channel-aware QoS outbound queue は良い方向にまとまっていたので、そこを壊さずに `BackendHealthSnapshot` と console の `status` command を追加した。

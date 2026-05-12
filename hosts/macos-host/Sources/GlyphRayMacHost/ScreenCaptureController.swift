@@ -4,16 +4,33 @@ import Foundation
 import ScreenCaptureKit
 #endif
 
+struct MacDisplayDescriptor: Identifiable, Equatable {
+    let id: UInt32
+    let width: Int
+    let height: Int
+    let originX: Int
+    let originY: Int
+
+    var label: String {
+        "Display \(id) \(width)x\(height) @ \(originX),\(originY)"
+    }
+}
+
 final class ScreenCaptureController {
-    func availableDisplays() async throws -> [String] {
+    func availableDisplays() async throws -> [MacDisplayDescriptor] {
         #if canImport(ScreenCaptureKit)
         let content = try await SCShareableContent.current
         return content.displays.map { display in
-            "Display \(display.displayID) \(display.width)x\(display.height)"
+            MacDisplayDescriptor(
+                id: display.displayID,
+                width: display.width,
+                height: display.height,
+                originX: Int(display.frame.origin.x),
+                originY: Int(display.frame.origin.y)
+            )
         }
         #else
         return []
         #endif
     }
 }
-

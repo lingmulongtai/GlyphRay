@@ -8,14 +8,14 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 79%**
+**Overall progress estimate: 80%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 79
-  "Remaining product work" : 21
+  "Implemented foundation" : 80
+  "Remaining product work" : 20
 ```
 
 | Area | Status | Progress |
@@ -23,15 +23,15 @@ pie title Overall Completion
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 78% |
-| Milestone 4 hardening and packaging | In progress | 61% |
-| Milestone 5 macOS, audio, relay readiness | In progress | 36% |
+| Milestone 4 hardening and packaging | In progress | 63% |
+| Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
 M3 Stylus -> Windows Ink      [################----]  78%
-M4 Security + Packaging       [############--------]  61%
-M5 macOS + Audio + Relay      [#######-------------]  36%
+M4 Security + Packaging       [#############-------]  63%
+M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -62,7 +62,7 @@ flowchart TB
 | --- | --- | --- |
 | `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
 | `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, health/status metrics, pending-peer hardening, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, VideoToolbox encoder foundation |
+| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, permission readiness UI, Keychain smoke test, VideoToolbox encoder smoke test |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
 | `crates/transport` | Real-time packet layer | UDP `GLYT`, LAN discovery `GLYD`, video fragmentation, reusable UDP buffers, secure datagram wrapper, reconnect, bitrate/keyframe adaptation logic |
@@ -150,7 +150,7 @@ sequenceDiagram
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, adaptive bitrate decisions, and packet-loss keyframe recovery signaling foundations.
-- macOS SwiftUI shell with ScreenCaptureKit, VideoToolbox, CGEvent, and audio permission foundations.
+- macOS SwiftUI shell with ScreenCaptureKit display diagnostics, permission readiness checks, VideoToolbox low-latency encoder smoke test, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
 - GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
 - GitHub Pages static download site with setup command generator and original hero artwork.
 

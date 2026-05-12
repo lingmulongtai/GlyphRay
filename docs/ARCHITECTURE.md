@@ -73,9 +73,11 @@ The current capture implementation includes a GDI fallback for early validation.
 The macOS host is parallel in structure but lower priority:
 
 - SwiftUI shell.
-- ScreenCaptureKit for capture.
-- VideoToolbox for H.264/H.265 encoding.
+- ScreenCaptureKit display diagnostics and future capture.
+- VideoToolbox for H.264/H.265 low-latency encoding.
 - CGEvent mouse/keyboard input first.
+- Permission readiness checks for Screen Recording, Accessibility, Input Monitoring, and audio.
+- Keychain secret storage boundary.
 
 Windows Ink-style pen injection remains Windows-specific.
 

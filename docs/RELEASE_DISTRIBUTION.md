@@ -27,13 +27,16 @@ Target format: signed and notarized app bundle plus `.pkg`.
 Current foundation:
 
 - SwiftPM host executable.
+- Permission readiness UI for Screen Recording, Accessibility, Input Monitoring, and audio.
+- Keychain secret-store boundary.
+- VideoToolbox encoder smoke-test path.
 - `pkgbuild` script in `tools/packaging/macos/build-pkg.sh`.
 
 Before beta:
 
 - Convert the host into a proper `.app` bundle.
 - Add Developer ID signing and notarization.
-- Add onboarding for Screen Recording, Accessibility, Input Monitoring, and audio permissions.
+- Expand permission readiness into first-run onboarding for Screen Recording, Accessibility, Input Monitoring, and audio permissions.
 
 ## Android / Play Store
 

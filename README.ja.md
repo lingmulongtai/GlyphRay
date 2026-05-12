@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 79%**
+**全体進捗見積もり: 80%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 79
-  "残りの製品化作業" : 21
+  "実装済みの基盤" : 80
+  "残りの製品化作業" : 20
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -23,15 +23,15 @@ pie title 全体進捗
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 87% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 78% |
-| Milestone 4 security hardening / packaging | 進行中 | 61% |
-| Milestone 5 macOS / audio / relay | 進行中 | 36% |
+| Milestone 4 security hardening / packaging | 進行中 | 63% |
+| Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [#################---]  87%
 M3 Stylus -> Windows Ink     [################----]  78%
-M4 Security + Packaging      [############--------]  61%
-M5 macOS + Audio + Relay     [#######-------------]  36%
+M4 Security + Packaging      [#############-------]  63%
+M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
 開発日記: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -62,7 +62,7 @@ flowchart TB
 | --- | --- | --- |
 | `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
 | `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、health/status metrics、pending peer hardening、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、VideoToolbox encoder foundation |
+| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、permission readiness UI、Keychain smoke test、VideoToolbox encoder smoke test |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
 | `crates/transport` | realtime packet layer | UDP `GLYT`、LAN discovery `GLYD`、video fragmentation、reusable UDP buffers、secure datagram、reconnect、bitrate / keyframe adaptation logic |
@@ -150,7 +150,7 @@ sequenceDiagram
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
 - Windows monitor enumeration、GDI capture fallback、encoder abstraction、streaming pipeline の形。
 - ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate decision、packet loss 時の keyframe recovery signaling 基盤。
-- macOS SwiftUI shell、ScreenCaptureKit、VideoToolbox、CGEvent、audio permission の基盤。
+- macOS SwiftUI shell、ScreenCaptureKit display diagnostics、permission readiness checks、VideoToolbox low-latency encoder smoke test、CGEvent mouse / keyboard 基盤、Keychain secret-store smoke test、audio permission plumbing。
 - Rust tests、Android unit tests、Android debug build 用 GitHub Actions CI。
 - GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。
 
