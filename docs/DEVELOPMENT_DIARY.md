@@ -92,6 +92,12 @@ Android debug build が `gradlew.bat :apps:android-client:assembleDebug` で成�
 
 この時点の進捗見積もり: 69%。
 
+## 2026-05-12 JST - CI Gradle Wrapper Permission
+
+GitHub Actions の Android build で `./gradlew: Permission denied` が出た。Windows では実行権限ビットが見えにくいので、Linux runner 上で `chmod +x ./gradlew` を CI step として明示的に入れた。これで wrapper を使う方針を保ったまま、Actions 側でも assembleDebug に進める。
+
+この時点の進捗見積もり: 69%。
+
 ## 2026-05-11 JST - Day 1, Compose Scope Compile Fix
 
 Gradle 8.11.1 に固定した後、Android compile は `Column` unresolved で止まった。原因は Compose の `Column` 関数を `ScreenFrame` の receiver 型として使っていたこと。型として正しいのは `ColumnScope` なので、`content: @Composable ColumnScope.() -> Unit` に修正した。
