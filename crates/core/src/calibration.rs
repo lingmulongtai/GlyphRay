@@ -76,4 +76,3 @@ mod tests {
         assert_eq!(y, 600.0);
     }
 }
-

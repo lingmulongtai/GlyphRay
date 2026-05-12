@@ -65,7 +65,9 @@ pub fn decode_fragment(bytes: &[u8]) -> Result<FrameFragment, TransportError> {
         return Err(TransportError::Decode("short video fragment".to_string()));
     }
     if bytes[0..4] != FRAGMENT_MAGIC[..] {
-        return Err(TransportError::Decode("bad video fragment magic".to_string()));
+        return Err(TransportError::Decode(
+            "bad video fragment magic".to_string(),
+        ));
     }
 
     let frame_sequence = u64::from_le_bytes(bytes[4..12].try_into().expect("slice length"));

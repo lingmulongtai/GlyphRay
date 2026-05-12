@@ -59,10 +59,10 @@ mod platform {
     use std::time::{SystemTime, UNIX_EPOCH};
     use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
     use windows::Win32::Graphics::Gdi::{
-        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC,
-        EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, SelectObject, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO,
-        MONITORINFOEXW, ReleaseDC, RGBQUAD, SRCCOPY,
+        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+        EnumDisplayMonitors, GetDC, GetDIBits, GetMonitorInfoW, ReleaseDC, SelectObject,
+        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC, HGDIOBJ, HMONITOR,
+        MONITORINFO, MONITORINFOEXW, RGBQUAD, SRCCOPY,
     };
     use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 
@@ -89,7 +89,9 @@ mod platform {
         let width = display.width_px as i32;
         let height = display.height_px as i32;
         if width <= 0 || height <= 0 {
-            return Err(CaptureError::Backend("display has no capture area".to_string()));
+            return Err(CaptureError::Backend(
+                "display has no capture area".to_string(),
+            ));
         }
 
         let hwnd = HWND::default();
@@ -211,7 +213,10 @@ mod platform {
     }
 
     fn utf16_device_name(raw: &[u16]) -> Option<String> {
-        let len = raw.iter().position(|value| *value == 0).unwrap_or(raw.len());
+        let len = raw
+            .iter()
+            .position(|value| *value == 0)
+            .unwrap_or(raw.len());
         if len == 0 {
             return None;
         }

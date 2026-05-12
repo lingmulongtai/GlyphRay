@@ -212,7 +212,8 @@ pub trait SecretStore {
         secret: SecretBytes,
     ) -> Result<(), SecurityError>;
 
-    fn get_device_secret(&self, device_id: &DeviceId) -> Result<Option<SecretBytes>, SecurityError>;
+    fn get_device_secret(&self, device_id: &DeviceId)
+        -> Result<Option<SecretBytes>, SecurityError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,11 +261,7 @@ impl SessionCipher {
         })
     }
 
-    pub fn open(
-        &self,
-        packet: &SealedPacket,
-        aad: &[u8],
-    ) -> Result<Vec<u8>, SecurityError> {
+    pub fn open(&self, packet: &SealedPacket, aad: &[u8]) -> Result<Vec<u8>, SecurityError> {
         let nonce = nonce_from_counter(packet.counter);
         self.cipher
             .decrypt(
@@ -333,7 +330,10 @@ impl SecretStore for InMemorySecretStore {
         Ok(())
     }
 
-    fn get_device_secret(&self, device_id: &DeviceId) -> Result<Option<SecretBytes>, SecurityError> {
+    fn get_device_secret(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Option<SecretBytes>, SecurityError> {
         Ok(self
             .secrets
             .get(device_id)

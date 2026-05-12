@@ -24,7 +24,10 @@ enum class TransportChannel(val wireId: Int) {
 object TransportMessageKind {
     const val pairingRequest = 5
     const val pairingResult = 6
+    const val displayInfo = 7
+    const val encoderConfig = 8
     const val stylusInputBatch = 11
+    const val keyboardInput = 13
     const val latencyPing = 15
     const val latencyPong = 16
 }

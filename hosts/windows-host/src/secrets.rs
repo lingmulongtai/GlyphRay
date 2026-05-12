@@ -21,8 +21,10 @@ impl SecretStore for PlatformSecretStore {
         self.inner.put_device_secret(device_id, secret)
     }
 
-    fn get_device_secret(&self, device_id: &DeviceId) -> Result<Option<SecretBytes>, SecurityError> {
+    fn get_device_secret(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Option<SecretBytes>, SecurityError> {
         self.inner.get_device_secret(device_id)
     }
 }
-

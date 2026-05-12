@@ -38,4 +38,3 @@ impl<S: SecretStore> PairingService<S> {
             .put_device_secret(&device_id, shared_secret)
     }
 }
-

@@ -55,4 +55,3 @@ mod tests {
         assert_eq!(selected.kind, RelayCandidateKind::DirectLan);
     }
 }
-

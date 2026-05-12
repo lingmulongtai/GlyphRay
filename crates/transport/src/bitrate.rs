@@ -84,4 +84,3 @@ mod tests {
         assert!(after > before);
     }
 }
-

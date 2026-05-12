@@ -28,10 +28,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.view.KeyEvent
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.input.StylusDiagnosticsController
+import com.glyphray.android.network.ClientColorSpace
+import com.glyphray.android.network.ClientInputSettings
+import com.glyphray.android.network.ClientResolution
+import com.glyphray.android.network.ClientTouchMode
+import com.glyphray.android.network.ClientVideoCodec
+import com.glyphray.android.network.ClientVideoSettings
 import com.glyphray.android.network.HostDiscoveryState
 import com.glyphray.android.network.SessionControlState
+import com.glyphray.android.network.SpecialRemoteKey
 import com.glyphray.android.network.StylusLanBridgeController
 import com.glyphray.android.ui.components.CalibrationPanel
 import com.glyphray.android.ui.components.CalibrationStep
@@ -131,7 +139,7 @@ fun ConnectionScreen(
     ) {
         MetricRow("Host", selectedHost?.hostName ?: "No host selected")
         MetricRow("Endpoint", selectedHost?.let { "${it.address.hostAddress}:${it.controlPort}" } ?: "-")
-        MetricRow("Selected display", "Primary monitor")
+        MetricRow("Selected display", controlState.primaryDisplay?.label ?: "Primary monitor")
         MetricRow("Video", "H.264 / low latency / 60 fps")
         MetricRow("Input", "Stylus priority channel")
         MetricRow("Control", controlState.statusLabel)
@@ -139,6 +147,7 @@ fun ConnectionScreen(
         MetricRow("Control responses", controlState.responsesReceived.toString())
         MetricRow("Pairing", controlState.lastPairingAccepted?.let { if (it) "Accepted" else "Rejected" } ?: "Waiting")
         MetricRow("Latency pong", controlState.lastRoundTripMs?.let { "${it} ms" } ?: "-")
+        MetricRow("Host displays", controlState.displays.size.toString())
         MetricRow("Trusted device", controlState.trustedDeviceId ?: "-")
         MetricRow("Last control action", controlState.lastAction)
         controlState.lastError?.let { error ->
@@ -153,6 +162,12 @@ fun ConnectionScreen(
 @Composable
 fun RemoteSessionScreen(
     selectedHost: DiscoveredHost?,
+    controlState: SessionControlState,
+    fullscreen: Boolean,
+    onFullscreenChange: (Boolean) -> Unit,
+    onVideoSettings: () -> Unit,
+    onSpecialKey: (SpecialRemoteKey) -> Unit,
+    onKeyEvent: (KeyEvent) -> Boolean,
     onPenSettings: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
@@ -177,8 +192,12 @@ fun RemoteSessionScreen(
         subtitle = selectedHost?.let { "Streaming workspace for ${it.hostName}" }
             ?: "Low-latency remote display workspace",
         actions = {
+            PrimaryAction("Video", onVideoSettings)
             PrimaryAction("Pen", onPenSettings)
             PrimaryAction("Diag", onDiagnostics)
+            PrimaryAction(if (fullscreen) "Window" else "Full") {
+                onFullscreenChange(!fullscreen)
+            }
         },
     ) {
         RemoteDisplayView(
@@ -192,8 +211,9 @@ fun RemoteSessionScreen(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(320.dp),
+                .height(if (fullscreen) 620.dp else 320.dp),
             onInputEvent = stylusBridge::onMotionEvent,
+            onKeyEvent = onKeyEvent,
         )
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -201,9 +221,19 @@ fun RemoteSessionScreen(
             AssistChip(onClick = {}, label = { Text("12 ms RTT") })
             AssistChip(onClick = {}, label = { Text("Ink input") })
         }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (controlState.inputSettings.specialKeyOverlay) {
+                AssistChip(onClick = { onSpecialKey(SpecialRemoteKey.Windows) }, label = { Text("Win") })
+                AssistChip(onClick = { onSpecialKey(SpecialRemoteKey.PrintScreen) }, label = { Text("PrtSc") })
+            }
+            AssistChip(onClick = {}, label = { Text(controlState.inputSettings.touchMode.label) })
+        }
         Spacer(Modifier.height(10.dp))
         MetricRow("Input stream", bridgeState.statusLabel)
         MetricRow("Input host", bridgeState.connectedHostName ?: "-")
+        MetricRow("Bluetooth keyboard", if (controlState.inputSettings.bluetoothKeyboardEnabled) "Enabled" else "Off")
+        MetricRow("Fullscreen", if (fullscreen) "On" else "Off")
         MetricRow("Stylus packets", bridgeState.packetsSent.toString())
         MetricRow("Stylus samples", bridgeState.samplesSent.toString())
         bridgeState.lastError?.let { error ->
@@ -250,14 +280,86 @@ fun PenSettingsScreen(onDiagnostics: () -> Unit) {
 }
 
 @Composable
-fun VideoSettingsScreen() {
+fun VideoSettingsScreen(
+    controlState: SessionControlState,
+    onSettingsChange: (ClientVideoSettings) -> Unit,
+    onInputSettingsChange: (ClientInputSettings) -> Unit,
+    onApply: () -> Unit,
+) {
+    val settings = controlState.videoSettings
+    val input = controlState.inputSettings
+
     ScreenFrame(
         title = "Video Settings",
-        subtitle = "Hardware decode and low-latency rendering",
+        subtitle = "Client-requested encoder and session controls",
+        actions = { PrimaryAction("Apply", onApply) },
     ) {
-        MetricRow("Codec", "H.264 first")
+        MetricRow("Current request", settings.summary)
+        Spacer(Modifier.height(12.dp))
+        Text("Resolution", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ClientResolution.entries.forEach { resolution ->
+                AssistChip(
+                    onClick = { onSettingsChange(settings.copy(resolution = resolution)) },
+                    label = { Text(resolution.label) },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Codec", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ClientVideoCodec.entries.forEach { codec ->
+                AssistChip(
+                    onClick = { onSettingsChange(settings.copy(codec = codec)) },
+                    label = { Text(codec.label) },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Color space", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ClientColorSpace.entries.forEach { colorSpace ->
+                AssistChip(
+                    onClick = { onSettingsChange(settings.copy(colorSpace = colorSpace)) },
+                    label = { Text(colorSpace.label) },
+                )
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        MetricRow("Refresh rate", "${settings.maxFps} fps")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(60, 90, 120).forEach { fps ->
+                AssistChip(onClick = { onSettingsChange(settings.copy(maxFps = fps)) }, label = { Text("$fps") })
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        MetricRow("Bitrate", "${settings.targetBitrateKbps} kbps")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(12_000, 18_000, 35_000, 60_000).forEach { bitrate ->
+                AssistChip(
+                    onClick = { onSettingsChange(settings.copy(targetBitrateKbps = bitrate)) },
+                    label = { Text("${bitrate / 1_000} Mbps") },
+                )
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text("Client controls", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ClientTouchMode.entries.forEach { touchMode ->
+                AssistChip(
+                    onClick = { onInputSettingsChange(input.copy(touchMode = touchMode)) },
+                    label = { Text(touchMode.label) },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        ToggleRow("Bluetooth keyboard capture", input.bluetoothKeyboardEnabled) {
+            onInputSettingsChange(input.copy(bluetoothKeyboardEnabled = it))
+        }
+        ToggleRow("Special key overlay", input.specialKeyOverlay) {
+            onInputSettingsChange(input.copy(specialKeyOverlay = it))
+        }
         MetricRow("Render target", "Low-latency surface")
-        MetricRow("Frame rate", "60 fps now, 90/120 fps later")
     }
 }
 

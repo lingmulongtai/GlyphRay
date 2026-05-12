@@ -3,6 +3,7 @@ package com.glyphray.android.ui.video
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.MotionEvent
+import android.view.KeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ fun RemoteDisplayView(
     telemetry: SessionTelemetrySnapshot,
     modifier: Modifier = Modifier,
     onInputEvent: ((MotionEvent) -> Boolean)? = null,
+    onKeyEvent: ((KeyEvent) -> Boolean)? = null,
 ) {
     var status by remember { mutableStateOf("Waiting for video") }
     var decoder by remember { mutableStateOf<RemoteVideoDecoder?>(null) }
@@ -52,6 +54,8 @@ fun RemoteDisplayView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 SurfaceView(context).apply {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
                     setBackgroundColor(android.graphics.Color.BLACK)
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
@@ -84,8 +88,12 @@ fun RemoteDisplayView(
                 }
             },
             update = { view ->
+                view.requestFocus()
                 view.setOnTouchListener { _, event ->
                     onInputEvent?.invoke(event) ?: false
+                }
+                view.setOnKeyListener { _, _, event ->
+                    onKeyEvent?.invoke(event) ?: false
                 }
             },
         )

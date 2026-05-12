@@ -2,7 +2,10 @@ use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, 
 use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
 use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy};
-use glyphray_windows_host::input::{create_pen_injector, PenInjector, StylusInputBridge};
+use glyphray_windows_host::input::{
+    create_keyboard_injector, create_pen_injector, KeyboardInjector, KeyboardInputBridge,
+    PenInjector, StylusInputBridge,
+};
 use glyphray_windows_host::HostConfig;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -38,15 +41,17 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     let mut server = UdpServer::bind(control_addr)?;
     let discovery = LanDiscoverySocket::bind(config.discovery_port)?;
     let input_bridge = create_runtime_input_bridge(&config);
+    let keyboard_bridge = create_runtime_keyboard_bridge();
     let permission_policy = if std::env::var_os("GLYPHRAY_DEV_AUTO_APPROVE").is_some() {
         println!("Development auto-approval is enabled for incoming LAN clients.");
         PermissionPolicy::DevAutoApprove
     } else {
         PermissionPolicy::RequireApproval
     };
-    let mut runtime = HostBackendRuntime::<Box<dyn PenInjector>>::new_with_permission_policy(
+    let mut runtime = HostBackendRuntime::<Box<dyn PenInjector>>::new_with_input_bridges(
         config,
         input_bridge,
+        keyboard_bridge,
         permission_policy,
     );
     let commands = spawn_console_command_reader();
@@ -70,6 +75,26 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
 
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+fn create_runtime_keyboard_bridge() -> Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>> {
+    if std::env::var_os("GLYPHRAY_ENABLE_KEYBOARD_INJECTION").is_none() {
+        println!(
+            "Native keyboard injection is disabled. Set GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1 for LAN keyboard smoke tests."
+        );
+        return None;
+    }
+
+    let injector = match create_keyboard_injector() {
+        Ok(injector) => injector,
+        Err(err) => {
+            println!("Keyboard injector unavailable: {err}");
+            return None;
+        }
+    };
+
+    println!("Native keyboard injection is enabled for approved clients.");
+    Some(KeyboardInputBridge::new(injector))
 }
 
 fn create_runtime_input_bridge(
@@ -173,11 +198,24 @@ fn drain_console_commands(
                 } else {
                     for session in sessions {
                         println!(
-                            "session peer={} device={} permission={:?} packets={}",
+                            "session peer={} device={} permission={:?} packets={} encoder={}",
                             session.peer,
                             session.device_id.as_deref().unwrap_or("-"),
                             session.permission,
-                            session.packets_received
+                            session.packets_received,
+                            session
+                                .encoder_config
+                                .as_ref()
+                                .map(|config| format!(
+                                    "{}x{} {}fps {}kbps {:?} {:?}",
+                                    config.width,
+                                    config.height,
+                                    config.max_fps,
+                                    config.target_bitrate_kbps,
+                                    config.codec,
+                                    config.color_space
+                                ))
+                                .unwrap_or_else(|| "-".to_string())
                         );
                     }
                 }
@@ -203,8 +241,34 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
         BackendEvent::PairingResultQueued { peer, accepted } => {
             println!("PairingResult queued for {peer}: accepted={accepted}");
         }
+        BackendEvent::DisplayInfoQueued { peer, displays } => {
+            println!("DisplayInfo queued for {peer}: {displays} display(s)");
+        }
         BackendEvent::PeerApproved { peer } => println!("Peer approved: {peer}"),
         BackendEvent::PeerRejected { peer } => println!("Peer rejected: {peer}"),
+        BackendEvent::EncoderConfigUpdated {
+            peer,
+            width,
+            height,
+            max_fps,
+            target_bitrate_kbps,
+        } => {
+            println!("Encoder config from {peer}: {width}x{height} {max_fps}fps {target_bitrate_kbps}kbps");
+        }
+        BackendEvent::KeyboardDecoded {
+            peer,
+            virtual_key,
+            pressed,
+        } => {
+            println!("Keyboard input from {peer}: vk={virtual_key} pressed={pressed}");
+        }
+        BackendEvent::KeyboardInjected {
+            peer,
+            virtual_key,
+            pressed,
+        } => {
+            println!("Keyboard injected for {peer}: vk={virtual_key} pressed={pressed}");
+        }
         other => println!("backend event: {other:?}"),
     }
 }

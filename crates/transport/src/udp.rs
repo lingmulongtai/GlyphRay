@@ -47,7 +47,9 @@ impl UdpServer {
         Ok(())
     }
 
-    pub fn poll_recv_from(&mut self) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
+    pub fn poll_recv_from(
+        &mut self,
+    ) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
         let mut buffer = vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD];
         match self.socket.recv_from(&mut buffer) {
             Ok((len, peer)) => decode_packet(&buffer[..len]).map(|packet| Some((packet, peer))),
@@ -137,20 +139,23 @@ pub fn decode_packet(bytes: &[u8]) -> Result<TransportPacket, TransportError> {
     let message_kind = MessageKind::try_from(u16::from_le_bytes([bytes[7], bytes[8]]))
         .map_err(|err| TransportError::Decode(err.to_string()))?;
     let sequence = u64::from_le_bytes(bytes[9..17].try_into().expect("slice length"));
-    let enqueue_timestamp_us =
-        u64::from_le_bytes(bytes[17..25].try_into().expect("slice length"));
+    let enqueue_timestamp_us = u64::from_le_bytes(bytes[17..25].try_into().expect("slice length"));
     let payload_len = u32::from_le_bytes(bytes[25..29].try_into().expect("slice length")) as usize;
     if payload_len > MAX_DATAGRAM_PAYLOAD {
         return Err(TransportError::PayloadTooLarge);
     }
     if bytes.len() != HEADER_LEN + payload_len {
-        return Err(TransportError::Decode("payload length mismatch".to_string()));
+        return Err(TransportError::Decode(
+            "payload length mismatch".to_string(),
+        ));
     }
 
     let expected_crc = u32::from_le_bytes(bytes[29..33].try_into().expect("slice length"));
     let payload = bytes[HEADER_LEN..].to_vec();
     if crc32fast::hash(&payload) != expected_crc {
-        return Err(TransportError::Decode("payload checksum mismatch".to_string()));
+        return Err(TransportError::Decode(
+            "payload checksum mismatch".to_string(),
+        ));
     }
 
     Ok(TransportPacket {
@@ -218,6 +223,9 @@ mod tests {
         let last = encoded.len() - 1;
         encoded[last] ^= 0x7f;
 
-        assert!(matches!(decode_packet(&encoded), Err(TransportError::Decode(_))));
+        assert!(matches!(
+            decode_packet(&encoded),
+            Err(TransportError::Decode(_))
+        ));
     }
 }

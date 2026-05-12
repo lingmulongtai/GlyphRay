@@ -62,6 +62,7 @@ enum class GlyphRayScreen(val label: String) {
 fun GlyphRayApp() {
     var screen by remember { mutableStateOf(GlyphRayScreen.Hosts) }
     var selectedHost by remember { mutableStateOf<DiscoveredHost?>(null) }
+    var sessionFullscreen by remember { mutableStateOf(false) }
     val diagnosticsController = remember { StylusDiagnosticsController() }
     val hostDiscoveryController = remember { HostDiscoveryController() }
     val sessionControlController = remember { SessionControlController() }
@@ -77,20 +78,23 @@ fun GlyphRayApp() {
 
     Scaffold(
         bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                listOf(
-                    GlyphRayScreen.Hosts,
-                    GlyphRayScreen.Session,
-                    GlyphRayScreen.Pen,
-                    GlyphRayScreen.Security,
-                    GlyphRayScreen.Diagnostics,
-                ).forEach { item ->
-                    NavigationBarItem(
-                        selected = screen == item,
-                        onClick = { screen = item },
-                        label = { Text(item.label) },
-                        icon = { Text(item.label.first().toString()) },
-                    )
+            if (!(screen == GlyphRayScreen.Session && sessionFullscreen)) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    listOf(
+                        GlyphRayScreen.Hosts,
+                        GlyphRayScreen.Session,
+                        GlyphRayScreen.Pen,
+                        GlyphRayScreen.Video,
+                        GlyphRayScreen.Security,
+                        GlyphRayScreen.Diagnostics,
+                    ).forEach { item ->
+                        NavigationBarItem(
+                            selected = screen == item,
+                            onClick = { screen = item },
+                            label = { Text(item.label) },
+                            icon = { Text(item.label.first().toString()) },
+                        )
+                    }
                 }
             }
         },
@@ -126,11 +130,27 @@ fun GlyphRayApp() {
                 )
                 GlyphRayScreen.Session -> RemoteSessionScreen(
                     selectedHost = selectedHost,
+                    controlState = sessionControlController.state,
+                    fullscreen = sessionFullscreen,
+                    onFullscreenChange = { fullscreen ->
+                        sessionFullscreen = fullscreen
+                        sessionControlController.updateInputSettings(
+                            sessionControlController.state.inputSettings.copy(fullscreenMode = fullscreen),
+                        )
+                    },
+                    onVideoSettings = { screen = GlyphRayScreen.Video },
+                    onSpecialKey = sessionControlController::sendSpecialKey,
+                    onKeyEvent = sessionControlController::onKeyEvent,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
                 )
                 GlyphRayScreen.Pen -> PenSettingsScreen(onDiagnostics = { screen = GlyphRayScreen.Diagnostics })
-                GlyphRayScreen.Video -> VideoSettingsScreen()
+                GlyphRayScreen.Video -> VideoSettingsScreen(
+                    controlState = sessionControlController.state,
+                    onSettingsChange = sessionControlController::updateVideoSettings,
+                    onInputSettingsChange = sessionControlController::updateInputSettings,
+                    onApply = sessionControlController::sendEncoderConfig,
+                )
                 GlyphRayScreen.Security -> SecuritySettingsScreen()
                 GlyphRayScreen.Diagnostics -> DiagnosticsScreen(diagnosticsController)
             }

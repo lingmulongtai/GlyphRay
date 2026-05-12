@@ -137,8 +137,8 @@ pub struct Frame {
 }
 
 pub fn encode_frame(sequence: u64, message: &Message) -> Result<Vec<u8>, ProtocolError> {
-    let payload = bincode::serialize(message)
-        .map_err(|err| ProtocolError::Serialization(err.to_string()))?;
+    let payload =
+        bincode::serialize(message).map_err(|err| ProtocolError::Serialization(err.to_string()))?;
     if payload.len() > MAX_PAYLOAD_LEN {
         return Err(ProtocolError::PayloadTooLarge);
     }
@@ -277,6 +277,7 @@ pub struct DisplayDescriptor {
 pub struct EncoderConfig {
     pub display_id: u32,
     pub codec: VideoCodec,
+    pub color_space: ColorSpace,
     pub width: u32,
     pub height: u32,
     pub max_fps: u16,
@@ -290,6 +291,14 @@ pub enum VideoCodec {
     H264,
     H265,
     Av1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ColorSpace {
+    Srgb,
+    DisplayP3,
+    Rec709,
+    Rec2020Pq,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,10 +482,13 @@ mod tests {
 
     #[test]
     fn rejects_bad_magic() {
-        let mut encoded = encode_frame(1, &Message::LatencyPing(LatencyPing {
-            sequence: 3,
-            client_send_timestamp_us: 10,
-        }))
+        let mut encoded = encode_frame(
+            1,
+            &Message::LatencyPing(LatencyPing {
+                sequence: 3,
+                client_send_timestamp_us: 10,
+            }),
+        )
         .expect("encode");
         encoded[0] = b'X';
 
@@ -485,13 +497,34 @@ mod tests {
 
     #[test]
     fn rejects_checksum_mismatch() {
-        let mut encoded = encode_frame(1, &Message::Disconnect(Disconnect {
-            reason: "test".to_string(),
-        }))
+        let mut encoded = encode_frame(
+            1,
+            &Message::Disconnect(Disconnect {
+                reason: "test".to_string(),
+            }),
+        )
         .expect("encode");
         let last = encoded.len() - 1;
         encoded[last] ^= 0x11;
 
         assert_eq!(decode_frame(&encoded), Err(ProtocolError::ChecksumMismatch));
+    }
+
+    #[test]
+    fn encoder_config_carries_video_quality_settings() {
+        let message = Message::EncoderConfig(EncoderConfig {
+            display_id: 2,
+            codec: VideoCodec::H264,
+            color_space: ColorSpace::Rec709,
+            width: 2560,
+            height: 1440,
+            max_fps: 120,
+            target_bitrate_kbps: 35_000,
+            keyframe_interval_ms: 1_000,
+            low_latency: true,
+        });
+
+        let decoded = decode_frame(&encode_frame(9, &message).expect("encode")).expect("decode");
+        assert_eq!(decoded.message, message);
     }
 }

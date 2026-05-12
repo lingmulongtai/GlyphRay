@@ -106,6 +106,90 @@ class ProtocolFrameCodecTest {
         assertEquals(130, message.hostReceiveTimestampUs)
         assertEquals(140, message.hostSendTimestampUs)
     }
+
+    @Test
+    fun displayInfoFrameDecodesRustDisplayDescriptors() {
+        val name = "\\\\.\\DISPLAY1".toByteArray(Charsets.UTF_8)
+        val payload = ByteBuffer
+            .allocate(4 + 8 + 4 + 8 + name.size + 4 + 4 + 4 + 4 + 4 + 2 + 4 + 1)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(6)
+            .putLong(1)
+            .putInt(7)
+            .putLong(name.size.toLong())
+            .put(name)
+            .putInt(0)
+            .putInt(0)
+            .putInt(1920)
+            .putInt(1080)
+            .putFloat(1.25f)
+            .putShort(0.toShort())
+            .putFloat(60.0f)
+            .put(1.toByte())
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(encodeFrame(44, TransportMessageKind.displayInfo, payload))
+        val message = frame.message as ControlProtocolMessage.DisplayInfo
+
+        assertEquals(1, message.displays.size)
+        assertEquals(7, message.displays[0].id)
+        assertEquals("\\\\.\\DISPLAY1", message.displays[0].name)
+        assertEquals(1920, message.displays[0].widthPx)
+        assertEquals(1080, message.displays[0].heightPx)
+        assertEquals(true, message.displays[0].primary)
+    }
+
+    @Test
+    fun encoderConfigFrameUsesRustBincodeLayout() {
+        val frame = ProtocolFrameCodec.encodeEncoderConfig(
+            sequence = 55,
+            settings = ClientVideoSettings(
+                displayId = 2,
+                resolution = ClientResolution.R1440p,
+                codec = ClientVideoCodec.H265,
+                colorSpace = ClientColorSpace.DisplayP3,
+                maxFps = 120,
+                targetBitrateKbps = 35_000,
+                keyframeIntervalMs = 500,
+                lowLatency = true,
+            ),
+        )
+        val payload = frame.copyOfRange(24, frame.size)
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals(7, buffer.int)
+        assertEquals(2, buffer.int)
+        assertEquals(ClientVideoCodec.H265.wireIndex, buffer.int)
+        assertEquals(ClientColorSpace.DisplayP3.wireIndex, buffer.int)
+        assertEquals(2560, buffer.int)
+        assertEquals(1440, buffer.int)
+        assertEquals(120, buffer.short.toInt())
+        assertEquals(35_000, buffer.int)
+        assertEquals(500, buffer.int)
+        assertEquals(1, buffer.get().toInt())
+    }
+
+    @Test
+    fun keyboardInputFrameUsesRustBincodeLayout() {
+        val frame = ProtocolFrameCodec.encodeKeyboardInput(
+            sequence = 56,
+            scanCode = 0x37,
+            virtualKey = 0x2C,
+            pressed = true,
+            modifiers = 0,
+            timestampUs = 1234,
+        )
+        val payload = frame.copyOfRange(24, frame.size)
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals(12, buffer.int)
+        assertEquals(56, buffer.long)
+        assertEquals(1234, buffer.long)
+        assertEquals(0x37, buffer.int)
+        assertEquals(0x2C, buffer.int)
+        assertEquals(1, buffer.get().toInt())
+        assertEquals(0, buffer.int)
+    }
 }
 
 private fun encodeFrame(sequence: Long, messageKind: Int, payload: ByteArray): ByteArray {

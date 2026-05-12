@@ -72,6 +72,21 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 - Control: `LatencyPing`, `LatencyPong`, `ErrorMessage`, `Disconnect`
 - Optional later: `ClipboardMessage`
 
+## EncoderConfig
+
+`EncoderConfig` is the bidirectional video preference message used by the client now and by host-side UI overrides later:
+
+- display id
+- codec: H.264, H.265, or AV1
+- color space: sRGB, Display P3, Rec.709, or Rec.2020 PQ
+- width and height
+- max fps
+- target bitrate kbps
+- keyframe interval
+- low-latency mode flag
+
+The Windows host currently stores approved-client requests. The live capture/encode loop still needs to consume this stored config.
+
 ## StylusInputBatch
 
 `StylusInputBatch` carries many samples in one small packet:
@@ -94,6 +109,19 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 - predicted flag
 
 Input channel packets must be prioritized over video when congestion appears.
+
+## KeyboardInput
+
+`KeyboardInput` carries key state without raw typed text:
+
+- sequence
+- timestamp
+- hardware scan code when available
+- Windows virtual key
+- pressed flag
+- modifier bitfield
+
+The Android client maps common `KeyEvent` codes to Windows virtual keys before transmission. The Windows host can decode these packets and, when explicitly enabled for smoke testing, inject them through `SendInput`. Layout-aware text input and IME behavior remain future work.
 
 ## Compact Stylus Wire Packet
 

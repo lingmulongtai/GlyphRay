@@ -8,7 +8,7 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Input::Pointer::{
     InjectSyntheticPointerInput, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE,
-    POINTER_FLAG_PRIMARY, POINTER_FLAG_UPDATE, POINTER_FLAG_UP, POINTER_INFO, POINTER_PEN_INFO,
+    POINTER_FLAG_PRIMARY, POINTER_FLAG_UP, POINTER_FLAG_UPDATE, POINTER_INFO, POINTER_PEN_INFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PEN_MASK_PRESSURE, PEN_MASK_ROTATION, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, PT_PEN,
@@ -71,10 +71,7 @@ impl PenInjector for PlatformPenInjector {
             let pen_info = POINTER_PEN_INFO {
                 pointerInfo: pointer_info,
                 penFlags: Default::default(),
-                penMask: PEN_MASK_PRESSURE
-                    | PEN_MASK_TILT_X
-                    | PEN_MASK_TILT_Y
-                    | PEN_MASK_ROTATION,
+                penMask: PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y | PEN_MASK_ROTATION,
                 pressure: pressure.to_windows_pressure(sample.pressure),
                 rotation: sample.orientation_degrees.rem_euclid(360.0).round() as u32,
                 tiltX: sample.tilt_x_degrees.round().clamp(-90.0, 90.0) as i32,

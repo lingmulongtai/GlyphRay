@@ -97,8 +97,8 @@ pub struct LanDiscoverySocket {
 
 impl LanDiscoverySocket {
     pub fn bind(port: u16) -> Result<Self, TransportError> {
-        let socket = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
-            .map_err(io_error)?;
+        let socket =
+            UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).map_err(io_error)?;
         socket.set_broadcast(true).map_err(io_error)?;
         socket.set_nonblocking(true).map_err(io_error)?;
         Ok(Self {
@@ -109,7 +109,9 @@ impl LanDiscoverySocket {
 
     pub fn announce(&self, advertisement: &HostAdvertisement) -> Result<usize, TransportError> {
         let payload = advertisement.encode()?;
-        self.socket.send_to(&payload, self.broadcast_addr).map_err(io_error)
+        self.socket
+            .send_to(&payload, self.broadcast_addr)
+            .map_err(io_error)
     }
 
     pub fn poll(&self) -> Result<Option<(HostAdvertisement, SocketAddr)>, TransportError> {
@@ -171,4 +173,3 @@ mod tests {
         assert!(matches!(ad.encode(), Err(TransportError::PayloadTooLarge)));
     }
 }
-

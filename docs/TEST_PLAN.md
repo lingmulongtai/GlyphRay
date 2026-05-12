@@ -62,10 +62,13 @@ cargo test --workspace
 - Run `cargo run -p glyphray-windows-host -- serve`.
 - Confirm GDI fallback captures the selected monitor before replacing it with Windows Graphics Capture or Desktop Duplication.
 - Confirm a pending Android peer cannot inject input until approved.
+- With `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1`, confirm an approved Android Bluetooth keyboard can inject a safe key sequence.
+- Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
 
 ## Integration Tests To Add
 
 - Android-to-host stylus batch replay.
+- Android-to-host Bluetooth keyboard replay with Windows virtual-key mapping.
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.

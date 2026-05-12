@@ -80,4 +80,3 @@ mod tests {
         assert_eq!(first.sample_rate, 48_000);
     }
 }
-

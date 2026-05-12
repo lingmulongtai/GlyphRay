@@ -7,6 +7,9 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Host session registry with pending/approved/rejected peers.
 - Pairing request routing.
 - Console approval/rejection commands that send `PairingResult`.
+- Host monitor `DisplayInfo` response after accepted pairing.
+- Client `EncoderConfig` intake for resolution, refresh rate, bitrate, color space, codec, and low-latency settings.
+- Keyboard packet decode and opt-in `SendInput` injection for Bluetooth keyboard and special-key smoke tests.
 - Permission gating before input packets are accepted.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
@@ -37,7 +40,7 @@ approve 192.168.1.20:44999
 reject 192.168.1.20:44999
 ```
 
-Approval and rejection both send a protocol-level `PairingResult` back to the Android control channel.
+Approval and rejection both send a protocol-level `PairingResult` back to the Android control channel. Accepted pairing also queues `DisplayInfo` so the client can see available monitor geometry.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
@@ -56,8 +59,13 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 
 - The backend loop is still console-driven.
 - Peer approval is console-driven and still needs a native host UI prompt.
+- DisplayInfo uses current monitor enumeration and should later feed selected-monitor mapping and calibration.
+- Client encoder config is stored on the session but is not yet wired into the live capture/encode loop.
+- Keyboard packets can be injected with native Windows `SendInput` when `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1` is explicitly set.
+- Keyboard injection currently uses Windows virtual keys and needs layout-aware text/IME handling before beta.
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once approval UI exists.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
+- `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` is for explicit keyboard smoke tests only until the host permission UI exists.
 - Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.
 - Production Windows secret storage still needs DPAPI or Credential Manager.
 - Real app validation for Windows Ink input is still required.

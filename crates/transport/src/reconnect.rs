@@ -64,4 +64,3 @@ mod tests {
         assert_eq!(state.next_delay(), None);
     }
 }
-

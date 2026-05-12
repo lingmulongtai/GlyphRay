@@ -24,6 +24,8 @@ fn main() {
     println!("Selected display: {}", snapshot.selected_display_id);
     println!("Encoder: {}", snapshot.encoder_name);
     println!("Target bitrate: {} kbps", snapshot.target_bitrate_kbps);
-    println!("Pen injection available: {}", snapshot.pen_injection_available);
+    println!(
+        "Pen injection available: {}",
+        snapshot.pen_injection_available
+    );
 }
-

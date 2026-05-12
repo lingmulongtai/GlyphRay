@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 72%**
+**Overall progress estimate: 75%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 72
-  "Remaining product work" : 28
+  "Implemented foundation" : 75
+  "Remaining product work" : 25
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 68% |
-| Milestone 4 hardening and packaging | In progress | 48% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 74% |
+| Milestone 4 hardening and packaging | In progress | 50% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 36% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink      [##############------]  68%
-M4 Security + Packaging       [##########----------]  48%
+M3 Stylus -> Windows Ink      [###############-----]  74%
+M4 Security + Packaging       [##########----------]  50%
 M5 macOS + Audio + Relay      [#######-------------]  36%
 ```
 
@@ -138,9 +138,11 @@ sequenceDiagram
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
 - Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
 - Android control response receiver for `PairingResult` and `LatencyPong`.
+- Android display-info receiver for host monitor geometry after pairing.
+- Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard capture, and special-key overlay.
 - Android remote-session stylus bridge that captures drawing-surface input and sends compact stylus batches over UDP on a background worker.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
-- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, permission gating, and latency pong replies.
+- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard injection, permission gating, and latency pong replies.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
@@ -223,6 +225,7 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Milestone checklist |
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | Validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | Latency and telemetry targets |
+| [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | Implementation status for video, input, fullscreen, special keys, and host startup |
 | [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md) | Running development diary |
 
 ## Website

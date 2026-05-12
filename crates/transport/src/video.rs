@@ -36,11 +36,7 @@ impl VideoPacketizer {
         access_unit: &EncodedVideoAccessUnit,
     ) -> Result<Vec<TransportPacket>, TransportError> {
         let envelope = encode_access_unit(access_unit)?;
-        let fragments = fragment_frame(
-            access_unit.sequence,
-            &envelope,
-            self.max_fragment_payload,
-        )?;
+        let fragments = fragment_frame(access_unit.sequence, &envelope, self.max_fragment_payload)?;
 
         fragments
             .into_iter()
@@ -141,7 +137,9 @@ fn codec_from_u8(value: u8) -> Result<VideoCodec, TransportError> {
         1 => Ok(VideoCodec::H264),
         2 => Ok(VideoCodec::H265),
         3 => Ok(VideoCodec::Av1),
-        _ => Err(TransportError::Decode(format!("unknown video codec {value}"))),
+        _ => Err(TransportError::Decode(format!(
+            "unknown video codec {value}"
+        ))),
     }
 }
 
@@ -159,8 +157,8 @@ mod tests {
             payload: vec![0, 0, 1, 103],
         };
 
-        let decoded = decode_access_unit(&encode_access_unit(&unit).expect("encode"))
-            .expect("decode");
+        let decoded =
+            decode_access_unit(&encode_access_unit(&unit).expect("encode")).expect("decode");
         assert_eq!(decoded, unit);
     }
 
@@ -186,4 +184,3 @@ mod tests {
         assert_eq!(completed, Some(unit));
     }
 }
-

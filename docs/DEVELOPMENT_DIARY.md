@@ -1,5 +1,27 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Client And Host Control Audit
+
+今日は、解像度、refresh rate、bitrate、color space、codec、touch、Bluetooth keyboard、fullscreen、Win/PrintScreen 補助キー、host startup / pre-login 接続について棚卸しした。結論として、video protocol は一部あったが色空間と client 設定送信が足りず、touch/keyboard/fullscreen/special keys はまだ入口だった。pre-login 接続は Windows の interactive desktop / secure desktop 制約があるため、サービス化しても慎重な設計が必要。
+
+実装として、protocol の `EncoderConfig` に `ColorSpace` を追加し、Android の Video Settings から resolution / refresh / bitrate / color space / codec を選んで host へ送れるようにした。host backend は approved client の `EncoderConfig` を decode して session に保持する。さらに Android remote surface は Bluetooth keyboard の `KeyEvent` を拾い、common key を Windows virtual key に変換して `KeyboardInput` として送れるようにした。Win / PrintScreen の補助キー overlay も追加し、host 側は opt-in の `SendInput` keyboard injection wrapper まで進めた。
+
+fullscreen は Android session の bottom navigation を隠す focus mode として実装した。system bar まで隠す本当の immersive fullscreen、touch gesture translation、host-side encoder override UI、startup-at-login / service-agent 構成は `docs/FEATURE_MATRIX.md` と roadmap に明記した。
+
+検証として Rust workspace tests と Android debug build を通した。Android unit test task はこのローカル環境の JDK 24 だと AGP の task 生成で落ちるため、CI と同じ JDK 17 で回す前提にしている。
+
+この時点の進捗見積もり: 75%。
+
+## 2026-05-12 JST - DisplayInfo Handshake
+
+今日は pairing の後に host display geometry を返す `DisplayInfo` handshake を追加した。Windows backend は accepted pairing の直後に monitor enumeration の結果を `DisplayInfo` として control channel に流す。manual approval でも development auto-approval でも同じように display info が queued される。
+
+Android 側には `DisplayInfo` decode を追加し、`RemoteDisplayDescriptor` として保持するようにした。Connect 画面には host display count と primary display label が出る。これで、次に selected monitor、DPI、rotation、calibration を本物の host geometry に合わせる準備が整った。
+
+検証として Rust workspace tests と Android debug build を通した。
+
+この時点の進捗見積もり: 73%。
+
 ## 2026-05-12 JST - Pairing Response Loop
 
 今日は Android と Windows host の control channel を片道から往復にした。Windows backend は `PairingRequest` を受けたあと、console の `approve <peer>` / `reject <peer>` で `PairingResult` を返せるようになった。development auto-approval では pairing request 自体にも accepted result を返すので、実機 smoke test の手順が短くなる。

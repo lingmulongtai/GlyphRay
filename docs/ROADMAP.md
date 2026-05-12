@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 72%.
+Current overall progress estimate: 75%.
 
 ## Milestone 1
 
@@ -33,6 +33,8 @@ Current overall progress estimate: 72%.
 - [x] Add Android LAN host discovery receiver for host advertisements.
 - [x] Add Android control-channel sender for pairing and latency smoke tests.
 - [x] Add Android control-channel receiver for pairing and latency responses.
+- [x] Add Android display-info decode for host monitor negotiation.
+- [x] Add Android video/session setting controls for resolution, refresh, bitrate, color space, codec, fullscreen, touch mode, keyboard, and special keys.
 - [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
@@ -57,6 +59,13 @@ Current overall progress estimate: 72%.
 - [x] Add backend session registry and input packet routing.
 - [x] Add backend permission gate for input packets.
 - [x] Add console approval/rejection flow with `PairingResult` responses.
+- [x] Queue host `DisplayInfo` after accepted pairing.
+- [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
+- [ ] Implement host-side encoder override UI/CLI and connect settings to the live capture/encode loop.
+- [x] Add native Windows keyboard injection for approved clients behind an explicit smoke-test flag.
+- [ ] Add native Windows mouse injection for approved clients.
+- [ ] Add touch gesture translation for direct touch, trackpad, and gesture assist modes.
+- [ ] Add Android system-bar fullscreen handling.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
 - [x] Add drawing area calibration UI surface.
@@ -74,6 +83,8 @@ Current overall progress estimate: 72%.
 - [x] Add development-only backend auto-approval mode for LAN input smoke tests.
 - [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
+- [ ] Add Windows startup-at-login and service/agent architecture plan.
+- [ ] Validate and document lock-screen/pre-login limitations for capture and input.
 - [x] Add GitHub Pages deployment workflow for the download site.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.
 - [ ] Add macOS Keychain implementation.

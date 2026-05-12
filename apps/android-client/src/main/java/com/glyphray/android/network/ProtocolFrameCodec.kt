@@ -1,6 +1,7 @@
 package com.glyphray.android.network
 
 import android.os.SystemClock
+import android.view.KeyEvent
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
@@ -27,6 +28,26 @@ sealed interface ControlProtocolMessage {
         val hostReceiveTimestampUs: Long,
         val hostSendTimestampUs: Long,
     ) : ControlProtocolMessage
+
+    data class DisplayInfo(
+        val displays: List<RemoteDisplayDescriptor>,
+    ) : ControlProtocolMessage
+}
+
+data class RemoteDisplayDescriptor(
+    val id: Int,
+    val name: String,
+    val originX: Int,
+    val originY: Int,
+    val widthPx: Int,
+    val heightPx: Int,
+    val scaleFactor: Float,
+    val rotationDegrees: Int,
+    val refreshHz: Float,
+    val primary: Boolean,
+) {
+    val label: String
+        get() = "$name ${widthPx}x$heightPx @ ${"%.0f".format(refreshHz)} Hz"
 }
 
 object ProtocolFrameCodec {
@@ -56,6 +77,47 @@ object ProtocolFrameCodec {
             clientSendTimestampUs = clientSendTimestampUs,
         ),
     )
+
+    fun encodeEncoderConfig(
+        sequence: Long,
+        settings: ClientVideoSettings,
+    ): ByteArray = encodeFrame(
+        messageKind = TransportMessageKind.encoderConfig,
+        sequence = sequence,
+        payload = BincodeMessageEncoder.encoderConfig(settings),
+    )
+
+    fun encodeKeyboardInput(
+        sequence: Long,
+        scanCode: Int,
+        virtualKey: Int,
+        pressed: Boolean,
+        modifiers: Int,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): ByteArray = encodeFrame(
+        messageKind = TransportMessageKind.keyboardInput,
+        sequence = sequence,
+        payload = BincodeMessageEncoder.keyboardInput(
+            sequence = sequence,
+            timestampUs = timestampUs,
+            scanCode = scanCode,
+            virtualKey = virtualKey,
+            pressed = pressed,
+            modifiers = modifiers,
+        ),
+    )
+
+    fun encodeKeyboardInput(sequence: Long, event: KeyEvent): ByteArray? {
+        val virtualKey = RemoteKeyMapper.toWindowsVirtualKey(event.keyCode) ?: return null
+        return encodeKeyboardInput(
+            sequence = sequence,
+            scanCode = event.scanCode,
+            virtualKey = virtualKey,
+            pressed = event.action == KeyEvent.ACTION_DOWN,
+            modifiers = event.metaState,
+            timestampUs = event.eventTime * 1_000L,
+        )
+    }
 
     private fun encodeFrame(
         messageKind: Int,
@@ -100,6 +162,7 @@ object ProtocolFrameCodec {
 
         val message = when (messageKind) {
             TransportMessageKind.pairingResult -> BincodeMessageEncoder.decodePairingResult(payload)
+            TransportMessageKind.displayInfo -> BincodeMessageEncoder.decodeDisplayInfo(payload)
             TransportMessageKind.latencyPong -> BincodeMessageEncoder.decodeLatencyPong(payload)
             else -> error("Unsupported control protocol message kind: $messageKind")
         }
@@ -110,6 +173,9 @@ object ProtocolFrameCodec {
 private object BincodeMessageEncoder {
     private const val pairingRequestVariant = 4
     private const val pairingResultVariant = 5
+    private const val displayInfoVariant = 6
+    private const val encoderConfigVariant = 7
+    private const val keyboardInputVariant = 12
     private const val latencyPingVariant = 14
     private const val latencyPongVariant = 15
 
@@ -138,6 +204,40 @@ private object BincodeMessageEncoder {
         .putLong(clientSendTimestampUs)
         .array()
 
+    fun encoderConfig(settings: ClientVideoSettings): ByteArray = ByteBuffer
+        .allocate(4 + 4 + 4 + 4 + 4 + 4 + 2 + 4 + 4 + 1)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(encoderConfigVariant)
+        .putInt(settings.displayId)
+        .putInt(settings.codec.wireIndex)
+        .putInt(settings.colorSpace.wireIndex)
+        .putInt(settings.width)
+        .putInt(settings.height)
+        .putShort(settings.maxFps.toShort())
+        .putInt(settings.targetBitrateKbps)
+        .putInt(settings.keyframeIntervalMs)
+        .put(if (settings.lowLatency) 1.toByte() else 0.toByte())
+        .array()
+
+    fun keyboardInput(
+        sequence: Long,
+        timestampUs: Long,
+        scanCode: Int,
+        virtualKey: Int,
+        pressed: Boolean,
+        modifiers: Int,
+    ): ByteArray = ByteBuffer
+        .allocate(4 + 8 + 8 + 4 + 4 + 1 + 4)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putInt(keyboardInputVariant)
+        .putLong(sequence)
+        .putLong(timestampUs)
+        .putInt(scanCode)
+        .putInt(virtualKey)
+        .put(if (pressed) 1.toByte() else 0.toByte())
+        .putInt(modifiers)
+        .array()
+
     fun decodePairingResult(payload: ByteArray): ControlProtocolMessage.PairingResult {
         val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
         val variant = buffer.int
@@ -162,6 +262,20 @@ private object BincodeMessageEncoder {
         )
     }
 
+    fun decodeDisplayInfo(payload: ByteArray): ControlProtocolMessage.DisplayInfo {
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val variant = buffer.int
+        require(variant == displayInfoVariant) { "Payload did not contain DisplayInfo" }
+        val count = buffer.long
+        require(count >= 0 && count <= 64) { "Invalid display count: $count" }
+        val displays = buildList {
+            repeat(count.toInt()) {
+                add(buffer.readDisplayDescriptor())
+            }
+        }
+        return ControlProtocolMessage.DisplayInfo(displays)
+    }
+
     private fun ByteBuffer.putBincodeBytes(bytes: ByteArray): ByteBuffer {
         putLong(bytes.size.toLong())
         put(bytes)
@@ -182,6 +296,21 @@ private object BincodeMessageEncoder {
         val bytes = ByteArray(length.toInt())
         get(bytes)
         return bytes.toString(Charsets.UTF_8)
+    }
+
+    private fun ByteBuffer.readDisplayDescriptor(): RemoteDisplayDescriptor {
+        return RemoteDisplayDescriptor(
+            id = int,
+            name = readBincodeString(),
+            originX = int,
+            originY = int,
+            widthPx = int,
+            heightPx = int,
+            scaleFactor = float,
+            rotationDegrees = short.toInt() and 0xFFFF,
+            refreshHz = float,
+            primary = get().toInt() != 0,
+        )
     }
 }
 

@@ -30,9 +30,9 @@ impl PressureMapper {
     }
 
     pub fn normalize(&self, raw_pressure: f32) -> f32 {
-        let normalized =
-            ((raw_pressure - self.min_pressure) / (self.max_pressure - self.min_pressure))
-                .clamp(0.0, 1.0);
+        let normalized = ((raw_pressure - self.min_pressure)
+            / (self.max_pressure - self.min_pressure))
+            .clamp(0.0, 1.0);
         match self.curve {
             PressureCurve::Linear => normalized,
             PressureCurve::Soft => normalized.sqrt(),
@@ -84,4 +84,3 @@ mod tests {
         assert_eq!(mapper.normalize(0.8), 1.0);
     }
 }
-

@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::time::Duration;
 
-pub mod fragment;
 pub mod bitrate;
 pub mod discovery;
+pub mod fragment;
 pub mod reconnect;
 pub mod relay;
-pub mod udp;
 pub mod secure;
+pub mod udp;
 pub mod video;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

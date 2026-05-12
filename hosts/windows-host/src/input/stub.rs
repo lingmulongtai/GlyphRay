@@ -1,6 +1,6 @@
-use super::{InjectionReport, InputError, PenInjector};
+use super::{InjectionReport, InputError, KeyboardInjectionReport, KeyboardInjector, PenInjector};
 use glyphray_core::{CoordinateMapper, PressureMapper};
-use glyphray_protocol::StylusInputBatch;
+use glyphray_protocol::{KeyboardInput, StylusInputBatch};
 
 pub struct PlatformPenInjector;
 
@@ -21,3 +21,19 @@ impl PenInjector for PlatformPenInjector {
     }
 }
 
+pub struct PlatformKeyboardInjector;
+
+impl PlatformKeyboardInjector {
+    pub fn open() -> Result<Self, InputError> {
+        Err(InputError::UnsupportedPlatform)
+    }
+}
+
+impl KeyboardInjector for PlatformKeyboardInjector {
+    fn inject_key(
+        &mut self,
+        _input: &KeyboardInput,
+    ) -> Result<KeyboardInjectionReport, InputError> {
+        Err(InputError::UnsupportedPlatform)
+    }
+}

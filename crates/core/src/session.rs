@@ -20,4 +20,3 @@ pub enum ConnectionQuality {
     Unstable,
     Offline,
 }
-

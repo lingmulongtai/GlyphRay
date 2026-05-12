@@ -8,29 +8,29 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 72%**
+**全体進捗見積もり: 75%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 72
-  "残りの製品化作業" : 28
+  "実装済みの基盤" : 75
+  "残りの製品化作業" : 25
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 87% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 68% |
-| Milestone 4 security hardening / packaging | 進行中 | 48% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 74% |
+| Milestone 4 security hardening / packaging | 進行中 | 50% |
 | Milestone 5 macOS / audio / relay | 進行中 | 36% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink     [##############------]  68%
-M4 Security + Packaging      [##########----------]  48%
+M3 Stylus -> Windows Ink     [###############-----]  74%
+M4 Security + Packaging      [##########----------]  50%
 M5 macOS + Audio + Relay     [#######-------------]  36%
 ```
 
@@ -138,9 +138,11 @@ sequenceDiagram
 - Rust host の `GLYD` advertisement を読む Android LAN discovery。
 - `GLYT` control channel で `PairingRequest` と `LatencyPing` を送る Android control sender。
 - `PairingResult` と `LatencyPong` を受け取る Android control response receiver。
+- pairing 後に host monitor geometry を受け取る Android display-info receiver。
+- resolution、refresh rate、bitrate、color space、codec、touch mode、fullscreen mode、Bluetooth keyboard capture、special-key overlay の Android video/session settings。
 - remote session の描画面から stylus input を拾い、background worker で compact stylus batch を UDP 送信する Android bridge。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
-- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、permission gate、latency pong。
+- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、display-info response、encoder config intake、opt-in keyboard injection、permission gate、latency pong。
 - LAN stylus path の smoke test 用 development auto-approval mode。
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
@@ -223,6 +225,7 @@ macOS host はまだ Phase 2/5 の基盤です。native pen injection の主戦�
 | [docs/ROADMAP.md](docs/ROADMAP.md) | milestone checklist |
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | latency / telemetry targets |
+| [docs/FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | video / input / fullscreen / special keys / host startup の実装状況 |
 | [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md) | 開発日記 |
 
 ## ウェブサイト

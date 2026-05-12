@@ -1,5 +1,5 @@
 use crate::capture::CapturedFrame;
-use glyphray_protocol::VideoCodec;
+use glyphray_protocol::{ColorSpace, VideoCodec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderBackend {
@@ -13,6 +13,7 @@ pub enum EncoderBackend {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncoderSettings {
     pub codec: VideoCodec,
+    pub color_space: ColorSpace,
     pub width: u32,
     pub height: u32,
     pub fps: u16,
@@ -31,6 +32,7 @@ impl EncoderSettings {
 
         Self {
             codec: VideoCodec::H264,
+            color_space: ColorSpace::Rec709,
             width,
             height,
             fps,
@@ -133,6 +135,7 @@ mod tests {
     fn low_latency_h264_disables_b_frames() {
         let settings = EncoderSettings::low_latency_h264(1920, 1080, 60);
         assert_eq!(settings.codec, VideoCodec::H264);
+        assert_eq!(settings.color_space, ColorSpace::Rec709);
         assert!(!settings.allow_b_frames);
         assert_eq!(settings.keyframe_interval_ms, 1_000);
     }
@@ -154,4 +157,3 @@ mod tests {
         assert_eq!(encoder.encode(&frame).expect("encode").sequence, 1);
     }
 }
-

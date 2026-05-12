@@ -104,9 +104,11 @@ pub fn decode_stylus_batch(bytes: &[u8]) -> Result<StylusInputBatch, StylusWireE
         offset += 4;
         let pressure = f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
         offset += 4;
-        let tilt_x_degrees = f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
+        let tilt_x_degrees =
+            f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
         offset += 4;
-        let tilt_y_degrees = f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
+        let tilt_y_degrees =
+            f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
         offset += 4;
         let orientation_degrees =
             f32::from_le_bytes(bytes[offset..offset + 4].try_into().expect("slice"));
@@ -218,8 +220,8 @@ mod tests {
             }],
         };
 
-        let decoded = decode_stylus_batch(&encode_stylus_batch(&batch).expect("encode"))
-            .expect("decode");
+        let decoded =
+            decode_stylus_batch(&encode_stylus_batch(&batch).expect("encode")).expect("decode");
         assert_eq!(decoded, batch);
     }
 }

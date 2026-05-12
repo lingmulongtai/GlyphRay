@@ -102,4 +102,3 @@ mod tests {
         assert_eq!(window.p95(), Some(95));
     }
 }
-

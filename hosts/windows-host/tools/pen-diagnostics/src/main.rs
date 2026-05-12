@@ -82,4 +82,3 @@ fn sample(
         predicted: false,
     }
 }
-

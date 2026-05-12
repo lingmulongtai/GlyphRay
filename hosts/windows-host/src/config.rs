@@ -12,7 +12,8 @@ pub struct HostConfig {
 impl Default for HostConfig {
     fn default() -> Self {
         Self {
-            host_name: std::env::var("COMPUTERNAME").unwrap_or_else(|_| "GlyphRay Host".to_string()),
+            host_name: std::env::var("COMPUTERNAME")
+                .unwrap_or_else(|_| "GlyphRay Host".to_string()),
             default_display_id: 0,
             encoder_preference: EncoderPreference::Auto,
             require_connection_permission: true,

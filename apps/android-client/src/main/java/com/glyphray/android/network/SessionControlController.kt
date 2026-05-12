@@ -1,6 +1,7 @@
 package com.glyphray.android.network
 
 import android.os.Build
+import android.view.KeyEvent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,11 +21,17 @@ data class SessionControlState(
     val lastPairingAccepted: Boolean? = null,
     val trustedDeviceId: String? = null,
     val lastRoundTripMs: Long? = null,
+    val displays: List<RemoteDisplayDescriptor> = emptyList(),
+    val videoSettings: ClientVideoSettings = ClientVideoSettings(),
+    val inputSettings: ClientInputSettings = ClientInputSettings(),
     val lastAction: String = "Idle",
     val lastError: String? = null,
 ) {
     val statusLabel: String
         get() = if (isConnected) "Control channel ready" else "Disconnected"
+
+    val primaryDisplay: RemoteDisplayDescriptor?
+        get() = displays.firstOrNull { it.primary } ?: displays.firstOrNull()
 }
 
 class SessionControlController : Closeable {
@@ -71,6 +78,49 @@ class SessionControlController : Closeable {
         executor.execute {
             sendControl("Latency ping") { client ->
                 client.sendLatencyPing()
+            }
+        }
+    }
+
+    fun updateVideoSettings(settings: ClientVideoSettings) {
+        state = state.copy(videoSettings = settings)
+    }
+
+    fun updateInputSettings(settings: ClientInputSettings) {
+        state = state.copy(inputSettings = settings)
+    }
+
+    fun sendEncoderConfig() {
+        executor.execute {
+            val settings = state.videoSettings
+            sendControl("Encoder config") { client ->
+                client.sendEncoderConfig(settings)
+            }
+        }
+    }
+
+    fun onKeyEvent(event: KeyEvent): Boolean {
+        if (!state.inputSettings.bluetoothKeyboardEnabled) {
+            return false
+        }
+        if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) {
+            return false
+        }
+        if (RemoteKeyMapper.toWindowsVirtualKey(event.keyCode) == null) {
+            return false
+        }
+        executor.execute {
+            sendControl("Keyboard input") { client ->
+                client.sendKeyboardInput(event)
+            }
+        }
+        return true
+    }
+
+    fun sendSpecialKey(key: SpecialRemoteKey) {
+        executor.execute {
+            sendControl("${key.label} key") { client ->
+                client.sendSpecialKey(key)
             }
         }
     }
@@ -136,6 +186,9 @@ class SessionControlController : Closeable {
                     lastAction = if (message.accepted) "Pairing accepted" else "Pairing rejected",
                     lastError = message.reason,
                 )
+                if (message.accepted) {
+                    sendEncoderConfig()
+                }
             }
             is ControlProtocolMessage.LatencyPong -> {
                 val nowUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L
@@ -144,6 +197,14 @@ class SessionControlController : Closeable {
                     responsesReceived = state.responsesReceived + 1,
                     lastRoundTripMs = rttMs,
                     lastAction = "Latency pong received",
+                    lastError = null,
+                )
+            }
+            is ControlProtocolMessage.DisplayInfo -> {
+                state = state.copy(
+                    responsesReceived = state.responsesReceived + 1,
+                    displays = message.displays,
+                    lastAction = "Display info received",
                     lastError = null,
                 )
             }
@@ -185,11 +246,59 @@ private class ControlUdpClient : Closeable {
         return sendControl(TransportMessageKind.latencyPing, frame)
     }
 
+    fun sendEncoderConfig(settings: ClientVideoSettings): Int {
+        val frame = ProtocolFrameCodec.encodeEncoderConfig(
+            sequence = nextFrameSequence++,
+            settings = settings,
+        )
+        return sendControl(TransportMessageKind.encoderConfig, frame)
+    }
+
+    fun sendKeyboardInput(event: KeyEvent): Int {
+        val frame = ProtocolFrameCodec.encodeKeyboardInput(
+            sequence = nextFrameSequence++,
+            event = event,
+        ) ?: return 0
+        return sendInput(TransportMessageKind.keyboardInput, frame)
+    }
+
+    fun sendSpecialKey(key: SpecialRemoteKey): Int {
+        val down = ProtocolFrameCodec.encodeKeyboardInput(
+            sequence = nextFrameSequence++,
+            scanCode = key.scanCode,
+            virtualKey = key.virtualKey,
+            pressed = true,
+            modifiers = 0,
+        )
+        val up = ProtocolFrameCodec.encodeKeyboardInput(
+            sequence = nextFrameSequence++,
+            scanCode = key.scanCode,
+            virtualKey = key.virtualKey,
+            pressed = false,
+            modifiers = 0,
+        )
+        return sendInput(TransportMessageKind.keyboardInput, down) +
+            sendInput(TransportMessageKind.keyboardInput, up)
+    }
+
     private fun sendControl(messageKind: Int, frame: ByteArray): Int {
         val target = remote ?: error("ControlUdpClient is not connected to a host")
         val datagram = TransportPacketCodec.encodeControl(
             sequence = nextTransportSequence++,
             messageKind = messageKind,
+            payload = frame,
+        )
+        socket.send(DatagramPacket(datagram, datagram.size, target))
+        return datagram.size
+    }
+
+    private fun sendInput(messageKind: Int, frame: ByteArray): Int {
+        val target = remote ?: error("ControlUdpClient is not connected to a host")
+        val datagram = TransportPacketCodec.encode(
+            channel = TransportChannel.Input,
+            messageKind = messageKind,
+            sequence = nextTransportSequence++,
+            timestampUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L,
             payload = frame,
         )
         socket.send(DatagramPacket(datagram, datagram.size, target))
