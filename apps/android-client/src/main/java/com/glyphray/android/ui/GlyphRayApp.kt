@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -128,7 +129,7 @@ fun ScreenFrame(
     title: String,
     subtitle: String,
     actions: @Composable RowScope.() -> Unit = {},
-    content: @Composable Column.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -148,7 +149,7 @@ fun ScreenFrame(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
         }
         Spacer(Modifier.height(18.dp))
-        Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
         Spacer(Modifier.height(18.dp))
         content()
     }

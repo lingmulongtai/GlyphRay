@@ -86,6 +86,24 @@ Android から stylus packet を送れるようになったので、今日は Wi
 
 この時点の進捗見積もり: 68%。
 
+## 2026-05-11 JST - Day 1, Android Build Green
+
+Android debug build が `gradlew.bat :apps:android-client:assembleDebug` で成功した。残っていた Compose の `Divider` deprecation warning は `HorizontalDivider` に置き換えた。Rust と Android の両方で実コンパイルが通ったので、次は実機 LAN smoke test に進める状態になった。
+
+この時点の進捗見積もり: 69%。
+
+## 2026-05-11 JST - Day 1, Compose Scope Compile Fix
+
+Gradle 8.11.1 に固定した後、Android compile は `Column` unresolved で止まった。原因は Compose の `Column` 関数を `ScreenFrame` の receiver 型として使っていたこと。型として正しいのは `ColumnScope` なので、`content: @Composable ColumnScope.() -> Unit` に修正した。
+
+この時点の進捗見積もり: 68%。
+
+## 2026-05-11 JST - Day 1, Gradle Wrapper Pin
+
+Android build の `debugRuntimeClasspathCopy` error は Gradle 9.0 milestone と Android Gradle Plugin 8.7.3 の組み合わせで出ていた。wrapper が Gradle 9.0 milestone を指していたので、CI と同じ Gradle 8.11.1 に固定し、README と CI も `gradle` ではなく `./gradlew` / `gradlew.bat` を使う形に揃えた。
+
+この時点の進捗見積もり: 68%。
+
 ## 2026-05-11 JST - Day 1, Android Gradle Configuration Fix
 
 Android build で `debugRuntimeClasspathCopy` が resolution root と consumable variant の両方として扱われる Gradle configuration error が出た。Android module 側で `*RuntimeClasspathCopy` configuration を明示的に `canBeConsumed=false` にして、依存解決用 configuration としてだけ扱うようにした。

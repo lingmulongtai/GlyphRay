@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 68%.
+Current overall progress estimate: 69%.
 
 ## Milestone 1
 
@@ -13,6 +13,7 @@ Current overall progress estimate: 68%.
 - [x] Add transport simulation tests.
 - [x] Add Android Compose skeleton.
 - [x] Fix Compose layout dependency and stylus diagnostics pointer-input compile path.
+- [x] Verify Android debug build with Gradle wrapper.
 - [x] Add Android stylus diagnostics screen.
 - [x] Add Windows host skeleton.
 - [x] Add Windows pen injection wrapper.

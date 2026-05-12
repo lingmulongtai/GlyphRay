@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 68%**
+**全体進捗見積もり: 69%**
 
 最終更新: 2026-05-11 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 68
-  "残りの製品化作業" : 32
+  "実装済みの基盤" : 69
+  "残りの製品化作業" : 31
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -181,7 +181,7 @@ cargo run -p glyphray-windows-host -- serve
 Android Studio または Android SDK command-line tools を入れて実行します。
 
 ```powershell
-gradle :apps:android-client:assembleDebug
+.\gradlew.bat :apps:android-client:assembleDebug
 ```
 
 現在の Android app には、LAN host discovery、stylus diagnostics、session UI、latency overlay、remote-session stylus UDP bridge、H.264 frame 受信用の MediaCodec-backed decoder surface が入っています。

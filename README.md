@@ -8,14 +8,14 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 68%**
+**Overall progress estimate: 69%**
 
 Last updated: 2026-05-11 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 68
-  "Remaining product work" : 32
+  "Implemented foundation" : 69
+  "Remaining product work" : 31
 ```
 
 | Area | Status | Progress |
@@ -181,7 +181,7 @@ cargo run -p glyphray-windows-host -- serve
 Install Android Studio or Android SDK command-line tools, then run:
 
 ```powershell
-gradle :apps:android-client:assembleDebug
+.\gradlew.bat :apps:android-client:assembleDebug
 ```
 
 The Android app currently includes LAN host discovery, stylus diagnostics, a session UI, a latency overlay, a remote-session stylus UDP bridge, and a MediaCodec-backed decoder surface prepared for incoming H.264 frames.
