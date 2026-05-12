@@ -1,8 +1,8 @@
 use crate::config::HostConfig;
-use crate::input::{InputError, InjectionReport, PenInjector, StylusInputBridge};
+use crate::input::{InjectionReport, InputError, PenInjector, StylusInputBridge};
 use glyphray_protocol::stylus_wire::{decode_stylus_batch, StylusWireError};
 use glyphray_protocol::{
-    decode_frame, encode_frame, LatencyPing, LatencyPong, Message, MessageKind,
+    decode_frame, encode_frame, LatencyPing, LatencyPong, Message, MessageKind, PairingResult,
 };
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
@@ -45,6 +45,14 @@ pub struct ClientSession {
     pub last_seen: Instant,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSnapshot {
+    pub peer: SocketAddr,
+    pub device_id: Option<String>,
+    pub permission: PermissionState,
+    pub packets_received: u64,
+}
+
 #[derive(Debug, Default)]
 pub struct SessionRegistry {
     sessions: HashMap<SocketAddr, ClientSession>,
@@ -81,19 +89,67 @@ impl SessionRegistry {
     pub fn len(&self) -> usize {
         self.sessions.len()
     }
+
+    pub fn snapshots(&self) -> Vec<SessionSnapshot> {
+        let mut snapshots = self
+            .sessions
+            .values()
+            .map(|session| SessionSnapshot {
+                peer: session.peer,
+                device_id: session.device_id.clone(),
+                permission: session.permission,
+                packets_received: session.packets_received,
+            })
+            .collect::<Vec<_>>();
+        snapshots.sort_by_key(|session| session.peer);
+        snapshots
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendEvent {
-    SessionDiscovered { peer: SocketAddr },
-    PeerAutoApproved { peer: SocketAddr },
-    PairingRequested { peer: SocketAddr, device_name: String },
-    PermissionRequired { peer: SocketAddr },
-    PacketIgnored { peer: SocketAddr, reason: String },
-    StylusInjected { peer: SocketAddr, samples: usize },
-    StylusDecoded { peer: SocketAddr, samples: usize },
-    LatencyPongQueued { peer: SocketAddr },
-    PacketRouted { peer: SocketAddr, channel: ChannelKind },
+    SessionDiscovered {
+        peer: SocketAddr,
+    },
+    PeerAutoApproved {
+        peer: SocketAddr,
+    },
+    PeerApproved {
+        peer: SocketAddr,
+    },
+    PeerRejected {
+        peer: SocketAddr,
+    },
+    PairingRequested {
+        peer: SocketAddr,
+        device_name: String,
+    },
+    PairingResultQueued {
+        peer: SocketAddr,
+        accepted: bool,
+    },
+    PermissionRequired {
+        peer: SocketAddr,
+    },
+    PacketIgnored {
+        peer: SocketAddr,
+        reason: String,
+    },
+    StylusInjected {
+        peer: SocketAddr,
+        samples: usize,
+    },
+    StylusDecoded {
+        peer: SocketAddr,
+        samples: usize,
+    },
+    LatencyPongQueued {
+        peer: SocketAddr,
+    },
+    PacketRouted {
+        peer: SocketAddr,
+        channel: ChannelKind,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -150,6 +206,30 @@ where
         self.sessions.approve(peer, device_id);
     }
 
+    pub fn approve_peer_with_response(
+        &mut self,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+    ) -> Result<TransportPacket, BackendError> {
+        let device_id = device_id.into();
+        self.sessions.approve(peer, device_id.clone());
+        self.build_pairing_result(true, Some(device_id), None)
+    }
+
+    pub fn reject_peer_with_response(
+        &mut self,
+        peer: SocketAddr,
+        reason: impl Into<String>,
+    ) -> Result<TransportPacket, BackendError> {
+        let reason = reason.into();
+        self.sessions.reject(peer);
+        self.build_pairing_result(false, None, Some(reason))
+    }
+
+    pub fn session_snapshots(&self) -> Vec<SessionSnapshot> {
+        self.sessions.snapshots()
+    }
+
     pub fn route_packet(
         &mut self,
         peer: SocketAddr,
@@ -160,7 +240,9 @@ where
         session.last_seen = Instant::now();
         session.packets_received += 1;
         if session.packets_received == 1 {
-            outcome.events.push(BackendEvent::SessionDiscovered { peer });
+            outcome
+                .events
+                .push(BackendEvent::SessionDiscovered { peer });
         }
 
         if session.permission == PermissionState::Rejected {
@@ -184,23 +266,40 @@ where
                 peer,
                 device_name: request.device_name,
             });
+            if self.permission_policy == PermissionPolicy::DevAutoApprove {
+                let device_id = trusted_device_id(peer);
+                session.permission = PermissionState::Approved;
+                session.device_id = Some(device_id.clone());
+                let response = self.build_pairing_result(true, Some(device_id), None)?;
+                outcome.outbound.push((peer, response));
+                outcome.events.push(BackendEvent::PeerAutoApproved { peer });
+                outcome.events.push(BackendEvent::PairingResultQueued {
+                    peer,
+                    accepted: true,
+                });
+            }
             return Ok(outcome);
         }
 
         if session.permission != PermissionState::Approved {
             if self.permission_policy == PermissionPolicy::DevAutoApprove {
                 session.permission = PermissionState::Approved;
-                session.device_id
+                session
+                    .device_id
                     .get_or_insert_with(|| format!("dev-peer-{peer}"));
                 outcome.events.push(BackendEvent::PeerAutoApproved { peer });
             } else {
-                outcome.events.push(BackendEvent::PermissionRequired { peer });
+                outcome
+                    .events
+                    .push(BackendEvent::PermissionRequired { peer });
                 return Ok(outcome);
             }
         }
 
         if session.permission != PermissionState::Approved {
-            outcome.events.push(BackendEvent::PermissionRequired { peer });
+            outcome
+                .events
+                .push(BackendEvent::PermissionRequired { peer });
             return Ok(outcome);
         }
 
@@ -223,7 +322,9 @@ where
             MessageKind::LatencyPing => {
                 let pong = self.build_latency_pong(&packet.payload)?;
                 outcome.outbound.push((peer, pong));
-                outcome.events.push(BackendEvent::LatencyPongQueued { peer });
+                outcome
+                    .events
+                    .push(BackendEvent::LatencyPongQueued { peer });
             }
             _ => outcome.events.push(BackendEvent::PacketRouted {
                 peer,
@@ -265,6 +366,30 @@ where
             payload,
         })
     }
+
+    fn build_pairing_result(
+        &mut self,
+        accepted: bool,
+        trusted_device_id: Option<String>,
+        reason: Option<String>,
+    ) -> Result<TransportPacket, BackendError> {
+        let response = Message::PairingResult(PairingResult {
+            accepted,
+            trusted_device_id,
+            reason,
+        });
+        let payload = encode_frame(self.next_outbound_sequence, &response)
+            .map_err(|err| BackendError::Protocol(err.to_string()))?;
+        let sequence = self.next_outbound_sequence;
+        self.next_outbound_sequence += 1;
+        Ok(TransportPacket {
+            sequence,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::PairingResult,
+            enqueue_timestamp_us: now_us(),
+            payload,
+        })
+    }
 }
 
 pub struct HostBackendRuntime<I> {
@@ -278,11 +403,7 @@ where
     I: PenInjector,
 {
     pub fn new(config: HostConfig, input_bridge: Option<StylusInputBridge<I>>) -> Self {
-        Self::new_with_permission_policy(
-            config,
-            input_bridge,
-            PermissionPolicy::RequireApproval,
-        )
+        Self::new_with_permission_policy(config, input_bridge, PermissionPolicy::RequireApproval)
     }
 
     pub fn new_with_permission_policy(
@@ -316,6 +437,40 @@ where
         self.router.approve_peer(peer, device_id);
     }
 
+    pub fn approve_peer_and_notify(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let device_id = trusted_device_id(peer);
+        let response = self.router.approve_peer_with_response(peer, device_id)?;
+        server.send_to(&response, peer)?;
+        Ok(vec![
+            BackendEvent::PeerApproved { peer },
+            BackendEvent::PairingResultQueued {
+                peer,
+                accepted: true,
+            },
+        ])
+    }
+
+    pub fn reject_peer_and_notify(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+        reason: impl Into<String>,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let response = self.router.reject_peer_with_response(peer, reason)?;
+        server.send_to(&response, peer)?;
+        Ok(vec![
+            BackendEvent::PeerRejected { peer },
+            BackendEvent::PairingResultQueued {
+                peer,
+                accepted: false,
+            },
+        ])
+    }
+
     pub fn poll_control(
         &mut self,
         server: &mut UdpServer,
@@ -333,6 +488,10 @@ where
 
     pub fn session_count(&self) -> usize {
         self.router.sessions.len()
+    }
+
+    pub fn session_snapshots(&self) -> Vec<SessionSnapshot> {
+        self.router.session_snapshots()
     }
 
     pub fn config(&self) -> &HostConfig {
@@ -353,6 +512,10 @@ fn now_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_micros() as u64)
         .unwrap_or_default()
+}
+
+fn trusted_device_id(peer: SocketAddr) -> String {
+    format!("trusted-{}", peer).replace([':', '.'], "-")
 }
 
 #[cfg(test)]
@@ -406,7 +569,9 @@ mod tests {
         let peer: SocketAddr = "127.0.0.1:50001".parse().expect("peer");
         router.approve_peer(peer, "tablet");
         let payload = encode_stylus_batch(&sample_batch()).expect("encode");
-        let outcome = router.route_packet(peer, input_packet(payload)).expect("route");
+        let outcome = router
+            .route_packet(peer, input_packet(payload))
+            .expect("route");
         assert!(outcome
             .events
             .contains(&BackendEvent::StylusInjected { peer, samples: 1 }));
@@ -444,13 +609,51 @@ mod tests {
         );
         let peer: SocketAddr = "127.0.0.1:50003".parse().expect("peer");
         let payload = encode_stylus_batch(&sample_batch()).expect("encode");
-        let outcome = router.route_packet(peer, input_packet(payload)).expect("route");
+        let outcome = router
+            .route_packet(peer, input_packet(payload))
+            .expect("route");
         assert!(outcome
             .events
             .contains(&BackendEvent::PeerAutoApproved { peer }));
         assert!(outcome
             .events
             .contains(&BackendEvent::StylusDecoded { peer, samples: 1 }));
+    }
+
+    #[test]
+    fn dev_auto_approve_pairing_queues_pairing_result() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new_with_permission_policy(
+            None,
+            PermissionPolicy::DevAutoApprove,
+        );
+        let peer: SocketAddr = "127.0.0.1:50004".parse().expect("peer");
+        let message = Message::PairingRequest(PairingRequest {
+            device_name: "Galaxy Tab".to_string(),
+            pairing_code_hash: vec![],
+            one_time_public_key: vec![],
+        });
+        let packet = TransportPacket {
+            sequence: 1,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::PairingRequest,
+            enqueue_timestamp_us: 0,
+            payload: encode_frame(1, &message).expect("encode"),
+        };
+
+        let outcome = router.route_packet(peer, packet).expect("route");
+
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::PeerAutoApproved { peer }));
+        assert!(outcome.events.contains(&BackendEvent::PairingResultQueued {
+            peer,
+            accepted: true,
+        }));
+        assert_eq!(outcome.outbound.len(), 1);
+        assert_eq!(
+            outcome.outbound[0].1.message_kind,
+            MessageKind::PairingResult
+        );
     }
 
     fn input_packet(payload: Vec<u8>) -> TransportPacket {

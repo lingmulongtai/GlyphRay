@@ -136,6 +136,10 @@ fun ConnectionScreen(
         MetricRow("Input", "Stylus priority channel")
         MetricRow("Control", controlState.statusLabel)
         MetricRow("Control packets", controlState.packetsSent.toString())
+        MetricRow("Control responses", controlState.responsesReceived.toString())
+        MetricRow("Pairing", controlState.lastPairingAccepted?.let { if (it) "Accepted" else "Rejected" } ?: "Waiting")
+        MetricRow("Latency pong", controlState.lastRoundTripMs?.let { "${it} ms" } ?: "-")
+        MetricRow("Trusted device", controlState.trustedDeviceId ?: "-")
         MetricRow("Last control action", controlState.lastAction)
         controlState.lastError?.let { error ->
             Text("Control error: $error", color = MaterialTheme.colorScheme.error)

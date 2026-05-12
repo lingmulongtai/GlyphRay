@@ -6,6 +6,7 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Server-side UDP receive/send in `UdpServer`.
 - Host session registry with pending/approved/rejected peers.
 - Pairing request routing.
+- Console approval/rejection commands that send `PairingResult`.
 - Permission gating before input packets are accepted.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
@@ -28,6 +29,16 @@ cargo run -p glyphray-windows-host -- serve
 
 `GLYPHRAY_DEV_AUTO_APPROVE` bypasses the approval UI for local smoke tests. `GLYPHRAY_ENABLE_PEN_INJECTION` connects the backend router to the native Win32 synthetic pen injector when that API is available. Both switches are intentionally explicit and must not become the production permission model.
 
+Without development auto-approval, the console loop prints incoming pairing requests. Use:
+
+```powershell
+sessions
+approve 192.168.1.20:44999
+reject 192.168.1.20:44999
+```
+
+Approval and rejection both send a protocol-level `PairingResult` back to the Android control channel.
+
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
 The backend binds:
@@ -44,7 +55,7 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 ## Current Limits
 
 - The backend loop is still console-driven.
-- Peer approval is exposed in code but not yet wired to a host UI prompt.
+- Peer approval is console-driven and still needs a native host UI prompt.
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once approval UI exists.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
 - Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.

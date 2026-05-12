@@ -2,6 +2,7 @@ package com.glyphray.android.network
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -61,6 +62,67 @@ class ProtocolFrameCodecTest {
         payloadBuffer.get(key)
         assertArrayEquals(byteArrayOf(4, 5), key)
     }
+
+    @Test
+    fun pairingResultFrameDecodesFromRustBincodeLayout() {
+        val payload = ByteBuffer
+            .allocate(4 + 1 + 4 + 8 + "trusted-device".length + 4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(5)
+            .put(1.toByte())
+            .putInt(1)
+            .putLong("trusted-device".length.toLong())
+            .put("trusted-device".toByteArray(Charsets.UTF_8))
+            .putInt(0)
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(encodeFrame(42, TransportMessageKind.pairingResult, payload))
+        val message = frame.message as ControlProtocolMessage.PairingResult
+
+        assertEquals(42, frame.sequence)
+        assertEquals(true, message.accepted)
+        assertEquals("trusted-device", message.trustedDeviceId)
+        assertNull(message.reason)
+    }
+
+    @Test
+    fun latencyPongFrameDecodesFromRustBincodeLayout() {
+        val payload = ByteBuffer
+            .allocate(36)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(15)
+            .putLong(3)
+            .putLong(100)
+            .putLong(130)
+            .putLong(140)
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(encodeFrame(43, TransportMessageKind.latencyPong, payload))
+        val message = frame.message as ControlProtocolMessage.LatencyPong
+
+        assertEquals(43, frame.sequence)
+        assertEquals(3, message.sequence)
+        assertEquals(100, message.clientSendTimestampUs)
+        assertEquals(130, message.hostReceiveTimestampUs)
+        assertEquals(140, message.hostSendTimestampUs)
+    }
+}
+
+private fun encodeFrame(sequence: Long, messageKind: Int, payload: ByteArray): ByteArray {
+    return ByteBuffer
+        .allocate(24 + payload.size)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .put('G'.code.toByte())
+        .put('L'.code.toByte())
+        .put('Y'.code.toByte())
+        .put('R'.code.toByte())
+        .putShort(1.toShort())
+        .putShort(messageKind.toShort())
+        .putLong(sequence)
+        .putInt(payload.size)
+        .putInt(payload.crc32())
+        .put(payload)
+        .array()
 }
 
 private fun ByteArray.crc32(): Int {

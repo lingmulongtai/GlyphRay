@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 71%**
+**Overall progress estimate: 72%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 71
-  "Remaining product work" : 29
+  "Implemented foundation" : 72
+  "Remaining product work" : 28
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 66% |
-| Milestone 4 hardening and packaging | In progress | 47% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 68% |
+| Milestone 4 hardening and packaging | In progress | 48% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 36% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink      [#############-------]  66%
-M4 Security + Packaging       [#########-----------]  47%
+M3 Stylus -> Windows Ink      [##############------]  68%
+M4 Security + Packaging       [##########----------]  48%
 M5 macOS + Audio + Relay      [#######-------------]  36%
 ```
 
@@ -60,8 +60,8 @@ flowchart TB
 
 | Path | Purpose | Current State |
 | --- | --- | --- |
-| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake sender, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
-| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
+| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
+| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, console approval, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, VideoToolbox encoder foundation |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
@@ -137,9 +137,10 @@ sequenceDiagram
 - Android raw stylus diagnostics for pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
 - Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
+- Android control response receiver for `PairingResult` and `LatencyPong`.
 - Android remote-session stylus bridge that captures drawing-surface input and sends compact stylus batches over UDP on a background worker.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
-- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, permission gating, and latency pong replies.
+- Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, permission gating, and latency pong replies.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
@@ -257,7 +258,7 @@ flowchart LR
 
 Immediate engineering focus:
 
-- Add host-side approval UI and PairingResult responses for Android control-channel requests.
+- Replace console host approval with a native host UI prompt.
 - Connect Android stylus UDP packets to the Windows native pen bridge in a full LAN smoke test.
 - Replace fallback capture with Windows Graphics Capture or Desktop Duplication.
 - Add a concrete low-latency H.264 encoder backend.

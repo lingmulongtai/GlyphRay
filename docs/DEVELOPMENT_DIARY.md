@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Pairing Response Loop
+
+今日は Android と Windows host の control channel を片道から往復にした。Windows backend は `PairingRequest` を受けたあと、console の `approve <peer>` / `reject <peer>` で `PairingResult` を返せるようになった。development auto-approval では pairing request 自体にも accepted result を返すので、実機 smoke test の手順が短くなる。
+
+Android 側も `GLYT` datagram と `GLYR` frame の response decode を追加し、`PairingResult` と `LatencyPong` を `SessionControlState` に反映するようにした。Connect 画面には pairing accepted/rejected、trusted device id、latency pong の簡易表示が出る。これで host discovery、control request、host approval、control response までが 1 本につながった。
+
+検証として Rust workspace tests と Android debug build を通した。Android unit test は引き続き JDK 17 の CI 側で見る前提。
+
+この時点の進捗見積もり: 72%。
+
 ## 2026-05-12 JST - Pages Permission Fix
 
 GitHub Pages workflow で `enablement: true` を使って Pages site の自動作成を試したが、この repository では `GITHUB_TOKEN` が Pages site creation API にアクセスできず、`Resource not accessible by integration` になった。workflow から site を作る方式は諦め、GitHub settings で Pages を一度だけ手動有効化してから deploy する前提に戻した。

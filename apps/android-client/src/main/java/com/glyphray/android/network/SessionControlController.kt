@@ -8,6 +8,7 @@ import java.io.Closeable
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -15,6 +16,10 @@ data class SessionControlState(
     val isConnected: Boolean = false,
     val connectedHostName: String? = null,
     val packetsSent: Long = 0,
+    val responsesReceived: Long = 0,
+    val lastPairingAccepted: Boolean? = null,
+    val trustedDeviceId: String? = null,
+    val lastRoundTripMs: Long? = null,
     val lastAction: String = "Idle",
     val lastError: String? = null,
 ) {
@@ -24,7 +29,9 @@ data class SessionControlState(
 
 class SessionControlController : Closeable {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val receiverExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: ControlUdpClient? = null
+    @Volatile private var receiving = false
 
     var state by mutableStateOf(SessionControlState())
         private set
@@ -33,13 +40,15 @@ class SessionControlController : Closeable {
         executor.execute {
             runCatching {
                 client?.close()
-                client = ControlUdpClient().also { it.connect(host) }
+                val nextClient = ControlUdpClient().also { it.connect(host) }
+                client = nextClient
                 state = state.copy(
                     isConnected = true,
                     connectedHostName = host.hostName,
                     lastAction = "Connected to ${host.hostName}",
                     lastError = null,
                 )
+                startReceiver(nextClient)
             }.onFailure { error ->
                 state = state.copy(
                     isConnected = false,
@@ -70,6 +79,7 @@ class SessionControlController : Closeable {
         executor.execute {
             client?.close()
             client = null
+            receiving = false
             state = state.copy(isConnected = false, connectedHostName = null, lastAction = "Disconnected")
         }
     }
@@ -97,10 +107,55 @@ class SessionControlController : Closeable {
         }
     }
 
+    private fun startReceiver(activeClient: ControlUdpClient) {
+        receiving = true
+        receiverExecutor.execute {
+            while (receiving && activeClient.isOpen) {
+                val response = runCatching {
+                    activeClient.receiveControlResponse(timeoutMs = 250)
+                }.onFailure { error ->
+                    if (activeClient.isOpen) {
+                        state = state.copy(lastAction = "Control receive failed", lastError = error.message)
+                    }
+                }.getOrNull()
+
+                if (response != null) {
+                    handleControlMessage(response)
+                }
+            }
+        }
+    }
+
+    private fun handleControlMessage(message: ControlProtocolMessage) {
+        when (message) {
+            is ControlProtocolMessage.PairingResult -> {
+                state = state.copy(
+                    responsesReceived = state.responsesReceived + 1,
+                    lastPairingAccepted = message.accepted,
+                    trustedDeviceId = message.trustedDeviceId,
+                    lastAction = if (message.accepted) "Pairing accepted" else "Pairing rejected",
+                    lastError = message.reason,
+                )
+            }
+            is ControlProtocolMessage.LatencyPong -> {
+                val nowUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L
+                val rttMs = ((nowUs - message.clientSendTimestampUs).coerceAtLeast(0L)) / 1_000L
+                state = state.copy(
+                    responsesReceived = state.responsesReceived + 1,
+                    lastRoundTripMs = rttMs,
+                    lastAction = "Latency pong received",
+                    lastError = null,
+                )
+            }
+        }
+    }
+
     override fun close() {
+        receiving = false
         client?.close()
         client = null
         executor.shutdownNow()
+        receiverExecutor.shutdownNow()
     }
 }
 
@@ -109,6 +164,8 @@ private class ControlUdpClient : Closeable {
     private var remote: InetSocketAddress? = null
     private var nextTransportSequence = 1L
     private var nextFrameSequence = 1L
+    @Volatile var isOpen: Boolean = true
+        private set
 
     fun connect(host: DiscoveredHost) {
         remote = host.endpoint
@@ -139,7 +196,24 @@ private class ControlUdpClient : Closeable {
         return datagram.size
     }
 
+    fun receiveControlResponse(timeoutMs: Int): ControlProtocolMessage? {
+        socket.soTimeout = timeoutMs
+        val buffer = ByteArray(65_536)
+        val packet = DatagramPacket(buffer, buffer.size)
+        return try {
+            socket.receive(packet)
+            val transportPacket = TransportPacketCodec.decode(buffer, packet.length)
+            if (transportPacket.channel != TransportChannel.Control) {
+                return null
+            }
+            ProtocolFrameCodec.decodeFrame(transportPacket.payload).message
+        } catch (_: SocketTimeoutException) {
+            null
+        }
+    }
+
     override fun close() {
+        isOpen = false
         socket.close()
     }
 }

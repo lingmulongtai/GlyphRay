@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 71%.
+Current overall progress estimate: 72%.
 
 ## Milestone 1
 
@@ -32,6 +32,7 @@ Current overall progress estimate: 71%.
 - [x] Add Android MediaCodec H.264 decode pipeline.
 - [x] Add Android LAN host discovery receiver for host advertisements.
 - [x] Add Android control-channel sender for pairing and latency smoke tests.
+- [x] Add Android control-channel receiver for pairing and latency responses.
 - [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
@@ -55,6 +56,7 @@ Current overall progress estimate: 71%.
 - [x] Add opt-in native pen injection bridge to Windows backend serve runtime.
 - [x] Add backend session registry and input packet routing.
 - [x] Add backend permission gate for input packets.
+- [x] Add console approval/rejection flow with `PairingResult` responses.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
 - [x] Add drawing area calibration UI surface.

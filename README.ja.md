@@ -8,29 +8,29 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 71%**
+**全体進捗見積もり: 72%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 71
-  "残りの製品化作業" : 29
+  "実装済みの基盤" : 72
+  "残りの製品化作業" : 28
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 87% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 66% |
-| Milestone 4 security hardening / packaging | 進行中 | 47% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 68% |
+| Milestone 4 security hardening / packaging | 進行中 | 48% |
 | Milestone 5 macOS / audio / relay | 進行中 | 36% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink     [#############-------]  66%
-M4 Security + Packaging      [#########-----------]  47%
+M3 Stylus -> Windows Ink     [##############------]  68%
+M4 Security + Packaging      [##########----------]  48%
 M5 macOS + Audio + Relay     [#######-------------]  36%
 ```
 
@@ -60,8 +60,8 @@ flowchart TB
 
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
-| `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake sender、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
-| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
+| `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
+| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、console approval、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、VideoToolbox encoder foundation |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
@@ -137,9 +137,10 @@ sequenceDiagram
 - Android の raw stylus diagnostics。pressure、tilt、orientation、hover、button、eraser、history、timestamp を表示。
 - Rust host の `GLYD` advertisement を読む Android LAN discovery。
 - `GLYT` control channel で `PairingRequest` と `LatencyPing` を送る Android control sender。
+- `PairingResult` と `LatencyPong` を受け取る Android control response receiver。
 - remote session の描画面から stylus input を拾い、background worker で compact stylus batch を UDP 送信する Android bridge。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
-- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、permission gate、latency pong。
+- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、permission gate、latency pong。
 - LAN stylus path の smoke test 用 development auto-approval mode。
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
@@ -257,7 +258,7 @@ flowchart LR
 
 直近の開発フォーカス:
 
-- Android の control-channel request に対する host-side approval UI と PairingResult 応答を追加する。
+- console host approval を native host UI prompt に置き換える。
 - Android stylus UDP packet を Windows native pen bridge まで通して LAN smoke test する。
 - fallback capture を Windows Graphics Capture または Desktop Duplication に置き換える。
 - low-latency H.264 encoder backend を実装する。
