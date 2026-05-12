@@ -232,7 +232,7 @@ The GitHub Pages site lives in [website](website). It is frontend-only and can b
 Start-Process .\website\index.html
 ```
 
-Deployment is handled by [pages.yml](.github/workflows/pages.yml). In GitHub repository settings, enable Pages and choose GitHub Actions as the source.
+Deployment is handled by [pages.yml](.github/workflows/pages.yml). The workflow attempts to enable Pages automatically on first run. If GitHub or your organization blocks that, enable Pages manually in repository settings and choose GitHub Actions as the source.
 
 ## Current Limits
 

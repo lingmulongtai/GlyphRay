@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - Pages Enablement Fix
+
+GitHub Pages workflow の初回実行で、repository の Pages site がまだ存在しないため `actions/configure-pages` が `Get Pages site failed` で止まった。`configure-pages@v5` に `enablement: true` を渡すようにして、workflow 側から Pages の初回有効化を試せる構成へ修正した。
+
+これでも organization policy などで自動有効化が拒否される場合は、GitHub repository settings から Pages を手動で有効化し、source を GitHub Actions にする必要がある。その注意も README と website README に追記した。
+
+この時点の進捗見積もり: 71%。
+
 ## 2026-05-12 JST - GitHub Pages Download Site
 
 今日は GlyphRay の公開入口として、frontend-only の GitHub Pages download site を追加した。`website/` に静的な `index.html` / `styles.css` / `app.js` を置き、ビルドなしでそのまま Pages artifact として配信できる構成にした。
