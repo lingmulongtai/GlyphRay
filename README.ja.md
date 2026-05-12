@@ -8,30 +8,30 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 70%**
+**全体進捗見積もり: 71%**
 
 最終更新: 2026-05-12 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 70
-  "残りの製品化作業" : 30
+  "実装済みの基盤" : 71
+  "残りの製品化作業" : 29
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 87% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 65% |
-| Milestone 4 security hardening / packaging | 進行中 | 46% |
-| Milestone 5 macOS / audio / relay | 進行中 | 35% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 66% |
+| Milestone 4 security hardening / packaging | 進行中 | 47% |
+| Milestone 5 macOS / audio / relay | 進行中 | 36% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink     [#############-------]  65%
-M4 Security + Packaging      [#########-----------]  46%
-M5 macOS + Audio + Relay     [#######-------------]  35%
+M3 Stylus -> Windows Ink     [#############-------]  66%
+M4 Security + Packaging      [#########-----------]  47%
+M5 macOS + Audio + Relay     [#######-------------]  36%
 ```
 
 開発日記: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -46,6 +46,7 @@ flowchart TB
   Mac["hosts/macos-host\nSwiftUI / ScreenCaptureKit / VideoToolbox"]
   Crates["crates/*\nRust shared protocol / transport / security / core"]
   Docs["docs/*\n仕様 / 設計 / protocol / security / roadmap"]
+  Website["website/*\nGitHub Pages download site"]
   Tools["tools + tests + CI\npackaging / diagnostics / GitHub Actions"]
 
   Root --> Android
@@ -53,6 +54,7 @@ flowchart TB
   Root --> Mac
   Root --> Crates
   Root --> Docs
+  Root --> Website
   Root --> Tools
 ```
 
@@ -68,6 +70,7 @@ flowchart TB
 | `crates/telemetry` | local diagnostics | latency breakdown、rolling metrics |
 | `crates/audio` | audio 基盤 | audio packetization primitives |
 | `docs` | knowledge base | architecture、security、Windows Ink、Android stylus、macOS、test plan、performance targets |
+| `website` | GitHub Pages site | 静的 download page、生成 hero image、release links、setup command generator |
 
 ## システム構成
 
@@ -144,6 +147,7 @@ sequenceDiagram
 - ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate 基盤。
 - macOS SwiftUI shell、ScreenCaptureKit、VideoToolbox、CGEvent、audio permission の基盤。
 - Rust tests、Android unit tests、Android debug build 用 GitHub Actions CI。
+- GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。
 
 ## ビルドと実行
 
@@ -219,6 +223,16 @@ macOS host はまだ Phase 2/5 の基盤です。native pen injection の主戦�
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | latency / telemetry targets |
 | [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md) | 開発日記 |
+
+## ウェブサイト
+
+GitHub Pages 用サイトは [website](website) にあります。frontend-only なので、そのままブラウザで開けます。
+
+```powershell
+Start-Process .\website\index.html
+```
+
+デプロイは [pages.yml](.github/workflows/pages.yml) で行います。GitHub repository settings で Pages を有効化し、source を GitHub Actions にしてください。
 
 ## 現在の制限
 

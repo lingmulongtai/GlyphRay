@@ -8,30 +8,30 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 70%**
+**Overall progress estimate: 71%**
 
 Last updated: 2026-05-12 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 70
-  "Remaining product work" : 30
+  "Implemented foundation" : 71
+  "Remaining product work" : 29
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 87% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 65% |
-| Milestone 4 hardening and packaging | In progress | 46% |
-| Milestone 5 macOS, audio, relay readiness | In progress | 35% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 66% |
+| Milestone 4 hardening and packaging | In progress | 47% |
+| Milestone 5 macOS, audio, relay readiness | In progress | 36% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [#################---]  87%
-M3 Stylus -> Windows Ink      [#############-------]  65%
-M4 Security + Packaging       [#########-----------]  46%
-M5 macOS + Audio + Relay      [#######-------------]  35%
+M3 Stylus -> Windows Ink      [#############-------]  66%
+M4 Security + Packaging       [#########-----------]  47%
+M5 macOS + Audio + Relay      [#######-------------]  36%
 ```
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -46,6 +46,7 @@ flowchart TB
   Mac["hosts/macos-host\nSwiftUI, ScreenCaptureKit, VideoToolbox"]
   Crates["crates/*\nRust shared protocol, transport, security, core"]
   Docs["docs/*\nProduct, architecture, protocol, security, roadmap"]
+  Website["website/*\nGitHub Pages download site"]
   Tools["tools + tests + CI\nPackaging, diagnostics, GitHub Actions"]
 
   Root --> Android
@@ -53,6 +54,7 @@ flowchart TB
   Root --> Mac
   Root --> Crates
   Root --> Docs
+  Root --> Website
   Root --> Tools
 ```
 
@@ -68,6 +70,7 @@ flowchart TB
 | `crates/telemetry` | Local diagnostics | Latency breakdowns and rolling metrics |
 | `crates/audio` | Audio foundation | Audio packetization primitives |
 | `docs` | Product knowledge base | Architecture, security, Windows Ink, Android stylus, macOS, test plan, performance targets |
+| `website` | GitHub Pages site | Static download page, generated hero image, release links, setup command generator |
 
 ## System Shape
 
@@ -144,6 +147,7 @@ sequenceDiagram
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, and adaptive bitrate foundations.
 - macOS SwiftUI shell with ScreenCaptureKit, VideoToolbox, CGEvent, and audio permission foundations.
 - GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
+- GitHub Pages static download site with setup command generator and original hero artwork.
 
 ## Build And Run
 
@@ -219,6 +223,16 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | Validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | Latency and telemetry targets |
 | [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md) | Running development diary |
+
+## Website
+
+The GitHub Pages site lives in [website](website). It is frontend-only and can be opened directly:
+
+```powershell
+Start-Process .\website\index.html
+```
+
+Deployment is handled by [pages.yml](.github/workflows/pages.yml). In GitHub repository settings, enable Pages and choose GitHub Actions as the source.
 
 ## Current Limits
 

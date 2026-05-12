@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 70%.
+Current overall progress estimate: 71%.
 
 ## Milestone 1
 
@@ -21,6 +21,7 @@ Current overall progress estimate: 70%.
 - [x] Add macOS host shell.
 - [x] Add initial docs and CI.
 - [x] Add visual README and Japanese README for repository onboarding.
+- [x] Add frontend-only GitHub Pages download site.
 
 ## Milestone 2
 
@@ -71,6 +72,7 @@ Current overall progress estimate: 70%.
 - [x] Add development-only backend auto-approval mode for LAN input smoke tests.
 - [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
+- [x] Add GitHub Pages deployment workflow for the download site.
 - [ ] Replace Windows development secret store with DPAPI or Credential Manager.
 - [ ] Add macOS Keychain implementation.
 - [ ] Add signed production installers.

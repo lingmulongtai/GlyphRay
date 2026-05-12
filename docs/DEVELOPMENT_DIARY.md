@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-12 JST - GitHub Pages Download Site
+
+今日は GlyphRay の公開入口として、frontend-only の GitHub Pages download site を追加した。`website/` に静的な `index.html` / `styles.css` / `app.js` を置き、ビルドなしでそのまま Pages artifact として配信できる構成にした。
+
+サイトは単なるリンク集ではなく、Android client、Windows host、macOS host の状態を分けて見せる download card と、ローカル setup command generator を持つ。ブラウザだけでは S Pen の高頻度入力や UDP transport、Windows Ink injection はできないので、そこは正直に native app が必要だと明記した。hero にはオリジナルの生成 PNG アートを入れて、GlyphRay の「ペンでデスクトップを触る」雰囲気が最初の画面で伝わるようにした。
+
+この時点の進捗見積もり: 71%。
+
 ## 2026-05-12 JST - Android Control Channel
 
 今日は Android 側に session control の送信経路を追加した。Host list で見つけた host を選び、Connect 画面の Start session を押すと、`GLYT` control datagram の中に `GLYR` の `PairingRequest` と `LatencyPing` を包んで Windows host へ送る。

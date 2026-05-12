@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="GlyphRay downloads and setup guide for Android creative remote display clients and Windows/macOS hosts.">
+    <meta property="og:title" content="GlyphRay Downloads">
+    <meta property="og:description" content="Low-latency Android pen display for creative desktops.">
+    <meta property="og:image" content="assets/glyphray-hero.png">
+    <meta name="theme-color" content="#101211">
+    <title>GlyphRay Downloads</title>
+    <link rel="preload" href="assets/glyphray-hero.png" as="image">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header" data-hero-nav>
+      <a class="brand" href="#top" aria-label="GlyphRay home">
+        <span class="brand-mark" aria-hidden="true">G</span>
+        <span>GlyphRay</span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="#downloads">Downloads</a>
+        <a href="#setup">Setup</a>
+        <a href="#status">Status</a>
+        <a href="https://github.com/lingm/GlyphRay">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <img class="hero-image" src="assets/glyphray-hero.png" alt="GlyphRay remote pen display concept showing a stylus drawing on a tablet-like creative desktop interface.">
+        <div class="hero-shade" aria-hidden="true"></div>
+        <div class="hero-content">
+          <p class="eyebrow">Android pen display for creative desktops</p>
+          <h1 id="hero-title">GlyphRay</h1>
+          <p class="hero-copy">
+            A low-latency remote desktop project for artists who want Android stylus input to arrive on Windows as native pen input, not mouse emulation.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="#downloads">Get builds</a>
+            <a class="button secondary" href="#setup">Generate setup commands</a>
+          </div>
+          <dl class="hero-metrics" aria-label="Current project targets">
+            <div>
+              <dt>Target</dt>
+              <dd>1080p60 under 35 ms p95</dd>
+            </div>
+            <div>
+              <dt>Input</dt>
+              <dd>Windows Ink-focused stylus stream</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>Developer preview foundation</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="section intro" aria-labelledby="intro-title">
+        <div class="section-heading">
+          <p class="eyebrow">What you can download here</p>
+          <h2 id="intro-title">Native clients first, browser helpers second.</h2>
+        </div>
+        <p>
+          GitHub Pages can host the download site and setup tools, but the actual remote display experience still requires native Android and desktop host builds. A browser cannot capture S Pen data at the same fidelity, send UDP realtime streams, or inject Windows Ink events into creative apps.
+        </p>
+      </section>
+
+      <section class="section" id="downloads" aria-labelledby="downloads-title">
+        <div class="section-heading">
+          <p class="eyebrow">Downloads</p>
+          <h2 id="downloads-title">Choose a component</h2>
+        </div>
+        <div class="download-grid">
+          <article class="download-card">
+            <div class="platform">Android Client</div>
+            <h3>Tablet and phone app</h3>
+            <p>Compose client with LAN discovery, stylus diagnostics, control packets, and a low-latency display surface.</p>
+            <ul>
+              <li>Primary target: Samsung Galaxy Tab S11 Ultra</li>
+              <li>Captures pressure, tilt, hover, eraser, buttons, and history</li>
+              <li>APK release artifact planned</li>
+            </ul>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+          </article>
+
+          <article class="download-card featured">
+            <div class="platform">Windows Host</div>
+            <h3>Creative desktop host</h3>
+            <p>Rust host with LAN backend runtime, diagnostics, capture foundation, and opt-in native synthetic pen injection.</p>
+            <ul>
+              <li>Windows 10/11 priority path</li>
+              <li>Development smoke test flags available</li>
+              <li>Installer packaging still in progress</li>
+            </ul>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+          </article>
+
+          <article class="download-card">
+            <div class="platform">macOS Host</div>
+            <h3>Phase 2/5 preview</h3>
+            <p>SwiftUI shell with ScreenCaptureKit and VideoToolbox foundations. Native Windows Ink-style injection is Windows-specific.</p>
+            <ul>
+              <li>macOS 13+ foundation</li>
+              <li>Mouse and keyboard compatibility path first</li>
+              <li>Live stream work remains</li>
+            </ul>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="section split" id="setup" aria-labelledby="setup-title">
+        <div>
+          <div class="section-heading">
+            <p class="eyebrow">Frontend helper</p>
+            <h2 id="setup-title">Generate local setup commands</h2>
+          </div>
+          <p>
+            Pick a platform and channel. The page builds copyable commands locally in your browser. It does not contact a server or collect telemetry.
+          </p>
+          <div class="chooser" role="group" aria-label="Setup command options">
+            <label>
+              Platform
+              <select id="platformSelect">
+                <option value="windows">Windows host smoke test</option>
+                <option value="android">Android debug build</option>
+                <option value="rust">Rust workspace tests</option>
+                <option value="macos">macOS host preview</option>
+              </select>
+            </label>
+            <label>
+              Channel
+              <select id="channelSelect">
+                <option value="dev">Developer preview</option>
+                <option value="safe">No injection flags</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="command-panel" aria-live="polite">
+          <div class="command-header">
+            <span id="commandTitle">Windows host smoke test</span>
+            <button class="copy-button" type="button" id="copyCommand">Copy</button>
+          </div>
+          <pre><code id="commandOutput"></code></pre>
+          <p id="copyStatus" class="copy-status" role="status"></p>
+        </div>
+      </section>
+
+      <section class="section status-section" id="status" aria-labelledby="status-title">
+        <div class="section-heading">
+          <p class="eyebrow">Project status</p>
+          <h2 id="status-title">Current repository progress</h2>
+        </div>
+        <div class="status-layout">
+          <div class="progress-meter" aria-label="Overall progress 71 percent">
+            <div class="progress-number">71%</div>
+            <div class="progress-track">
+              <span style="width: 71%"></span>
+            </div>
+            <p>Developer-preview foundation. Not a production release yet.</p>
+          </div>
+          <ol class="milestones">
+            <li><span>100%</span> Milestone 1 foundation</li>
+            <li><span>87%</span> Video and transport foundation</li>
+            <li><span>66%</span> Android stylus to Windows Ink path</li>
+            <li><span>47%</span> Security hardening and packaging</li>
+            <li><span>36%</span> macOS, audio, relay readiness</li>
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>GlyphRay is an original open project. It does not copy Parsec source code, UI, branding, assets, wording, or proprietary protocol.</p>
+      <a href="https://github.com/lingm/GlyphRay">Repository</a>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
