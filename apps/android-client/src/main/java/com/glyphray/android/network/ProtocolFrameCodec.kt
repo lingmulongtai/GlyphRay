@@ -125,18 +125,40 @@ object ProtocolFrameCodec {
         if (!event.isMouseLike()) {
             return null
         }
+        return encodeMouseInput(
+            sequence = sequence,
+            timestampUs = event.eventTime * 1_000L,
+            displayId = displayId,
+            x = event.x,
+            y = event.y,
+            wheelDeltaX = event.getAxisValue(MotionEvent.AXIS_HSCROLL),
+            wheelDeltaY = event.getAxisValue(MotionEvent.AXIS_VSCROLL),
+            buttonFlags = event.buttonState,
+        )
+    }
+
+    fun encodeMouseInput(
+        sequence: Long,
+        timestampUs: Long,
+        displayId: Int = 0,
+        x: Float,
+        y: Float,
+        wheelDeltaX: Float = 0f,
+        wheelDeltaY: Float = 0f,
+        buttonFlags: Int = 0,
+    ): ByteArray {
         return encodeFrame(
             messageKind = TransportMessageKind.mouseInput,
             sequence = sequence,
             payload = BincodeMessageEncoder.mouseInput(
                 sequence = sequence,
-                timestampUs = event.eventTime * 1_000L,
+                timestampUs = timestampUs,
                 displayId = displayId,
-                x = event.x,
-                y = event.y,
-                wheelDeltaX = event.getAxisValue(MotionEvent.AXIS_HSCROLL),
-                wheelDeltaY = event.getAxisValue(MotionEvent.AXIS_VSCROLL),
-                buttonFlags = event.buttonState,
+                x = x,
+                y = y,
+                wheelDeltaX = wheelDeltaX,
+                wheelDeltaY = wheelDeltaY,
+                buttonFlags = buttonFlags,
             ),
         )
     }

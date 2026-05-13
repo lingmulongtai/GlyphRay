@@ -1,17 +1,81 @@
-use glyphray_security::{DeviceId, InMemorySecretStore, SecretBytes, SecretStore, SecurityError};
+use glyphray_security::{DeviceId, SecretBytes, SecretStore, SecurityError};
+use std::path::PathBuf;
 
+#[cfg(not(windows))]
+use glyphray_security::InMemorySecretStore;
+
+#[cfg(windows)]
+pub struct PlatformSecretStore {
+    root: PathBuf,
+}
+
+#[cfg(not(windows))]
 pub struct PlatformSecretStore {
     inner: InMemorySecretStore,
 }
 
+#[cfg(windows)]
+impl PlatformSecretStore {
+    pub fn open() -> Result<Self, SecurityError> {
+        Self::open_at(default_secret_dir()?)
+    }
+
+    pub fn open_at(root: impl Into<PathBuf>) -> Result<Self, SecurityError> {
+        let root = root.into();
+        std::fs::create_dir_all(&root).map_err(secret_error)?;
+        Ok(Self { root })
+    }
+
+    fn path_for(&self, device_id: &DeviceId) -> PathBuf {
+        self.root.join(format!(
+            "device-{:08x}.dpapi",
+            stable_device_id_hash(device_id)
+        ))
+    }
+}
+
+#[cfg(not(windows))]
 impl PlatformSecretStore {
     pub fn open() -> Result<Self, SecurityError> {
         Ok(Self {
             inner: InMemorySecretStore::default(),
         })
     }
+
+    pub fn open_at(_root: impl Into<PathBuf>) -> Result<Self, SecurityError> {
+        Ok(Self {
+            inner: InMemorySecretStore::default(),
+        })
+    }
 }
 
+#[cfg(windows)]
+impl SecretStore for PlatformSecretStore {
+    fn put_device_secret(
+        &mut self,
+        device_id: &DeviceId,
+        secret: SecretBytes,
+    ) -> Result<(), SecurityError> {
+        let protected = dpapi::protect_secret(secret.expose())?;
+        std::fs::write(self.path_for(device_id), protected).map_err(secret_error)
+    }
+
+    fn get_device_secret(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Option<SecretBytes>, SecurityError> {
+        let path = self.path_for(device_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        let protected = std::fs::read(path).map_err(secret_error)?;
+        let secret = dpapi::unprotect_secret(&protected)?;
+        Ok(Some(SecretBytes::from_bytes(secret)))
+    }
+}
+
+#[cfg(not(windows))]
 impl SecretStore for PlatformSecretStore {
     fn put_device_secret(
         &mut self,
@@ -26,5 +90,146 @@ impl SecretStore for PlatformSecretStore {
         device_id: &DeviceId,
     ) -> Result<Option<SecretBytes>, SecurityError> {
         self.inner.get_device_secret(device_id)
+    }
+}
+
+fn stable_device_id_hash(device_id: &DeviceId) -> u32 {
+    let mut hasher = crc32fast::Hasher::new();
+    hasher.update(device_id.as_str().as_bytes());
+    hasher.finalize()
+}
+
+fn secret_error(error: impl std::fmt::Display) -> SecurityError {
+    SecurityError::SecretStore(error.to_string())
+}
+
+#[cfg(windows)]
+fn default_secret_dir() -> Result<PathBuf, SecurityError> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("APPDATA"))
+        .map(PathBuf::from)
+        .ok_or_else(|| SecurityError::SecretStore("LOCALAPPDATA/APPDATA is not set".to_string()))?;
+
+    Ok(base.join("GlyphRay").join("secrets"))
+}
+
+#[cfg(windows)]
+mod dpapi {
+    use super::{secret_error, SecurityError};
+    use std::{ptr::null_mut, slice};
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+
+    pub fn protect_secret(plaintext: &[u8]) -> Result<Vec<u8>, SecurityError> {
+        let input = blob_from_slice(plaintext);
+        let mut output = CRYPT_INTEGER_BLOB::default();
+
+        unsafe {
+            CryptProtectData(
+                &input,
+                PCWSTR::null(),
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+            .map_err(secret_error)?;
+
+            copy_blob_and_free(output)
+        }
+    }
+
+    pub fn unprotect_secret(protected: &[u8]) -> Result<Vec<u8>, SecurityError> {
+        let input = blob_from_slice(protected);
+        let mut output = CRYPT_INTEGER_BLOB::default();
+
+        unsafe {
+            CryptUnprotectData(
+                &input,
+                None,
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+            .map_err(secret_error)?;
+
+            copy_blob_and_free(output)
+        }
+    }
+
+    fn blob_from_slice(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
+        CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_ptr() as *mut u8,
+        }
+    }
+
+    unsafe fn copy_blob_and_free(blob: CRYPT_INTEGER_BLOB) -> Result<Vec<u8>, SecurityError> {
+        if blob.pbData == null_mut() {
+            return Err(SecurityError::SecretStore(
+                "DPAPI returned a null output buffer".to_string(),
+            ));
+        }
+
+        let bytes = slice::from_raw_parts(blob.pbData, blob.cbData as usize).to_vec();
+        let _ = LocalFree(HLOCAL(blob.pbData.cast()));
+        Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_secret_store_roundtrips_device_secret() {
+        let root = unique_temp_dir();
+        let _ = std::fs::remove_dir_all(&root);
+
+        let device_id = DeviceId::new("test-device");
+        let secret = SecretBytes::from_bytes(b"glyphray test secret".to_vec());
+        let mut store = PlatformSecretStore::open_at(&root).expect("open store");
+
+        store
+            .put_device_secret(&device_id, secret.clone())
+            .expect("put secret");
+        let loaded = store
+            .get_device_secret(&device_id)
+            .expect("get secret")
+            .expect("secret exists");
+        assert_eq!(loaded.expose(), secret.expose());
+
+        #[cfg(windows)]
+        {
+            let reopened = PlatformSecretStore::open_at(&root).expect("reopen store");
+            let loaded = reopened
+                .get_device_secret(&device_id)
+                .expect("get secret")
+                .expect("secret exists");
+            assert_eq!(loaded.expose(), secret.expose());
+            assert!(secret_file_count(&root) > 0);
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn unique_temp_dir() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "glyphray-platform-secret-store-{}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(windows)]
+    fn secret_file_count(root: &std::path::Path) -> usize {
+        std::fs::read_dir(root)
+            .map(|entries| entries.filter_map(Result::ok).count())
+            .unwrap_or(0)
     }
 }

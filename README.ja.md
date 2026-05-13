@@ -8,29 +8,29 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 84%**
+**全体進捗見積もり: 87%**
 
 最終更新: 2026-05-13 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 84
-  "残りの製品化作業" : 16
+  "実装済みの基盤" : 87
+  "残りの製品化作業" : 13
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
-| Milestone 2 映像・transport 基盤 | 進行中 | 91% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 84% |
-| Milestone 4 security hardening / packaging | 進行中 | 66% |
+| Milestone 2 映像・transport 基盤 | 進行中 | 92% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 88% |
+| Milestone 4 security hardening / packaging | 進行中 | 71% |
 | Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
-M2 映像 + Transport          [##################--]  91%
-M3 Stylus -> Windows Ink     [#################---]  84%
-M4 Security + Packaging      [#############-------]  66%
+M2 映像 + Transport          [##################--]  92%
+M3 Stylus -> Windows Ink     [##################--]  88%
+M4 Security + Packaging      [##############------]  71%
 M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
@@ -139,21 +139,25 @@ sequenceDiagram
 - `GLYT` control channel で `PairingRequest` と `LatencyPing` を送る Android control sender。
 - `PairingResult` と `LatencyPong` を受け取る Android control response receiver。
 - pairing 後に host monitor geometry を受け取る Android display-info receiver。
+- Android video settings で discovery 済み host display を選択でき、選択 display id は stylus / touch / mouse input packet に乗る。
 - resolution、refresh rate、bitrate、color space、codec、touch mode、fullscreen mode、Bluetooth keyboard / mouse capture、game controller capture、special-key overlay の Android video/session settings。
 - Android session fullscreen は system bar を隠す immersive mode に入り、active session 中は画面スリープを抑制する。
-- Tailscale IP / MagicDNS / direct endpoint 用の Android manual host entry。
+- Tailscale IP / MagicDNS / direct endpoint 用の Android manual host entry。保存した endpoint は次回起動時に host list へ復元される。
 - remote session の描画面から stylus、native touch、Bluetooth mouse、keyboard、gamepad input を拾い、QoS-aware background worker で UDP 送信する Android bridge。
+- Android touch mode は direct native touch、trackpad 的な cursor movement、two-finger gesture wheel translation に対応。
 - Android の realtime receive path は、transport socket で受けた `VideoFrame` packet を `RemoteVideoStreamController` と MediaCodec decoder へ流せるようになった。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
 - Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、approved-peer video fragment queueing、console-visible queue/backpressure health metrics。
 - Windows host の video pump は approved client の `EncoderConfig` で再起動でき、host console の `encoder override` command でも stream 設定を変更できる。
+- Windows runtime input bridge は、display enumeration ができる場合、固定の smoke-test rectangle ではなく選択 display geometry から mapper を作る。
 - Windows stylus bridge は Win32 synthetic pen injector に渡す前に pen axis を正規化し、pressure を平滑化する。
 - LAN stylus path の smoke test 用 development auto-approval mode。
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
 - Windows monitor enumeration、GDI capture fallback、encoder abstraction、streaming pipeline の形。
 - ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate decision、packet loss 時の keyframe recovery signaling 基盤。
+- Windows `PlatformSecretStore` は Windows 上で DPAPI 保護の per-user secret file を使う。non-Windows build では in-memory fallback を使う。
 - macOS SwiftUI shell、ScreenCaptureKit display diagnostics、permission readiness checks、VideoToolbox low-latency encoder smoke test、CGEvent mouse / keyboard 基盤、Keychain secret-store smoke test、audio permission plumbing。
 - Rust tests、Android unit tests、Android debug build 用 GitHub Actions CI。
 - GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。

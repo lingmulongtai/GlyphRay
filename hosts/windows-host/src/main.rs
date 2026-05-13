@@ -49,8 +49,8 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     let discovery = LanDiscoverySocket::bind(config.discovery_port)?;
     let input_bridge = create_runtime_input_bridge(&config);
     let keyboard_bridge = create_runtime_keyboard_bridge();
-    let touch_bridge = create_runtime_touch_bridge();
-    let mouse_bridge = create_runtime_mouse_bridge();
+    let touch_bridge = create_runtime_touch_bridge(&config);
+    let mouse_bridge = create_runtime_mouse_bridge(&config);
     let permission_policy = if std::env::var_os("GLYPHRAY_DEV_AUTO_APPROVE").is_some() {
         println!("Development auto-approval is enabled for incoming LAN clients.");
         PermissionPolicy::DevAutoApprove
@@ -302,7 +302,9 @@ fn create_runtime_keyboard_bridge() -> Option<KeyboardInputBridge<Box<dyn Keyboa
     Some(KeyboardInputBridge::new(injector))
 }
 
-fn create_runtime_touch_bridge() -> Option<TouchInputBridge<Box<dyn TouchInjector>>> {
+fn create_runtime_touch_bridge(
+    config: &HostConfig,
+) -> Option<TouchInputBridge<Box<dyn TouchInjector>>> {
     if std::env::var_os("GLYPHRAY_ENABLE_TOUCH_INJECTION").is_none() {
         println!(
             "Native touch injection is disabled. Set GLYPHRAY_ENABLE_TOUCH_INJECTION=1 for LAN touch smoke tests."
@@ -318,11 +320,14 @@ fn create_runtime_touch_bridge() -> Option<TouchInputBridge<Box<dyn TouchInjecto
         }
     };
 
-    println!("Native touch injection is enabled with temporary 1920x1080 stretch mapping.");
-    Some(TouchInputBridge::new(injector, temporary_mapper()))
+    let mapper = mapper_for_default_display(config);
+    println!("Native touch injection is enabled with default-display coordinate mapping.");
+    Some(TouchInputBridge::new(injector, mapper))
 }
 
-fn create_runtime_mouse_bridge() -> Option<MouseInputBridge<Box<dyn MouseInjector>>> {
+fn create_runtime_mouse_bridge(
+    config: &HostConfig,
+) -> Option<MouseInputBridge<Box<dyn MouseInjector>>> {
     if std::env::var_os("GLYPHRAY_ENABLE_MOUSE_INJECTION").is_none() {
         println!(
             "Native mouse injection is disabled. Set GLYPHRAY_ENABLE_MOUSE_INJECTION=1 for LAN mouse smoke tests."
@@ -338,8 +343,9 @@ fn create_runtime_mouse_bridge() -> Option<MouseInputBridge<Box<dyn MouseInjecto
         }
     };
 
-    println!("Native mouse injection is enabled with temporary 1920x1080 stretch mapping.");
-    Some(MouseInputBridge::new(injector, temporary_mapper()))
+    let mapper = mapper_for_default_display(config);
+    println!("Native mouse injection is enabled with default-display coordinate mapping.");
+    Some(MouseInputBridge::new(injector, mapper))
 }
 
 fn temporary_mapper() -> CoordinateMapper {
@@ -348,8 +354,45 @@ fn temporary_mapper() -> CoordinateMapper {
     CoordinateMapper::new(source, display, MappingMode::Stretch)
 }
 
+fn mapper_for_default_display(config: &HostConfig) -> CoordinateMapper {
+    let capture = WindowsGraphicsCaptureBackend;
+    let display = capture.list_displays().ok().and_then(|displays| {
+        select_video_display(
+            displays,
+            config.default_display_id,
+            config.default_display_id,
+        )
+    });
+
+    let Some(display) = display else {
+        println!(
+            "Display-aware input mapper unavailable. Falling back to temporary 1920x1080 mapping."
+        );
+        return temporary_mapper();
+    };
+
+    println!(
+        "Input mapper targets display {} {}x{} at origin {},{}.",
+        display.id, display.width_px, display.height_px, display.origin_x, display.origin_y
+    );
+    let source = SourceRect::new(display.width_px as f32, display.height_px as f32)
+        .unwrap_or_else(|_| SourceRect::new(1920.0, 1080.0).expect("fallback source rect"));
+    let target = DisplayRect::new(
+        display.origin_x as f32,
+        display.origin_y as f32,
+        display.width_px as f32,
+        display.height_px as f32,
+        display.rotation_degrees,
+        display.scale_factor,
+    )
+    .unwrap_or_else(|_| {
+        DisplayRect::new(0.0, 0.0, 1920.0, 1080.0, 0, 1.0).expect("fallback display rect")
+    });
+    CoordinateMapper::new(source, target, MappingMode::Stretch)
+}
+
 fn create_runtime_input_bridge(
-    _config: &HostConfig,
+    config: &HostConfig,
 ) -> Option<StylusInputBridge<Box<dyn PenInjector>>> {
     if std::env::var_os("GLYPHRAY_ENABLE_PEN_INJECTION").is_none() {
         println!(
@@ -366,10 +409,10 @@ fn create_runtime_input_bridge(
         }
     };
 
-    println!("Native pen injection is enabled with temporary 1920x1080 stretch mapping.");
+    println!("Native pen injection is enabled with default-display coordinate mapping.");
     Some(StylusInputBridge::new(
         injector,
-        temporary_mapper(),
+        mapper_for_default_display(config),
         PressureMapper::default(),
     ))
 }

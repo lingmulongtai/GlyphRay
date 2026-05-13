@@ -309,7 +309,13 @@ fun RemoteSessionScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(if (fullscreen) 620.dp else 360.dp),
-            onInputEvent = { event -> stylusBridge.onMotionEvent(event, controlState.inputSettings) },
+            onInputEvent = { event ->
+                stylusBridge.onMotionEvent(
+                    event = event,
+                    inputSettings = controlState.inputSettings,
+                    displayId = controlState.videoSettings.displayId,
+                )
+            },
             onKeyEvent = onKeyEvent,
             onGenericMotionEvent = onGenericMotionEvent,
             onVideoStreamController = onVideoStreamController,
@@ -450,10 +456,24 @@ fun VideoSettingsScreen(
         InfoPanel {
             SectionTitle("Stream profile")
             MetricRow("Current request", settings.summary)
+            MetricRow("Display", selectedDisplayLabel(controlState))
             MetricRow("Color", settings.colorSpace.label)
             MetricRow("Keyframe interval", "${settings.keyframeIntervalMs} ms")
         }
         Spacer(Modifier.height(14.dp))
+
+        if (controlState.displays.isNotEmpty()) {
+            OptionGroup("Host display") {
+                controlState.displays.forEach { display ->
+                    FilterChip(
+                        selected = settings.displayId == display.id,
+                        onClick = { onSettingsChange(settings.copy(displayId = display.id)) },
+                        label = { Text(display.label) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         OptionGroup("Resolution") {
             ClientResolution.entries.forEach { resolution ->
@@ -533,6 +553,14 @@ fun VideoSettingsScreen(
             MetricRow("Render target", "Low-latency surface")
         }
     }
+}
+
+private fun selectedDisplayLabel(controlState: SessionControlState): String {
+    val displayId = controlState.videoSettings.displayId
+    return controlState.displays
+        .firstOrNull { it.id == displayId }
+        ?.label
+        ?: "Display $displayId"
 }
 
 @Composable

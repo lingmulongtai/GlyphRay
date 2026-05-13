@@ -237,14 +237,36 @@ class StylusUdpSender : Closeable {
         return sendQueued(target, TransportChannel.Input, datagram)
     }
 
-    fun sendMouse(event: android.view.MotionEvent): Int {
-        val frame = ProtocolFrameCodec.encodeMouseInput(nextFrameSequence++, event)
+    fun sendMouse(event: android.view.MotionEvent, displayId: Int = 0): Int {
+        val frame = ProtocolFrameCodec.encodeMouseInput(nextFrameSequence++, event, displayId)
             ?: return 0
         return sendFramedInput(TransportMessageKind.mouseInput, frame)
     }
 
-    fun sendTouch(event: android.view.MotionEvent): Int {
-        val frame = ProtocolFrameCodec.encodeTouchInputBatch(nextFrameSequence++, event)
+    fun sendMouse(
+        displayId: Int = 0,
+        x: Float,
+        y: Float,
+        wheelDeltaX: Float = 0f,
+        wheelDeltaY: Float = 0f,
+        buttonFlags: Int = 0,
+        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
+    ): Int {
+        val frame = ProtocolFrameCodec.encodeMouseInput(
+            sequence = nextFrameSequence++,
+            timestampUs = timestampUs,
+            displayId = displayId,
+            x = x,
+            y = y,
+            wheelDeltaX = wheelDeltaX,
+            wheelDeltaY = wheelDeltaY,
+            buttonFlags = buttonFlags,
+        )
+        return sendFramedInput(TransportMessageKind.mouseInput, frame)
+    }
+
+    fun sendTouch(event: android.view.MotionEvent, displayId: Int = 0): Int {
+        val frame = ProtocolFrameCodec.encodeTouchInputBatch(nextFrameSequence++, event, displayId)
             ?: return 0
         return sendFramedInput(TransportMessageKind.touchInputBatch, frame)
     }

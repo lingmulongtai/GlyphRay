@@ -190,6 +190,32 @@ class ProtocolFrameCodecTest {
         assertEquals(1, buffer.get().toInt())
         assertEquals(0, buffer.int)
     }
+
+    @Test
+    fun syntheticMouseInputFrameUsesRustBincodeLayout() {
+        val frame = ProtocolFrameCodec.encodeMouseInput(
+            sequence = 57,
+            timestampUs = 12345,
+            displayId = 2,
+            x = 321.5f,
+            y = 654.25f,
+            wheelDeltaX = 1.0f,
+            wheelDeltaY = -2.0f,
+            buttonFlags = 1,
+        )
+        val payload = frame.copyOfRange(24, frame.size)
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals(11, buffer.int)
+        assertEquals(57, buffer.long)
+        assertEquals(12345, buffer.long)
+        assertEquals(2, buffer.int)
+        assertEquals(321.5f, buffer.float)
+        assertEquals(654.25f, buffer.float)
+        assertEquals(1.0f, buffer.float)
+        assertEquals(-2.0f, buffer.float)
+        assertEquals(1, buffer.int)
+    }
 }
 
 private fun encodeFrame(sequence: Long, messageKind: Int, payload: ByteArray): ByteArray {

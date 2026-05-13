@@ -93,6 +93,7 @@ cargo test --workspace
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
+- Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Post a safe CGEvent mouse move/click and keyboard test only after Accessibility permission is granted.
 
 ## Integration Tests To Add

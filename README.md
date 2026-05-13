@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 84%**
+**Overall progress estimate: 87%**
 
 Last updated: 2026-05-13 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 84
-  "Remaining product work" : 16
+  "Implemented foundation" : 87
+  "Remaining product work" : 13
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 91% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 84% |
-| Milestone 4 hardening and packaging | In progress | 66% |
+| Milestone 2 video and transport foundation | In progress | 92% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 88% |
+| Milestone 4 hardening and packaging | In progress | 71% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
-M2 Video + Transport          [##################--]  91%
-M3 Stylus -> Windows Ink      [#################---]  84%
-M4 Security + Packaging       [#############-------]  66%
+M2 Video + Transport          [##################--]  92%
+M3 Stylus -> Windows Ink      [##################--]  88%
+M4 Security + Packaging       [##############------]  71%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -139,21 +139,25 @@ sequenceDiagram
 - Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
 - Android control response receiver for `PairingResult` and `LatencyPong`.
 - Android display-info receiver for host monitor geometry after pairing.
+- Android video settings can select a discovered host display, and the selected display id is sent with stylus, touch, and mouse input packets.
 - Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard/mouse capture, game controller capture, and special-key overlay.
 - Android session fullscreen now hides system bars with immersive mode and keeps the screen awake during active sessions.
-- Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use.
+- Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use, with saved endpoints restored into the host list.
 - Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on QoS-aware background workers.
+- Android touch modes now include direct native touch, trackpad-style cursor movement, and two-finger gesture wheel translation.
 - Android realtime receive path can route `VideoFrame` packets from the transport socket into `RemoteVideoStreamController` and the MediaCodec decoder.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
 - Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
+- Windows runtime input bridges now derive their mapper from the selected display geometry instead of a fixed smoke-test rectangle when the display can be enumerated.
 - Windows stylus bridge now normalizes pen axes and smooths pressure before calling the native Win32 synthetic pen injector.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
 - Windows stylus input bridge and Win32 synthetic pen injection wrapper.
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, adaptive bitrate decisions, and packet-loss keyframe recovery signaling foundations.
+- Windows `PlatformSecretStore` uses DPAPI-protected per-user secret files on Windows, with an in-memory fallback on non-Windows builds.
 - macOS SwiftUI shell with ScreenCaptureKit display diagnostics, permission readiness checks, VideoToolbox low-latency encoder smoke test, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
 - GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
 - GitHub Pages static download site with setup command generator and original hero artwork.

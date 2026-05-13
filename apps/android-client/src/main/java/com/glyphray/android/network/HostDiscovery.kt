@@ -1,5 +1,6 @@
 package com.glyphray.android.network
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -51,8 +52,65 @@ data class HostDiscoveryState(
     val lastScanLabel: String = "not scanned",
 )
 
+data class ManualHostEndpoint(
+    val addressText: String,
+    val controlPort: Int = 44_999,
+    val videoPort: Int = 45_000,
+)
+
+interface ManualHostStore {
+    fun load(): List<ManualHostEndpoint>
+    fun save(endpoints: List<ManualHostEndpoint>)
+}
+
+class AndroidManualHostStore(context: Context) : ManualHostStore {
+    private val preferences = context.applicationContext.getSharedPreferences("glyphray_hosts", Context.MODE_PRIVATE)
+
+    override fun load(): List<ManualHostEndpoint> {
+        return preferences
+            .getStringSet(savedHostsKey, emptySet())
+            .orEmpty()
+            .mapNotNull(::decodeEndpoint)
+            .sortedBy { it.addressText }
+    }
+
+    override fun save(endpoints: List<ManualHostEndpoint>) {
+        val encoded = endpoints
+            .distinctBy { "${it.addressText.lowercase()}:${it.controlPort}:${it.videoPort}" }
+            .map(::encodeEndpoint)
+            .toSet()
+        preferences.edit().putStringSet(savedHostsKey, encoded).apply()
+    }
+
+    private fun encodeEndpoint(endpoint: ManualHostEndpoint): String =
+        "${endpoint.addressText}|${endpoint.controlPort}|${endpoint.videoPort}"
+
+    private fun decodeEndpoint(value: String): ManualHostEndpoint? {
+        val parts = value.split('|')
+        if (parts.size != 3) {
+            return null
+        }
+        val address = parts[0].trim().takeIf { it.isNotBlank() } ?: return null
+        return ManualHostEndpoint(
+            addressText = address,
+            controlPort = parts[1].toIntOrNull() ?: return null,
+            videoPort = parts[2].toIntOrNull() ?: return null,
+        )
+    }
+
+    private companion object {
+        const val savedHostsKey = "manual_hosts"
+    }
+}
+
+object NoopManualHostStore : ManualHostStore {
+    override fun load(): List<ManualHostEndpoint> = emptyList()
+    override fun save(endpoints: List<ManualHostEndpoint>) = Unit
+}
+
 class HostDiscoveryController(
     private val client: LanHostDiscoveryClient = LanHostDiscoveryClient(),
+    private val manualHostStore: ManualHostStore = NoopManualHostStore,
 ) : Closeable {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val running = AtomicBoolean(false)
@@ -66,6 +124,7 @@ class HostDiscoveryController(
             return
         }
 
+        loadSavedManualHosts()
         postState { it.copy(isScanning = true, lastError = null) }
         worker = Thread {
             while (running.get()) {
@@ -117,20 +176,14 @@ class HostDiscoveryController(
     fun addManualHost(addressText: String, controlPort: Int = 44_999, videoPort: Int = 45_000) {
         Thread {
             runCatching {
-                val address = InetAddress.getByName(addressText.trim())
-                DiscoveredHost(
-                    hostId = "manual-${address.hostAddress}:$controlPort",
-                    hostName = "Manual ${address.hostAddress}",
-                    address = address,
-                    protocolVersion = 1,
+                val endpoint = ManualHostEndpoint(
+                    addressText = addressText.trim(),
                     controlPort = controlPort,
                     videoPort = videoPort,
-                    supportsWindowsInk = true,
-                    supportsH264 = true,
-                    pairingRequired = true,
-                    loadPercent = 0,
-                    lastSeenElapsedMs = SystemClock.elapsedRealtime(),
                 )
+                val host = endpoint.toDiscoveredHost()
+                saveManualEndpoint(endpoint)
+                host
             }.onSuccess { host ->
                 mergeHosts(listOf(host))
             }.onFailure { error ->
@@ -146,6 +199,36 @@ class HostDiscoveryController(
             isDaemon = true
             start()
         }
+    }
+
+    private fun loadSavedManualHosts() {
+        Thread {
+            runCatching {
+                manualHostStore.load().mapNotNull { endpoint ->
+                    runCatching { endpoint.toDiscoveredHost() }.getOrNull()
+                }
+            }.onSuccess { hosts ->
+                mergeHosts(hosts)
+            }.onFailure { error ->
+                postState {
+                    it.copy(lastError = error.message ?: error.javaClass.simpleName)
+                }
+            }
+        }.apply {
+            name = "GlyphRayManualHostLoad"
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun saveManualEndpoint(endpoint: ManualHostEndpoint) {
+        val saved = manualHostStore.load()
+            .filterNot {
+                it.addressText.equals(endpoint.addressText, ignoreCase = true) &&
+                    it.controlPort == endpoint.controlPort &&
+                    it.videoPort == endpoint.videoPort
+            } + endpoint
+        manualHostStore.save(saved.takeLast(24))
     }
 
     override fun close() {
@@ -176,6 +259,23 @@ class HostDiscoveryController(
             state = update(state)
         }
     }
+}
+
+private fun ManualHostEndpoint.toDiscoveredHost(): DiscoveredHost {
+    val address = InetAddress.getByName(addressText)
+    return DiscoveredHost(
+        hostId = "manual-${address.hostAddress}:$controlPort",
+        hostName = "Manual $addressText",
+        address = address,
+        protocolVersion = 1,
+        controlPort = controlPort,
+        videoPort = videoPort,
+        supportsWindowsInk = true,
+        supportsH264 = true,
+        pairingRequired = true,
+        loadPercent = 0,
+        lastSeenElapsedMs = SystemClock.elapsedRealtime(),
+    )
 }
 
 class LanHostDiscoveryClient(

@@ -45,9 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.glyphray.android.network.AndroidManualHostStore
 import com.glyphray.android.input.StylusDiagnosticsController
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.network.HostDiscoveryController
@@ -77,8 +79,11 @@ fun GlyphRayApp() {
     var screen by remember { mutableStateOf(GlyphRayScreen.Hosts) }
     var selectedHost by remember { mutableStateOf<DiscoveredHost?>(null) }
     var sessionFullscreen by remember { mutableStateOf(false) }
+    val context = LocalContext.current.applicationContext
     val diagnosticsController = remember { StylusDiagnosticsController() }
-    val hostDiscoveryController = remember { HostDiscoveryController() }
+    val hostDiscoveryController = remember(context) {
+        HostDiscoveryController(manualHostStore = AndroidManualHostStore(context))
+    }
     val sessionControlController = remember { SessionControlController() }
 
     DisposableEffect(hostDiscoveryController) {

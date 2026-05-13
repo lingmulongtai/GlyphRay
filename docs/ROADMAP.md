@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 84%.
+Current overall progress estimate: 87%.
 
 ## Milestone 1
 
@@ -34,9 +34,10 @@ Current overall progress estimate: 84%.
 - [x] Add Android control-channel sender for pairing and latency smoke tests.
 - [x] Add Android control-channel receiver for pairing and latency responses.
 - [x] Add Android display-info decode for host monitor negotiation.
+- [x] Add Android host display selector and attach selected display id to stylus/touch/mouse packets.
 - [x] Add Android video/session setting controls for resolution, refresh, bitrate, color space, codec, fullscreen, touch mode, keyboard, and special keys.
 - [x] Polish Android host list, connection readiness, session cockpit, settings, security, and diagnostics UI/UX.
-- [x] Add Android manual host entry for Tailscale/overlay-network endpoints.
+- [x] Add and persist Android manual host entries for Tailscale/overlay-network endpoints.
 - [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
@@ -72,12 +73,13 @@ Current overall progress estimate: 84%.
 - [x] Add Android direct-touch protocol path and Windows native touch injection smoke-test path.
 - [x] Add Android gamepad protocol path and Windows host gamepad decode.
 - [ ] Add virtual gamepad injection backend for Windows.
-- [ ] Add touch gesture translation for trackpad and gesture assist modes.
+- [x] Add first-pass touch gesture translation for trackpad and gesture assist modes.
 - [x] Add Android system-bar fullscreen handling.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
 - [x] Add drawing area calibration UI surface.
 - [x] Add calibration profile math.
+- [x] Use selected display geometry for runtime input mapper when Windows display enumeration is available.
 - [ ] Harden multi-monitor and high-DPI mapping on real hardware.
 
 ## Milestone 4
@@ -102,7 +104,7 @@ Current overall progress estimate: 84%.
 - [ ] Replace O(N) pending-session eviction with heap/indexed eviction if reused for relay-scale workloads.
 - [ ] Validate and document lock-screen/pre-login limitations for capture and input.
 - [x] Add GitHub Pages deployment workflow for the download site.
-- [ ] Replace Windows development secret store with DPAPI or Credential Manager.
+- [x] Replace Windows development secret store with DPAPI-protected per-user storage.
 - [x] Add macOS Keychain implementation.
 - [ ] Add signed production installers.
 - [ ] Add Android Play Store internal testing release track checklist and signing workflow.

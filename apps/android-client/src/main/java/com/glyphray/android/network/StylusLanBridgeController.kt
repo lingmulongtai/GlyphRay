@@ -23,7 +23,7 @@ data class StylusLanBridgeState(
     val statusLabel: String
         get() = when {
             lastError != null -> "Input error"
-            isConnected -> "Streaming stylus"
+            isConnected -> "Streaming input"
             else -> "Input idle"
         }
 }
@@ -39,6 +39,7 @@ class StylusLanBridgeController(
     }
     private val closed = AtomicBoolean(false)
     private var sender: StylusUdpSender? = null
+    private val touchTranslator = TouchModeTranslator()
 
     var state by mutableStateOf(StylusLanBridgeState())
         private set
@@ -80,18 +81,22 @@ class StylusLanBridgeController(
         }
     }
 
-    fun onMotionEvent(event: MotionEvent, inputSettings: ClientInputSettings = ClientInputSettings()): Boolean {
+    fun onMotionEvent(
+        event: MotionEvent,
+        inputSettings: ClientInputSettings = ClientInputSettings(),
+        displayId: Int = 0,
+    ): Boolean {
         val directInputKind = event.directInputKind()
         if (directInputKind == DirectInputKind.Mouse && !inputSettings.bluetoothMouseEnabled) {
             return false
         }
         if (directInputKind != DirectInputKind.Stylus) {
-            sendDirectInput(event, directInputKind)
+            sendDirectInput(event, directInputKind, inputSettings, displayId)
             return true
         }
 
         val packet = runCatching {
-            streamController.onMotionEvent(event)
+            streamController.onMotionEvent(event, displayId)
         }.getOrElse { error ->
             postState {
                 it.copy(lastError = error.message ?: error.javaClass.simpleName)
@@ -132,7 +137,12 @@ class StylusLanBridgeController(
         return true
     }
 
-    private fun sendDirectInput(event: MotionEvent, kind: DirectInputKind) {
+    private fun sendDirectInput(
+        event: MotionEvent,
+        kind: DirectInputKind,
+        inputSettings: ClientInputSettings,
+        displayId: Int,
+    ) {
         execute {
             val activeSender = sender
             if (activeSender == null) {
@@ -142,8 +152,8 @@ class StylusLanBridgeController(
 
             runCatching {
                 when (kind) {
-                    DirectInputKind.Touch -> activeSender.sendTouch(event)
-                    DirectInputKind.Mouse -> activeSender.sendMouse(event)
+                    DirectInputKind.Touch -> sendTouchByMode(activeSender, event, inputSettings.touchMode, displayId)
+                    DirectInputKind.Mouse -> activeSender.sendMouse(event, displayId)
                     DirectInputKind.Stylus -> 0
                 }
             }.onSuccess { bytes ->
@@ -160,6 +170,47 @@ class StylusLanBridgeController(
                         isConnected = false,
                         lastError = error.message ?: error.javaClass.simpleName,
                     )
+                }
+            }
+        }
+    }
+
+    private fun sendTouchByMode(
+        activeSender: StylusUdpSender,
+        event: MotionEvent,
+        touchMode: ClientTouchMode,
+        displayId: Int,
+    ): Int {
+        return when (touchMode) {
+            ClientTouchMode.Direct -> {
+                touchTranslator.resetIfFinished(event)
+                activeSender.sendTouch(event, displayId)
+            }
+            ClientTouchMode.Trackpad -> {
+                val mouseEvents = touchTranslator.trackpadMouse(event)
+                mouseEvents.sumOf { mouse ->
+                    activeSender.sendMouse(
+                        displayId = displayId,
+                        x = mouse.x,
+                        y = mouse.y,
+                        buttonFlags = mouse.buttonFlags,
+                        timestampUs = mouse.timestampUs,
+                    )
+                }
+            }
+            ClientTouchMode.Gesture -> {
+                val wheel = touchTranslator.gestureWheel(event)
+                if (wheel != null) {
+                    activeSender.sendMouse(
+                        displayId = displayId,
+                        x = wheel.x,
+                        y = wheel.y,
+                        wheelDeltaX = wheel.wheelDeltaX,
+                        wheelDeltaY = wheel.wheelDeltaY,
+                        timestampUs = wheel.timestampUs,
+                    )
+                } else {
+                    activeSender.sendTouch(event, displayId)
                 }
             }
         }
@@ -217,4 +268,129 @@ private fun MotionEvent.directInputKind(): DirectInputKind {
     }
     val hasFinger = (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_FINGER }
     return if (hasFinger) DirectInputKind.Touch else DirectInputKind.Stylus
+}
+
+private data class RemoteMouseGesture(
+    val x: Float,
+    val y: Float,
+    val wheelDeltaX: Float = 0f,
+    val wheelDeltaY: Float = 0f,
+    val buttonFlags: Int = 0,
+    val timestampUs: Long,
+)
+
+private class TouchModeTranslator {
+    private var lastX: Float? = null
+    private var lastY: Float? = null
+    private var downX: Float = 0f
+    private var downY: Float = 0f
+    private var movedSinceDown: Boolean = false
+    private var virtualX: Float = 960f
+    private var virtualY: Float = 540f
+
+    fun trackpadMouse(event: MotionEvent): List<RemoteMouseGesture> {
+        if (event.pointerCount == 0) {
+            return emptyList()
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            lastX = null
+            lastY = null
+            val tapped = !movedSinceDown &&
+                kotlin.math.abs(event.getX(0) - downX) <= tapSlopPx &&
+                kotlin.math.abs(event.getY(0) - downY) <= tapSlopPx
+            movedSinceDown = false
+            return if (event.actionMasked == MotionEvent.ACTION_UP && tapped) {
+                listOf(
+                    RemoteMouseGesture(
+                        x = virtualX,
+                        y = virtualY,
+                        buttonFlags = primaryButtonFlag,
+                        timestampUs = event.eventTime * 1_000L,
+                    ),
+                    RemoteMouseGesture(
+                        x = virtualX,
+                        y = virtualY,
+                        buttonFlags = 0,
+                        timestampUs = event.eventTime * 1_000L,
+                    ),
+                )
+            } else {
+                listOf(
+                    RemoteMouseGesture(
+                        x = virtualX,
+                        y = virtualY,
+                        buttonFlags = 0,
+                        timestampUs = event.eventTime * 1_000L,
+                    ),
+                )
+            }
+        }
+
+        val x = event.getX(0)
+        val y = event.getY(0)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            downX = x
+            downY = y
+            movedSinceDown = false
+        }
+        val previousX = lastX
+        val previousY = lastY
+        lastX = x
+        lastY = y
+        if (previousX == null || previousY == null) {
+            virtualX = x
+            virtualY = y
+        } else {
+            val dx = x - previousX
+            val dy = y - previousY
+            movedSinceDown = movedSinceDown ||
+                kotlin.math.abs(x - downX) > tapSlopPx ||
+                kotlin.math.abs(y - downY) > tapSlopPx
+            virtualX = (virtualX + dx * trackpadGain).coerceAtLeast(0f)
+            virtualY = (virtualY + dy * trackpadGain).coerceAtLeast(0f)
+        }
+        return listOf(
+            RemoteMouseGesture(
+                x = virtualX,
+                y = virtualY,
+                buttonFlags = 0,
+                timestampUs = event.eventTime * 1_000L,
+            ),
+        )
+    }
+
+    fun gestureWheel(event: MotionEvent): RemoteMouseGesture? {
+        if (event.pointerCount < 2 || event.actionMasked == MotionEvent.ACTION_POINTER_UP) {
+            return null
+        }
+        val centerX = (event.getX(0) + event.getX(1)) * 0.5f
+        val centerY = (event.getY(0) + event.getY(1)) * 0.5f
+        val previousX = lastX
+        val previousY = lastY
+        lastX = centerX
+        lastY = centerY
+        if (previousX == null || previousY == null) {
+            return null
+        }
+        return RemoteMouseGesture(
+            x = centerX,
+            y = centerY,
+            wheelDeltaX = ((centerX - previousX) / 72f).coerceIn(-3f, 3f),
+            wheelDeltaY = ((previousY - centerY) / 72f).coerceIn(-3f, 3f),
+            timestampUs = event.eventTime * 1_000L,
+        )
+    }
+
+    fun resetIfFinished(event: MotionEvent) {
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            lastX = null
+            lastY = null
+        }
+    }
+
+    private companion object {
+        const val primaryButtonFlag = 1
+        const val tapSlopPx = 18f
+        const val trackpadGain = 1.65f
+    }
 }

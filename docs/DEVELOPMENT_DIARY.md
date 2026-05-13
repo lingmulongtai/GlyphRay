@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-13 JST - Persistence, Touch Modes, Display Mapping, DPAPI
+
+今日は「100%に限りなく近づける」方向で、見た目よりも実機運用で効く土台を進めた。Android の manual host entry は、その場限りではなく SharedPreferences に保存され、次回起動時に host list へ復元されるようになった。Tailscale IP や MagicDNS name でつなぐ検証が、毎回打ち直しではなくなる。
+
+入力まわりは、finger touch を単に native touch として流すだけでなく、touch mode に応じて direct / trackpad / gesture assist の挙動を分けた。direct は `TouchInputBatch` のまま送り、trackpad は one-finger movement を synthetic mouse movement に変換し、gesture assist は two-finger movement を wheel delta として送る。これで Android tablet を机上の remote surface として使う時の操作感を少し現実に寄せられた。
+
+Windows host は pen / mouse / touch injection の runtime mapper を固定 1920x1080 から、可能な場合は選択 display geometry ベースに変えた。Android video settings には host から届いた display list を選ぶ UI を追加し、選択した display id を stylus / touch / mouse packet へ乗せるようにしたので、multi-monitor 検証の入口がつながった。さらに `PlatformSecretStore` を DPAPI 保護の per-user file store に置き換え、ペアリング済み端末の長期 secret を開発用メモリ保存から一段引き上げた。検証として Windows host tests、Android unit tests、Android debug build を通した。
+
+この時点の進捗見積もり: 87%。
+
 ## 2026-05-13 JST - Fullscreen And Host Encoder Control
 
 今日は前回の UI/UX push の続きとして、実際の利用時に効く操作感と host control を進めた。Android session の Full ボタンは、bottom navigation を隠すだけではなく、Android の status bar / navigation bar まで隠す immersive mode に入るようにした。active session 中は `FLAG_KEEP_SCREEN_ON` も立てるので、描画中や検証中に画面が寝てしまう事故を減らせる。

@@ -7,7 +7,7 @@ GlyphRay is LAN-first, but the transport is plain UDP over IP once the host endp
 Current status:
 
 - Android LAN broadcast discovery is not expected to cross Tailscale.
-- Android can manually add a host by Tailscale IP or MagicDNS name from the host list screen.
+- Android can manually add a host by Tailscale IP or MagicDNS name from the host list screen, and saved manual endpoints are restored on the next app launch.
 - The Windows host still listens on the same ports: discovery `44998`, control/input `44999`, and video `45000`.
 
 Validation checklist:

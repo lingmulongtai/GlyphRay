@@ -45,8 +45,8 @@ The Rust `SecretStore` trait is intentionally abstract so platform storage is im
 
 ## Current Implementation
 
-Current code includes pairing code generation, salted pairing-code hashing, challenge-response helpers, session-token type, pairing rate limiting, a ChaCha20-Poly1305 session cipher, replay protection, and a secure datagram codec foundation. Android device identity keys use Android Keystore, and the macOS host now has a Security-framework Keychain secret store boundary.
+Current code includes pairing code generation, salted pairing-code hashing, challenge-response helpers, session-token type, pairing rate limiting, a ChaCha20-Poly1305 session cipher, replay protection, and a secure datagram codec foundation. Android device identity keys use Android Keystore, Windows host secrets are protected with DPAPI-backed per-user files, and the macOS host has a Security-framework Keychain secret store boundary.
 
 The Windows host router also limits pending unapproved sessions, rate limits new pending attempts per source IP, evicts the oldest pending peer when the global cap is reached, drops late input packets before native injection, queues outbound packets through bounded nonblocking per-channel QoS queues, and exposes local-only health counters for rate limits, queue drops, and backpressure.
 
-Windows DPAPI/Credential Manager is still required before beta. macOS Keychain now exists as a code-level store, but still needs device identity wiring and migration tests.
+macOS Keychain now exists as a code-level store, but still needs device identity wiring and migration tests. Windows DPAPI storage exists, but still needs migration, backup, and corrupted-store recovery tests before beta.
