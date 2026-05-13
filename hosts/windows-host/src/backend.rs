@@ -905,6 +905,15 @@ where
         self.router.sessions.approved_peers()
     }
 
+    pub fn latest_approved_encoder_config(&self) -> Option<EncoderConfig> {
+        self.router
+            .session_snapshots()
+            .into_iter()
+            .filter(|session| session.permission == PermissionState::Approved)
+            .filter_map(|session| session.encoder_config)
+            .last()
+    }
+
     pub fn config(&self) -> &HostConfig {
         &self.config
     }

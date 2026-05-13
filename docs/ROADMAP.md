@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 83%.
+Current overall progress estimate: 84%.
 
 ## Milestone 1
 
@@ -66,14 +66,14 @@ Current overall progress estimate: 83%.
 - [x] Add console approval/rejection flow with `PairingResult` responses.
 - [x] Queue host `DisplayInfo` after accepted pairing.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
-- [ ] Implement host-side encoder override UI/CLI and connect settings to the live capture/encode loop.
+- [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.
 - [x] Add native Windows keyboard injection for approved clients behind an explicit smoke-test flag.
 - [x] Add native Windows mouse injection for approved clients behind an explicit smoke-test flag.
 - [x] Add Android direct-touch protocol path and Windows native touch injection smoke-test path.
 - [x] Add Android gamepad protocol path and Windows host gamepad decode.
 - [ ] Add virtual gamepad injection backend for Windows.
 - [ ] Add touch gesture translation for trackpad and gesture assist modes.
-- [ ] Add Android system-bar fullscreen handling.
+- [x] Add Android system-bar fullscreen handling.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
 - [ ] Validate pressure, tilt, hover, barrel button, and eraser in creative apps.
 - [x] Add drawing area calibration UI surface.

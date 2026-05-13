@@ -90,6 +90,11 @@ fun GlyphRayApp() {
         onDispose { sessionControlController.close() }
     }
 
+    SessionWindowEffect(
+        active = screen == GlyphRayScreen.Session,
+        immersive = screen == GlyphRayScreen.Session && sessionFullscreen,
+    )
+
     Scaffold(
         bottomBar = {
             if (!(screen == GlyphRayScreen.Session && sessionFullscreen)) {

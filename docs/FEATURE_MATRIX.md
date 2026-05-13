@@ -6,12 +6,12 @@ This document tracks product controls that must exist on both the Android client
 
 | Feature | Current status | Next implementation step |
 | --- | --- | --- |
-| Resolution | Client can select 1080p, 1440p, or host native and send `EncoderConfig`. Host stores requested config. | Wire stored config into the live capture/encode loop. Add host UI override. |
-| Refresh rate | Client can request 60/90/120 fps in `EncoderConfig`. | Clamp against host display and encoder capability. |
-| Bitrate | Client can request bitrate presets in `EncoderConfig`. Transport has adaptive bitrate foundation. | Combine manual bitrate with adaptive bitrate controller. |
+| Resolution | Client can select 1080p, 1440p, or host native and send `EncoderConfig`. Host now restarts the video pump from approved client config, but capture remains display-native until scaler support lands. | Add scaling/cropping stage before encode and clamp against encoder capability. |
+| Refresh rate | Client can request 60/90/120 fps in `EncoderConfig`; host pump uses the requested FPS as its frame interval after clamping to 30-120. | Clamp against actual monitor refresh and encoder capability. |
+| Bitrate | Client can request bitrate presets in `EncoderConfig`; host pump applies the requested bitrate to effective encoder settings. Transport has adaptive bitrate foundation. | Combine manual bitrate with adaptive bitrate controller. |
 | Color space | Protocol now carries `ColorSpace` and Android can request sRGB, Display P3, Rec.709, or Rec.2020 PQ. | Wire through encoder, decoder, and render surface metadata. |
 | Codec | Protocol and Android settings support H.264, H.265, and AV1 preferences. H.264 remains the first real implementation target. | Add host encoder capability negotiation and client decoder fallback. |
-| Host-side controls | Host currently logs and stores client encoder config. | Add native host UI and console/CLI override for encoder config. |
+| Host-side controls | Host console supports `encoder status`, `encoder override <width>x<height> <fps> <kbps>`, and `encoder clear`; live pump restarts from host override or approved client config. | Add native host UI and persistent presets. |
 
 ## Input Controls
 
@@ -23,7 +23,7 @@ This document tracks product controls that must exist on both the Android client
 | Bluetooth mouse | Android mouse `MotionEvent` now sends `MouseInput`. Windows host can opt-in inject cursor/buttons/wheel with `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`. | Add relative pointer-lock mode, high-resolution wheel handling, and host permission UI. |
 | Game controller | Android gamepad buttons/axes now send `GamepadInput`. Windows host decodes controller reports. | Add virtual gamepad backend such as ViGEm/virtual HID and per-device controller mapping UI. |
 | Windows key / PrintScreen | Android session overlay sends Win and PrintScreen key packets. Host can inject them when `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1` is set. | Add visible host/client safety indicators and per-device permission controls for privileged keys. |
-| Fullscreen client mode | Android session can hide the bottom navigation for a fullscreen/focus mode. | Hide Android system bars and add gesture escape affordance. |
+| Fullscreen client mode | Android session hides the bottom navigation and enters immersive system-bar hiding mode. Active sessions keep the screen awake. | Add a visible gesture escape affordance and per-device fullscreen preference. |
 
 ## Network Compatibility
 

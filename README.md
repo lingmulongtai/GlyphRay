@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 83%**
+**Overall progress estimate: 84%**
 
 Last updated: 2026-05-13 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 83
-  "Remaining product work" : 17
+  "Implemented foundation" : 84
+  "Remaining product work" : 16
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
-| Milestone 2 video and transport foundation | In progress | 90% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 83% |
-| Milestone 4 hardening and packaging | In progress | 65% |
+| Milestone 2 video and transport foundation | In progress | 91% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 84% |
+| Milestone 4 hardening and packaging | In progress | 66% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
-M2 Video + Transport          [##################--]  90%
-M3 Stylus -> Windows Ink      [#################---]  83%
-M4 Security + Packaging       [#############-------]  65%
+M2 Video + Transport          [##################--]  91%
+M3 Stylus -> Windows Ink      [#################---]  84%
+M4 Security + Packaging       [#############-------]  66%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -140,12 +140,14 @@ sequenceDiagram
 - Android control response receiver for `PairingResult` and `LatencyPong`.
 - Android display-info receiver for host monitor geometry after pairing.
 - Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard/mouse capture, game controller capture, and special-key overlay.
+- Android session fullscreen now hides system bars with immersive mode and keeps the screen awake during active sessions.
 - Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use.
 - Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on QoS-aware background workers.
 - Android realtime receive path can route `VideoFrame` packets from the transport socket into `RemoteVideoStreamController` and the MediaCodec decoder.
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
+- Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
 - Windows stylus bridge now normalizes pen axes and smooths pressure before calling the native Win32 synthetic pen injector.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
 - Windows backend opt-in native pen injection bridge for LAN smoke tests.
@@ -179,6 +181,8 @@ Run the Windows backend runtime:
 ```powershell
 cargo run -p glyphray-windows-host -- serve
 ```
+
+While the backend is running, `encoder status`, `encoder override 1920x1080 120 35000`, and `encoder clear` are available in the host console for stream-control smoke tests.
 
 For local input-path smoke testing before the host approval UI exists:
 

@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-13 JST - Fullscreen And Host Encoder Control
+
+今日は前回の UI/UX push の続きとして、実際の利用時に効く操作感と host control を進めた。Android session の Full ボタンは、bottom navigation を隠すだけではなく、Android の status bar / navigation bar まで隠す immersive mode に入るようにした。active session 中は `FLAG_KEEP_SCREEN_ON` も立てるので、描画中や検証中に画面が寝てしまう事故を減らせる。
+
+Windows host 側では、approved client から届いた `EncoderConfig` を video pump に反映する道をつないだ。`GLYPHRAY_ENABLE_VIDEO_STREAM=1` で動く pump は、client config 更新時に再起動し、FPS interval、bitrate、codec、color space、keyframe interval を effective encoder settings に入れる。resolution はまだ scaler が無いため capture-native に戻すが、その制限は console に明示する。
+
+さらに host console に `encoder status`、`encoder override <width>x<height> <fps> <kbps>`、`encoder clear` を追加した。これで client request だけでなく host operator 側からも stream settings を切り替えられる。検証として Windows host tests、Android unit tests、Android debug build を通した。
+
+この時点の進捗見積もり: 84%。
+
 ## 2026-05-13 JST - Android UI/UX Cockpit Pass
 
 今日は UI/UX に集中した。Android client は、単に画面がある状態から、接続前・接続中・設定変更の判断がしやすい作業画面へ寄せた。Host list には discovery 状態、manual endpoint、host capability pill を追加し、Connect 画面には target / requested session / readiness checklist を置いた。Session 画面は remote surface の上に host、RTT、stream、input 状態を並べ、下には video / input counters を整理したので、LAN smoke test 中に何が動いているか追いやすくなった。
