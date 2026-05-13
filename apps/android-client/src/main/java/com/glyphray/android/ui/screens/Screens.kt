@@ -5,15 +5,23 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
@@ -28,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import android.view.KeyEvent
 import com.glyphray.android.network.DiscoveredHost
@@ -63,23 +72,36 @@ fun HostListScreen(
     var manualHost by remember { mutableStateOf("") }
     ScreenFrame(
         title = "GlyphRay",
-        subtitle = "Creative remote display hosts on your local network",
+        subtitle = "Remote creative workstations",
         actions = {
             PrimaryAction("Scan", onRefresh)
             PrimaryAction("Pair", onPair)
         },
     ) {
+        StatusBand(
+            items = listOf(
+                StatusMetric("Hosts", discoveryState.hosts.size.toString(), Tone.Primary),
+                StatusMetric("Discovery", if (discoveryState.isScanning) "Scanning" else "Idle", if (discoveryState.isScanning) Tone.Good else Tone.Neutral),
+                StatusMetric("Last scan", discoveryState.lastScanLabel, Tone.Neutral),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+
         if (discoveryState.hosts.isEmpty()) {
-            Text(
-                text = if (discoveryState.isScanning) {
-                    "Listening for GlyphRay hosts..."
-                } else {
-                    "No GlyphRay hosts found"
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            InfoPanel {
+                Text(
+                    text = if (discoveryState.isScanning) "Listening for GlyphRay hosts" else "No hosts discovered",
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Manual endpoint entry stays available for Tailscale IPs, MagicDNS names, and direct LAN addresses.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(14.dp))
         }
 
+        SectionTitle("Manual endpoint")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -95,43 +117,45 @@ fun HostListScreen(
             PrimaryAction("Add") {
                 if (manualHost.isNotBlank()) {
                     onAddManualHost(manualHost)
+                    manualHost = ""
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
-
-        discoveryState.hosts.forEach { host ->
-            HostRow(
-                name = host.hostName,
-                details = "${host.address.hostAddress}:${host.controlPort} / ${host.capabilitiesLabel} / load ${host.loadPercent}%",
-                onConnect = { onConnect(host) },
-            )
-        }
         Spacer(Modifier.height(18.dp))
+
+        SectionTitle("Available hosts")
+        discoveryState.hosts.forEach { host ->
+            HostCard(host = host, onConnect = { onConnect(host) })
+            Spacer(Modifier.height(10.dp))
+        }
+        Spacer(Modifier.height(8.dp))
         discoveryState.lastError?.let { error ->
             Text("Discovery error: $error", color = MaterialTheme.colorScheme.error)
         }
-        Text(
-            "Last scan: ${discoveryState.lastScanLabel}",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 
 @Composable
-private fun HostRow(name: String, details: String, onConnect: () -> Unit) {
+private fun HostCard(host: DiscoveredHost, onConnect: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp)
             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
             .padding(14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(name, fontWeight = FontWeight.SemiBold)
-            Text(details, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(host.hostName, fontWeight = FontWeight.SemiBold)
+            Text("${host.address.hostAddress}:${host.controlPort}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            ChipRow {
+                StatusPill(if (host.supportsWindowsInk) "Ink ready" else "Mouse fallback", if (host.supportsWindowsInk) Tone.Good else Tone.Warning)
+                StatusPill(if (host.supportsH264) "H.264" else "No codec", if (host.supportsH264) Tone.Good else Tone.Warning)
+                StatusPill(if (host.pairingRequired) "Pairing" else "Trusted", if (host.pairingRequired) Tone.Warning else Tone.Good)
+                StatusPill("Load ${host.loadPercent}%", if (host.loadPercent < 70) Tone.Neutral else Tone.Warning)
+            }
         }
         PrimaryAction("Connect", onConnect)
     }
@@ -141,12 +165,23 @@ private fun HostRow(name: String, details: String, onConnect: () -> Unit) {
 fun PairingScreen(onDone: () -> Unit) {
     ScreenFrame(
         title = "Pair Computer",
-        subtitle = "Local-network pairing with numeric code or QR handoff",
+        subtitle = "Local trust setup",
     ) {
-        MetricRow("Pairing method", "Numeric code first")
-        MetricRow("Session security", "Mutual authentication")
-        MetricRow("Secret storage", "Android Keystore")
+        StatusBand(
+            items = listOf(
+                StatusMetric("Method", "Code / QR-ready", Tone.Primary),
+                StatusMetric("Auth", "Mutual", Tone.Good),
+                StatusMetric("Secrets", "Keystore", Tone.Good),
+            ),
+        )
         Spacer(Modifier.height(18.dp))
+        InfoPanel {
+            SectionTitle("Trust model")
+            MetricRow("Pairing token", "One-time")
+            MetricRow("Session token", "Short-lived")
+            MetricRow("Raw keyboard logs", "Disabled")
+        }
+        Spacer(Modifier.height(14.dp))
         PrimaryAction("Trust this host", onDone)
     }
 }
@@ -159,26 +194,52 @@ fun ConnectionScreen(
 ) {
     ScreenFrame(
         title = "Connect",
-        subtitle = "Permission, display, and encoder negotiation",
+        subtitle = "Session readiness and stream negotiation",
     ) {
-        MetricRow("Host", selectedHost?.hostName ?: "No host selected")
-        MetricRow("Endpoint", selectedHost?.let { "${it.address.hostAddress}:${it.controlPort}" } ?: "-")
-        MetricRow("Selected display", controlState.primaryDisplay?.label ?: "Primary monitor")
-        MetricRow("Video", "H.264 / low latency / 60 fps")
-        MetricRow("Input", "Stylus priority channel")
-        MetricRow("Control", controlState.statusLabel)
+        StatusBand(
+            items = listOf(
+                StatusMetric("Control", if (controlState.isConnected) "Ready" else "Offline", if (controlState.isConnected) Tone.Good else Tone.Warning),
+                StatusMetric("Pairing", controlState.lastPairingAccepted?.let { if (it) "Accepted" else "Rejected" } ?: "Pending", if (controlState.lastPairingAccepted == true) Tone.Good else Tone.Neutral),
+                StatusMetric("RTT", controlState.lastRoundTripMs?.let { "${it} ms" } ?: "-", Tone.Primary),
+                StatusMetric("Displays", controlState.displays.size.toString(), Tone.Neutral),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+
+        InfoPanel {
+            SectionTitle("Target")
+            MetricRow("Host", selectedHost?.hostName ?: "No host selected")
+            MetricRow("Endpoint", selectedHost?.let { "${it.address.hostAddress}:${it.controlPort}" } ?: "-")
+            MetricRow("Selected display", controlState.primaryDisplay?.label ?: "Primary monitor")
+        }
+        Spacer(Modifier.height(12.dp))
+
+        InfoPanel {
+            SectionTitle("Requested session")
+            MetricRow("Video", controlState.videoSettings.summary)
+            MetricRow("Input", "${controlState.inputSettings.touchMode.label} / stylus priority")
+            MetricRow("Fullscreen", if (controlState.inputSettings.fullscreenMode) "On" else "Windowed")
+            MetricRow("Trusted device", controlState.trustedDeviceId ?: "-")
+        }
+        Spacer(Modifier.height(12.dp))
+
+        InfoPanel {
+            SectionTitle("Readiness")
+            ReadinessRow("Host selected", selectedHost != null)
+            ReadinessRow("Control channel", controlState.isConnected)
+            ReadinessRow("Pairing accepted", controlState.lastPairingAccepted == true)
+            ReadinessRow("Display geometry", controlState.displays.isNotEmpty())
+            ReadinessRow("Encoder request", controlState.videoSettings.lowLatency)
+        }
+        Spacer(Modifier.height(12.dp))
         MetricRow("Control packets", controlState.packetsSent.toString())
         MetricRow("Control responses", controlState.responsesReceived.toString())
-        MetricRow("Pairing", controlState.lastPairingAccepted?.let { if (it) "Accepted" else "Rejected" } ?: "Waiting")
-        MetricRow("Latency pong", controlState.lastRoundTripMs?.let { "${it} ms" } ?: "-")
-        MetricRow("Host displays", controlState.displays.size.toString())
-        MetricRow("Trusted device", controlState.trustedDeviceId ?: "-")
         MetricRow("Last control action", controlState.lastAction)
         controlState.lastError?.let { error ->
             Text("Control error: $error", color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(18.dp))
-        PrimaryAction("Start session", onConnected)
+        PrimaryAction("Start session", enabled = selectedHost != null, onClick = onConnected)
     }
 }
 
@@ -226,49 +287,71 @@ fun RemoteSessionScreen(
             }
         },
     ) {
+        StatusBand(
+            items = listOf(
+                StatusMetric("Host", selectedHost?.hostName ?: "None", if (selectedHost != null) Tone.Good else Tone.Warning),
+                StatusMetric("RTT", controlState.lastRoundTripMs?.let { "${it} ms" } ?: "-", Tone.Primary),
+                StatusMetric("Stream", "${controlState.videoSettings.maxFps} fps", Tone.Neutral),
+                StatusMetric("Input", bridgeState.statusLabel, if (bridgeState.lastError == null) Tone.Good else Tone.Warning),
+            ),
+        )
+        Spacer(Modifier.height(14.dp))
+
         RemoteDisplayView(
             telemetry = SessionTelemetrySnapshot(
-                roundTripMs = 12,
-                decodeMs = 3,
-                renderMs = 2,
-                inputMs = 4,
-                fps = 60,
-                bitrateKbps = 18_000,
+                roundTripMs = controlState.lastRoundTripMs?.toInt() ?: 0,
+                decodeMs = 0,
+                renderMs = 0,
+                inputMs = 0,
+                fps = controlState.videoSettings.maxFps,
+                bitrateKbps = controlState.videoSettings.targetBitrateKbps,
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (fullscreen) 620.dp else 320.dp),
+                .height(if (fullscreen) 620.dp else 360.dp),
             onInputEvent = { event -> stylusBridge.onMotionEvent(event, controlState.inputSettings) },
             onKeyEvent = onKeyEvent,
             onGenericMotionEvent = onGenericMotionEvent,
             onVideoStreamController = onVideoStreamController,
         )
         Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(onClick = {}, label = { Text("60 fps") })
-            AssistChip(onClick = {}, label = { Text("12 ms RTT") })
-            AssistChip(onClick = {}, label = { Text("Ink input") })
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChipRow {
+            StatusPill(controlState.videoSettings.codec.label, Tone.Primary)
+            StatusPill(controlState.videoSettings.colorSpace.label, Tone.Neutral)
+            StatusPill("${controlState.videoSettings.targetBitrateKbps / 1_000} Mbps", Tone.Neutral)
+            StatusPill("Ink input", Tone.Good)
+            StatusPill(controlState.inputSettings.touchMode.label, Tone.Neutral)
+            StatusPill(if (fullscreen) "Fullscreen" else "Windowed", Tone.Neutral)
             if (controlState.inputSettings.specialKeyOverlay) {
                 AssistChip(onClick = { onSpecialKey(SpecialRemoteKey.Windows) }, label = { Text("Win") })
                 AssistChip(onClick = { onSpecialKey(SpecialRemoteKey.PrintScreen) }, label = { Text("PrtSc") })
             }
-            AssistChip(onClick = {}, label = { Text(controlState.inputSettings.touchMode.label) })
-            AssistChip(onClick = {}, label = { Text("Mouse") })
-            AssistChip(onClick = {}, label = { Text("Gamepad") })
         }
-        Spacer(Modifier.height(10.dp))
-        MetricRow("Input stream", bridgeState.statusLabel)
-        MetricRow("Input host", bridgeState.connectedHostName ?: "-")
-        MetricRow("Bluetooth keyboard", if (controlState.inputSettings.bluetoothKeyboardEnabled) "Enabled" else "Off")
-        MetricRow("Fullscreen", if (fullscreen) "On" else "Off")
-        MetricRow("Stylus packets", bridgeState.packetsSent.toString())
-        MetricRow("Stylus samples", bridgeState.samplesSent.toString())
-        MetricRow("Video packets", controlState.videoPacketsReceived.toString())
-        MetricRow("Video frames", controlState.videoFramesCompleted.toString())
-        MetricRow("Decoder queued", controlState.videoFramesQueuedToDecoder.toString())
+        Spacer(Modifier.height(14.dp))
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            InfoPanel {
+                SectionTitle("Input")
+                MetricRow("Stream", bridgeState.statusLabel)
+                MetricRow("Host", bridgeState.connectedHostName ?: "-")
+                MetricRow("Stylus packets", bridgeState.packetsSent.toString())
+                MetricRow("Stylus samples", bridgeState.samplesSent.toString())
+                MetricRow("Keyboard", if (controlState.inputSettings.bluetoothKeyboardEnabled) "Enabled" else "Off")
+                MetricRow("Mouse", if (controlState.inputSettings.bluetoothMouseEnabled) "Enabled" else "Off")
+                MetricRow("Gamepad", if (controlState.inputSettings.gameControllerEnabled) "Enabled" else "Off")
+            }
+            InfoPanel {
+                SectionTitle("Video")
+                MetricRow("Packets", controlState.videoPacketsReceived.toString())
+                MetricRow("Frames", controlState.videoFramesCompleted.toString())
+                MetricRow("Decoder queued", controlState.videoFramesQueuedToDecoder.toString())
+                MetricRow("Last sequence", controlState.lastVideoSequence?.toString() ?: "-")
+                MetricRow("Request", controlState.videoSettings.summary)
+            }
+        }
         bridgeState.lastError?.let { error ->
             Text("Input stream error: $error", color = MaterialTheme.colorScheme.error)
         }
@@ -280,26 +363,53 @@ fun PenSettingsScreen(onDiagnostics: () -> Unit) {
     var pressure by remember { mutableFloatStateOf(0.45f) }
     var palmRejection by remember { mutableStateOf(true) }
     var calibrationStep by remember { mutableStateOf(CalibrationStep.TopLeft) }
+    var pressureCurve by remember { mutableStateOf("Linear") }
+    var mappingMode by remember { mutableStateOf("Fit") }
 
     ScreenFrame(
         title = "Pen Settings",
         subtitle = "Pressure curves, calibration, and mapping",
         actions = { PrimaryAction("Raw input", onDiagnostics) },
     ) {
-        Text("Pressure curve", fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(onClick = {}, label = { Text("Linear") })
-            AssistChip(onClick = {}, label = { Text("Soft") })
-            AssistChip(onClick = {}, label = { Text("Hard") })
+        InfoPanel {
+            SectionTitle("Pressure")
+            ChipRow {
+                listOf("Linear", "Soft", "Hard").forEach { curve ->
+                    FilterChip(
+                        selected = pressureCurve == curve,
+                        onClick = { pressureCurve = curve },
+                        label = { Text(curve) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            MetricRow("Test pressure", "${(pressure * 100).toInt()}%")
+            Slider(value = pressure, onValueChange = { pressure = it })
+            LinearProgressIndicator(
+                progress = { pressure.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ToggleRow("Palm rejection hints", palmRejection) { palmRejection = it }
         }
         Spacer(Modifier.height(18.dp))
-        Text("Test pressure: ${(pressure * 100).toInt()}%")
-        Slider(value = pressure, onValueChange = { pressure = it })
-        ToggleRow("Palm rejection hints", palmRejection) { palmRejection = it }
+
+        InfoPanel {
+            SectionTitle("Mapping")
+            ChipRow {
+                listOf("Fit", "Fill", "1:1", "Selected monitor").forEach { mode ->
+                    FilterChip(
+                        selected = mappingMode == mode,
+                        onClick = { mappingMode = mode },
+                        label = { Text(mode) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            MetricRow("Active mode", mappingMode)
+            MetricRow("Calibration", calibrationStep.name)
+        }
         Spacer(Modifier.height(12.dp))
-        MetricRow("Mapping", "Fit / Fill / 1:1 / selected monitor")
-        MetricRow("Calibration", calibrationStep.name)
-        Spacer(Modifier.height(12.dp))
+
         CalibrationPanel(step = calibrationStep)
         Spacer(Modifier.height(12.dp))
         PrimaryAction("Advance calibration") {
@@ -327,78 +437,101 @@ fun VideoSettingsScreen(
         subtitle = "Client-requested encoder and session controls",
         actions = { PrimaryAction("Apply", onApply) },
     ) {
-        MetricRow("Current request", settings.summary)
-        Spacer(Modifier.height(12.dp))
-        Text("Resolution", fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        StatusBand(
+            items = listOf(
+                StatusMetric("Resolution", settings.resolution.label, Tone.Primary),
+                StatusMetric("Refresh", "${settings.maxFps} fps", Tone.Neutral),
+                StatusMetric("Bitrate", "${settings.targetBitrateKbps / 1_000} Mbps", Tone.Neutral),
+                StatusMetric("Codec", settings.codec.label, Tone.Primary),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+
+        InfoPanel {
+            SectionTitle("Stream profile")
+            MetricRow("Current request", settings.summary)
+            MetricRow("Color", settings.colorSpace.label)
+            MetricRow("Keyframe interval", "${settings.keyframeIntervalMs} ms")
+        }
+        Spacer(Modifier.height(14.dp))
+
+        OptionGroup("Resolution") {
             ClientResolution.entries.forEach { resolution ->
-                AssistChip(
+                FilterChip(
+                    selected = settings.resolution == resolution,
                     onClick = { onSettingsChange(settings.copy(resolution = resolution)) },
                     label = { Text(resolution.label) },
                 )
             }
         }
         Spacer(Modifier.height(12.dp))
-        Text("Codec", fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OptionGroup("Codec") {
             ClientVideoCodec.entries.forEach { codec ->
-                AssistChip(
+                FilterChip(
+                    selected = settings.codec == codec,
                     onClick = { onSettingsChange(settings.copy(codec = codec)) },
                     label = { Text(codec.label) },
                 )
             }
         }
         Spacer(Modifier.height(12.dp))
-        Text("Color space", fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OptionGroup("Color space") {
             ClientColorSpace.entries.forEach { colorSpace ->
-                AssistChip(
+                FilterChip(
+                    selected = settings.colorSpace == colorSpace,
                     onClick = { onSettingsChange(settings.copy(colorSpace = colorSpace)) },
                     label = { Text(colorSpace.label) },
                 )
             }
         }
         Spacer(Modifier.height(12.dp))
-        MetricRow("Refresh rate", "${settings.maxFps} fps")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OptionGroup("Refresh rate") {
             listOf(60, 90, 120).forEach { fps ->
-                AssistChip(onClick = { onSettingsChange(settings.copy(maxFps = fps)) }, label = { Text("$fps") })
+                FilterChip(
+                    selected = settings.maxFps == fps,
+                    onClick = { onSettingsChange(settings.copy(maxFps = fps)) },
+                    label = { Text("$fps") },
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
-        MetricRow("Bitrate", "${settings.targetBitrateKbps} kbps")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OptionGroup("Bitrate") {
             listOf(12_000, 18_000, 35_000, 60_000).forEach { bitrate ->
-                AssistChip(
+                FilterChip(
+                    selected = settings.targetBitrateKbps == bitrate,
                     onClick = { onSettingsChange(settings.copy(targetBitrateKbps = bitrate)) },
                     label = { Text("${bitrate / 1_000} Mbps") },
                 )
             }
         }
         Spacer(Modifier.height(18.dp))
-        Text("Client controls", fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ClientTouchMode.entries.forEach { touchMode ->
-                AssistChip(
-                    onClick = { onInputSettingsChange(input.copy(touchMode = touchMode)) },
-                    label = { Text(touchMode.label) },
-                )
+
+        InfoPanel {
+            SectionTitle("Client controls")
+            ChipRow {
+                ClientTouchMode.entries.forEach { touchMode ->
+                    FilterChip(
+                        selected = input.touchMode == touchMode,
+                        onClick = { onInputSettingsChange(input.copy(touchMode = touchMode)) },
+                        label = { Text(touchMode.label) },
+                    )
+                }
             }
+            Spacer(Modifier.height(8.dp))
+            ToggleRow("Bluetooth keyboard capture", input.bluetoothKeyboardEnabled) {
+                onInputSettingsChange(input.copy(bluetoothKeyboardEnabled = it))
+            }
+            ToggleRow("Bluetooth mouse capture", input.bluetoothMouseEnabled) {
+                onInputSettingsChange(input.copy(bluetoothMouseEnabled = it))
+            }
+            ToggleRow("Game controller capture", input.gameControllerEnabled) {
+                onInputSettingsChange(input.copy(gameControllerEnabled = it))
+            }
+            ToggleRow("Special key overlay", input.specialKeyOverlay) {
+                onInputSettingsChange(input.copy(specialKeyOverlay = it))
+            }
+            MetricRow("Render target", "Low-latency surface")
         }
-        Spacer(Modifier.height(8.dp))
-        ToggleRow("Bluetooth keyboard capture", input.bluetoothKeyboardEnabled) {
-            onInputSettingsChange(input.copy(bluetoothKeyboardEnabled = it))
-        }
-        ToggleRow("Bluetooth mouse capture", input.bluetoothMouseEnabled) {
-            onInputSettingsChange(input.copy(bluetoothMouseEnabled = it))
-        }
-        ToggleRow("Game controller capture", input.gameControllerEnabled) {
-            onInputSettingsChange(input.copy(gameControllerEnabled = it))
-        }
-        ToggleRow("Special key overlay", input.specialKeyOverlay) {
-            onInputSettingsChange(input.copy(specialKeyOverlay = it))
-        }
-        MetricRow("Render target", "Low-latency surface")
     }
 }
 
@@ -408,11 +541,28 @@ fun SecuritySettingsScreen() {
         title = "Security",
         subtitle = "Local trust, pairing, and device identity",
     ) {
-        MetricRow("Device identity", "Android Keystore")
-        MetricRow("Pairing", "One-time code / QR-ready")
-        MetricRow("Transport", "Encrypted session packets")
-        MetricRow("Keyboard logging", "Disabled")
-        MetricRow("Clipboard", "Off")
+        StatusBand(
+            items = listOf(
+                StatusMetric("Identity", "Keystore", Tone.Good),
+                StatusMetric("Transport", "Encrypted", Tone.Good),
+                StatusMetric("Clipboard", "Off", Tone.Neutral),
+            ),
+        )
+        Spacer(Modifier.height(16.dp))
+        InfoPanel {
+            SectionTitle("Local trust")
+            MetricRow("Device identity", "Android Keystore")
+            MetricRow("Pairing", "One-time code / QR-ready")
+            MetricRow("Session tokens", "Short-lived")
+            MetricRow("Trusted hosts", "Per-device list")
+        }
+        Spacer(Modifier.height(12.dp))
+        InfoPanel {
+            SectionTitle("Privacy defaults")
+            MetricRow("Keyboard logging", "Disabled")
+            MetricRow("Clipboard sync", "Off")
+            MetricRow("Stylus diagnostics", "Explicit screen only")
+        }
     }
 }
 
@@ -426,34 +576,188 @@ fun DiagnosticsScreen(controller: StylusDiagnosticsController) {
         title = "Stylus Diagnostics",
         subtitle = "Raw Samsung S Pen and Android MotionEvent values",
     ) {
+        StatusBand(
+            items = listOf(
+                StatusMetric("Samples", state.totalSamples.toString(), Tone.Primary),
+                StatusMetric("Hover", state.hoverSamples.toString(), Tone.Neutral),
+                StatusMetric("Contact", state.contactSamples.toString(), Tone.Neutral),
+                StatusMetric("Batch", state.lastBatchSize.toString(), Tone.Neutral),
+            ),
+        )
+        Spacer(Modifier.height(14.dp))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
+                .heightIn(min = 260.dp)
                 .background(Color(0xFF070A0E), RoundedCornerShape(8.dp))
                 .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                 .pointerInteropFilter(onTouchEvent = controller::onMotionEvent),
             contentAlignment = Alignment.Center,
         ) {
-            Text("Draw or hover here", color = Color(0xFF9DB2BC))
+            Text(latest?.toolType?.name ?: "Awaiting input", color = Color(0xFF9DB2BC))
         }
         Spacer(Modifier.height(16.dp))
-        MetricRow("Total samples", state.totalSamples.toString())
-        MetricRow("Historical samples", state.historicalSamples.toString())
-        MetricRow("Hover samples", state.hoverSamples.toString())
-        MetricRow("Contact samples", state.contactSamples.toString())
-        MetricRow("Last batch size", state.lastBatchSize.toString())
-        Spacer(Modifier.height(8.dp))
-        MetricRow("Tool", latest?.toolType?.name ?: "-")
-        MetricRow("Action", latest?.action?.name ?: "-")
-        MetricRow("Pointer id", latest?.pointerId?.toString() ?: "-")
-        MetricRow("X / Y", latest?.let { "%.1f / %.1f".format(it.x, it.y) } ?: "-")
-        MetricRow("Pressure", latest?.let { "%.4f".format(it.pressure) } ?: "-")
-        MetricRow("Tilt", latest?.let { "%.2f deg".format(it.tiltDegrees) } ?: "-")
-        MetricRow("Orientation", latest?.let { "%.2f deg".format(it.orientationDegrees) } ?: "-")
-        MetricRow("Distance", latest?.let { "%.4f".format(it.distance) } ?: "-")
-        MetricRow("Buttons", latest?.buttonState?.toString() ?: "-")
-        MetricRow("Eraser", latest?.isEraser?.toString() ?: "-")
-        MetricRow("Timestamp ns", latest?.eventTimeNanos?.toString() ?: "-")
+        InfoPanel {
+            SectionTitle("Raw sample")
+            MetricRow("Tool", latest?.toolType?.name ?: "-")
+            MetricRow("Action", latest?.action?.name ?: "-")
+            MetricRow("Pointer id", latest?.pointerId?.toString() ?: "-")
+            MetricRow("X / Y", latest?.let { "%.1f / %.1f".format(it.x, it.y) } ?: "-")
+            MetricRow("Pressure", latest?.let { "%.4f".format(it.pressure) } ?: "-")
+            MetricRow("Tilt", latest?.let { "%.2f deg".format(it.tiltDegrees) } ?: "-")
+            MetricRow("Orientation", latest?.let { "%.2f deg".format(it.orientationDegrees) } ?: "-")
+            MetricRow("Distance", latest?.let { "%.4f".format(it.distance) } ?: "-")
+            MetricRow("Buttons", latest?.buttonState?.toString() ?: "-")
+            MetricRow("Eraser", latest?.isEraser?.toString() ?: "-")
+            MetricRow("Timestamp ns", latest?.eventTimeNanos?.toString() ?: "-")
+        }
+        Spacer(Modifier.height(12.dp))
+        InfoPanel {
+            SectionTitle("Batch counters")
+            MetricRow("Total samples", state.totalSamples.toString())
+            MetricRow("Historical samples", state.historicalSamples.toString())
+            MetricRow("Hover samples", state.hoverSamples.toString())
+            MetricRow("Contact samples", state.contactSamples.toString())
+            MetricRow("Last batch size", state.lastBatchSize.toString())
+        }
+    }
+}
+
+private enum class Tone {
+    Primary,
+    Good,
+    Warning,
+    Neutral,
+}
+
+private data class StatusMetric(
+    val label: String,
+    val value: String,
+    val tone: Tone = Tone.Neutral,
+)
+
+@Composable
+private fun SectionTitle(label: String) {
+    Text(
+        text = label,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+}
+
+@Composable
+private fun InfoPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.24f), RoundedCornerShape(8.dp)),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.76f),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            content = content,
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ChipRow(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    FlowRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun StatusBand(items: List<StatusMetric>) {
+    ChipRow {
+        items.forEach { item ->
+            StatusTile(item)
+        }
+    }
+}
+
+@Composable
+private fun StatusTile(metric: StatusMetric) {
+    val colors = toneColors(metric.tone)
+    Surface(
+        modifier = Modifier
+            .widthIn(min = 148.dp)
+            .heightIn(min = 64.dp),
+        color = colors.first,
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(metric.label, color = colors.second.copy(alpha = 0.72f), fontSize = 12.sp)
+            Text(metric.value, color = colors.second, fontWeight = FontWeight.SemiBold, maxLines = 2)
+        }
+    }
+}
+
+@Composable
+private fun StatusPill(label: String, tone: Tone = Tone.Neutral) {
+    val colors = toneColors(tone)
+    Surface(
+        color = colors.first,
+        shape = RoundedCornerShape(6.dp),
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = colors.second,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun ReadinessRow(label: String, ready: Boolean) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        StatusPill(if (ready) "Ready" else "Pending", if (ready) Tone.Good else Tone.Warning)
+    }
+}
+
+@Composable
+private fun OptionGroup(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    InfoPanel {
+        SectionTitle(title)
+        Spacer(Modifier.height(6.dp))
+        ChipRow(content = content)
+    }
+}
+
+@Composable
+private fun toneColors(tone: Tone): Pair<Color, Color> {
+    return when (tone) {
+        Tone.Primary -> Color(0xFF11343E) to Color(0xFFB9F3FF)
+        Tone.Good -> Color(0xFF14372E) to Color(0xFFB8F5D6)
+        Tone.Warning -> Color(0xFF3B3114) to Color(0xFFFFE6A6)
+        Tone.Neutral -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.74f) to MaterialTheme.colorScheme.onSurface
     }
 }

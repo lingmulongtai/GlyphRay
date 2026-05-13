@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-13 JST - Android UI/UX Cockpit Pass
+
+今日は UI/UX に集中した。Android client は、単に画面がある状態から、接続前・接続中・設定変更の判断がしやすい作業画面へ寄せた。Host list には discovery 状態、manual endpoint、host capability pill を追加し、Connect 画面には target / requested session / readiness checklist を置いた。Session 画面は remote surface の上に host、RTT、stream、input 状態を並べ、下には video / input counters を整理したので、LAN smoke test 中に何が動いているか追いやすくなった。
+
+Pen settings は pressure curve と mapping mode を選択状態つきの chip にし、pressure preview を入れた。Video settings は resolution、refresh rate、bitrate、codec、color space、client controls をそれぞれ操作しやすい group に分けた。Security と diagnostics も status band と information panel へ揃え、全画面を scrollable frame にしたので、電話サイズでも詰まりにくい。
+
+公開用 GitHub Pages site も progress を 83% に更新し、色調を graphite / teal / amber / rose の組み合わせへ調整して、単調な茶色寄りに見えないようにした。Android debug build は通過済み。
+
+この時点の進捗見積もり: 83%。
+
 ## 2026-05-12 JST - Video Channel And Ink Smoothing Push
 
 今日は video / pen / Android transport を一気に前へ押した。Rust 側では capture -> encode -> packetize の既存部品に `VideoPacketPipeline` を足し、Windows backend runtime から approved peer に `VideoFrame` packet を Video channel で queue できるようにした。`GLYPHRAY_ENABLE_VIDEO_STREAM=1` で video pump が動き、H.264 access unit envelope を `GLYF` fragment に分割して outbound QoS queue に載せる。まだ default encoder は placeholder なので、実デスクトップ映像には concrete H.264 backend が必要。

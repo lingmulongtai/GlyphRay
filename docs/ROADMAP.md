@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 82%.
+Current overall progress estimate: 83%.
 
 ## Milestone 1
 
@@ -35,6 +35,7 @@ Current overall progress estimate: 82%.
 - [x] Add Android control-channel receiver for pairing and latency responses.
 - [x] Add Android display-info decode for host monitor negotiation.
 - [x] Add Android video/session setting controls for resolution, refresh, bitrate, color space, codec, fullscreen, touch mode, keyboard, and special keys.
+- [x] Polish Android host list, connection readiness, session cockpit, settings, security, and diagnostics UI/UX.
 - [x] Add Android manual host entry for Tailscale/overlay-network endpoints.
 - [x] Add Android video fragment reassembly and decoder feed controller.
 - [x] Add UDP datagram packet format for transport packets.

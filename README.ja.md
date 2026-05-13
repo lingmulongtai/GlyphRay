@@ -8,29 +8,29 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 82%**
+**全体進捗見積もり: 83%**
 
-最終更新: 2026-05-12 JST
+最終更新: 2026-05-13 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 82
-  "残りの製品化作業" : 18
+  "実装済みの基盤" : 83
+  "残りの製品化作業" : 17
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 90% |
-| Milestone 3 Android stylus から Windows Ink | 進行中 | 82% |
-| Milestone 4 security hardening / packaging | 進行中 | 64% |
+| Milestone 3 Android stylus から Windows Ink | 進行中 | 83% |
+| Milestone 4 security hardening / packaging | 進行中 | 65% |
 | Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [##################--]  90%
-M3 Stylus -> Windows Ink     [################----]  82%
-M4 Security + Packaging      [#############-------]  64%
+M3 Stylus -> Windows Ink     [#################---]  83%
+M4 Security + Packaging      [#############-------]  65%
 M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
@@ -133,7 +133,7 @@ sequenceDiagram
 - stylus、media、session、pairing、latency、control 用の versioned binary protocol。
 - Android と Rust で揃えた高頻度 stylus packet format `GLYS`。
 - coordinate mapping、calibration、pressure curve の実装と unit tests。
-- Android Compose app の host list / pairing / connection / session / pen settings / video settings / security / diagnostics 画面。
+- Android Compose app の polished host list / pairing / connection readiness / session cockpit / pen settings / video settings / security / diagnostics 画面。
 - Android の raw stylus diagnostics。pressure、tilt、orientation、hover、button、eraser、history、timestamp を表示。
 - Rust host の `GLYD` advertisement を読む Android LAN discovery。
 - `GLYT` control channel で `PairingRequest` と `LatencyPing` を送る Android control sender。

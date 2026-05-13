@@ -1,16 +1,16 @@
 :root {
   color-scheme: dark;
-  --bg: #101211;
-  --bg-soft: #171a18;
-  --surface: #202421;
-  --surface-strong: #292e2a;
-  --text: #f5f0e7;
-  --muted: #b8c1b9;
-  --line: rgba(245, 240, 231, 0.16);
-  --teal: #4bd2c3;
-  --amber: #eea052;
-  --rose: #c96086;
-  --ink: #0b0d0c;
+  --bg: #0d1117;
+  --bg-soft: #111827;
+  --surface: #171d27;
+  --surface-strong: #202938;
+  --text: #eef5ff;
+  --muted: #a8b5c7;
+  --line: rgba(238, 245, 255, 0.15);
+  --teal: #50d5c8;
+  --amber: #f4c95d;
+  --rose: #ee7aa7;
+  --ink: #080b10;
   --shadow: rgba(0, 0, 0, 0.34);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -102,14 +102,17 @@ a {
 }
 
 .hero-image {
+  filter: brightness(0.42) saturate(0.9);
   height: 100%;
   object-fit: cover;
-  object-position: center;
+  object-position: 42% center;
+  transform: scale(1.28);
+  transform-origin: right center;
   width: 100%;
 }
 
 .hero-shade {
-  background: rgba(4, 5, 5, 0.54);
+  background: rgba(5, 8, 13, 0.74);
 }
 
 .hero-content {
@@ -154,7 +157,7 @@ h3 {
 }
 
 .hero-copy {
-  color: #efe9dc;
+  color: #e6eefc;
   font-size: 1.32rem;
   max-width: 700px;
 }
@@ -218,7 +221,7 @@ dd {
 }
 
 .intro {
-  background: #171612;
+  background: #111827;
   display: grid;
   gap: 32px;
   grid-template-columns: minmax(0, 0.85fr) minmax(280px, 1fr);
@@ -279,7 +282,7 @@ dd {
 }
 
 .split {
-  background: #131614;
+  background: #0f1722;
   display: grid;
   gap: 36px;
   grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1fr);
@@ -355,7 +358,7 @@ code {
 }
 
 .status-section {
-  background: #1d1a18;
+  background: #111722;
 }
 
 .status-layout {
@@ -415,7 +418,7 @@ code {
 
 .footer {
   align-items: center;
-  background: #0d0e0d;
+  background: #080b10;
   border-top: 1px solid var(--line);
   display: flex;
   gap: 20px;

@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 82%**
+**Overall progress estimate: 83%**
 
-Last updated: 2026-05-12 JST
+Last updated: 2026-05-13 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 82
-  "Remaining product work" : 18
+  "Implemented foundation" : 83
+  "Remaining product work" : 17
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 90% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 82% |
-| Milestone 4 hardening and packaging | In progress | 64% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 83% |
+| Milestone 4 hardening and packaging | In progress | 65% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  90%
-M3 Stylus -> Windows Ink      [################----]  82%
-M4 Security + Packaging       [#############-------]  64%
+M3 Stylus -> Windows Ink      [#################---]  83%
+M4 Security + Packaging       [#############-------]  65%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -133,7 +133,7 @@ sequenceDiagram
 - Versioned binary protocol with stylus, media, session, pairing, latency, and control messages.
 - Compact high-frequency stylus wire format (`GLYS`) shared by Android and Rust.
 - Coordinate mapping, calibration, and pressure-curve logic with unit tests.
-- Android Compose app with host list, pairing, connection, session, pen settings, video settings, security, and diagnostics screens.
+- Android Compose app with polished host list, pairing, connection readiness, session cockpit, pen settings, video settings, security, and diagnostics screens.
 - Android raw stylus diagnostics for pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
 - Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.

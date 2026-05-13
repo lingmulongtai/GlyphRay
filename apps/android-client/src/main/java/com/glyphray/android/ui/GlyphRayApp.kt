@@ -5,17 +5,29 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.CastConnected
+import androidx.compose.material.icons.rounded.Devices
+import androidx.compose.material.icons.rounded.HealthAndSafety
+import androidx.compose.material.icons.rounded.QueryStats
+import androidx.compose.material.icons.rounded.VideoSettings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -32,7 +44,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.glyphray.android.input.StylusDiagnosticsController
 import com.glyphray.android.network.DiscoveredHost
@@ -47,15 +61,15 @@ import com.glyphray.android.ui.screens.RemoteSessionScreen
 import com.glyphray.android.ui.screens.SecuritySettingsScreen
 import com.glyphray.android.ui.screens.VideoSettingsScreen
 
-enum class GlyphRayScreen(val label: String) {
-    Hosts("Hosts"),
-    Pair("Pair"),
-    Connect("Connect"),
-    Session("Session"),
-    Pen("Pen"),
-    Video("Video"),
-    Security("Security"),
-    Diagnostics("Diagnostics"),
+enum class GlyphRayScreen(val label: String, val icon: ImageVector) {
+    Hosts("Hosts", Icons.Rounded.Devices),
+    Pair("Pair", Icons.Rounded.CastConnected),
+    Connect("Connect", Icons.Rounded.CastConnected),
+    Session("Session", Icons.Rounded.CastConnected),
+    Pen("Pen", Icons.Rounded.Brush),
+    Video("Video", Icons.Rounded.VideoSettings),
+    Security("Security", Icons.Rounded.HealthAndSafety),
+    Diagnostics("Diagnostics", Icons.Rounded.QueryStats),
 }
 
 @Composable
@@ -92,7 +106,7 @@ fun GlyphRayApp() {
                             selected = screen == item,
                             onClick = { screen = item },
                             label = { Text(item.label) },
-                            icon = { Text(item.label.first().toString()) },
+                            icon = { Icon(item.icon, contentDescription = item.label) },
                         )
                     }
                 }
@@ -161,34 +175,49 @@ fun GlyphRayApp() {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ScreenFrame(
     title: String,
     subtitle: String,
-    actions: @Composable RowScope.() -> Unit = {},
+    actions: @Composable () -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(20.dp),
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .widthIn(max = 1120.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    actions()
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
+            Spacer(Modifier.height(18.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+            Spacer(Modifier.height(18.dp))
+            content()
+            Spacer(Modifier.height(24.dp))
         }
-        Spacer(Modifier.height(18.dp))
-        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-        Spacer(Modifier.height(18.dp))
-        content()
     }
 }
 
@@ -203,14 +232,25 @@ fun MetricRow(label: String, value: String) {
     ) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(16.dp))
-        Text(value, fontWeight = FontWeight.Medium)
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }
 
 @Composable
 fun PrimaryAction(label: String, onClick: () -> Unit) {
+    PrimaryAction(label = label, enabled = true, onClick = onClick)
+}
+
+@Composable
+fun PrimaryAction(label: String, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
     ) {
         Text(label)
@@ -220,7 +260,9 @@ fun PrimaryAction(label: String, onClick: () -> Unit) {
 @Composable
 fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
