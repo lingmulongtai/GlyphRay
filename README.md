@@ -8,30 +8,30 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 92%**
+**Overall progress estimate: 93%**
 
 Last updated: 2026-05-15 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 92
-  "Remaining product work" : 8
+  "Implemented foundation" : 93
+  "Remaining product work" : 7
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 92% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 89% |
-| Milestone 4 hardening and packaging | In progress | 82% |
-| Milestone 5 macOS, audio, relay readiness | In progress | 42% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 90% |
+| Milestone 4 hardening and packaging | In progress | 84% |
+| Milestone 5 macOS, audio, relay readiness | In progress | 48% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  92%
-M3 Stylus -> Windows Ink      [##################--]  89%
-M4 Security + Packaging       [################----]  82%
-M5 macOS + Audio + Relay      [########------------]  42%
+M3 Stylus -> Windows Ink      [##################--]  90%
+M4 Security + Packaging       [#################---]  84%
+M5 macOS + Audio + Relay      [##########----------]  48%
 ```
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -60,9 +60,9 @@ flowchart TB
 
 | Path | Purpose | Current State |
 | --- | --- | --- |
-| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
-| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, native permission dialog, trusted-device list management, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, permission readiness UI, Keychain smoke test, VideoToolbox encoder smoke test |
+| `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, Android Keystore public-key pairing identity, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
+| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, native permission dialog, cryptographic trusted-device matching, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
+| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration and live capture probe, permission readiness UI, Keychain smoke test, VideoToolbox encoder smoke test |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
 | `crates/transport` | Real-time packet layer | UDP `GLYT`, LAN discovery `GLYD`, video fragmentation, reusable UDP buffers, secure datagram wrapper, reconnect, bitrate/keyframe adaptation logic |
@@ -136,7 +136,7 @@ sequenceDiagram
 - Android Compose app with polished host list, pairing, connection readiness, session cockpit, pen settings, video settings, security, and diagnostics screens.
 - Android raw stylus diagnostics for pressure, tilt, orientation, hover, buttons, eraser, history, and timestamps.
 - Android LAN host discovery receiver for Rust `GLYD` advertisements.
-- Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`.
+- Android control channel sender for `PairingRequest` and `LatencyPing` frames wrapped in `GLYT`; pairing now includes the Android Keystore public key bytes for host-side device fingerprinting.
 - Android control response receiver for `PairingResult` and `LatencyPong`.
 - Android display-info receiver for host monitor geometry after pairing.
 - Android video settings can select a discovered host display, and the selected display id is sent with stylus, touch, and mouse input packets.
@@ -150,7 +150,7 @@ sequenceDiagram
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, optional native permission dialogs, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
-- Windows host records approved devices into local host settings and exposes `trust list`, `trust forget <id>`, and `trust clear` management commands.
+- Windows host records approved devices into local host settings, stores the Android public-key SHA-256 fingerprint when available, auto-approves returning devices only when that fingerprint matches, and exposes `trust list`, `trust forget <id>`, and `trust clear` management commands.
 - Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
 - Windows host can persist a default encoder override with `encoder save`, reload it on backend startup, clear it with `encoder clear`, and manage named stream presets with `encoder preset save|apply|delete|list`.
 - Windows host can show an opt-in Win32 connection permission dialog for incoming pairing requests with `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`.
@@ -163,7 +163,7 @@ sequenceDiagram
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, adaptive bitrate decisions, and packet-loss keyframe recovery signaling foundations.
 - Windows `PlatformSecretStore` uses DPAPI-protected per-user secret files on Windows, with an in-memory fallback on non-Windows builds.
-- macOS SwiftUI shell with ScreenCaptureKit display diagnostics, permission readiness checks, VideoToolbox low-latency encoder smoke test, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
+- macOS SwiftUI shell with ScreenCaptureKit display diagnostics, a live capture frame probe, permission readiness checks, VideoToolbox low-latency encoder smoke test, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
 - GitHub Actions CI for Rust tests, Android unit tests, and Android debug build.
 - GitHub Pages static download site with setup command generator and original hero artwork.
 
@@ -288,11 +288,12 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 ## Current Limits
 
 - Rust tests and Android debug builds have been exercised on Windows. Android unit tests should be run with JDK 17.
-- The host router now has in-memory DoS guards, console-visible health counters, an opt-in native permission dialog, and a persisted trusted-device list. Production pairing still needs cryptographic device identity validation before trusted devices can auto-approve.
+- The host router now has in-memory DoS guards, console-visible health counters, an opt-in native permission dialog, and public-key-fingerprint trusted-device matching for returning Android devices.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
 - Video fragments can now be queued to approved clients on the Video channel, but a concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction before real desktop video is useful.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
 - The permission dialog and trusted-device commands are minimal host-console features, not a full tray/settings UI yet. `GLYPHRAY_DEV_AUTO_APPROVE` remains only for local smoke tests.
+- macOS live capture has a ScreenCaptureKit frame probe, but capture frames are not yet fed into VideoToolbox or the shared transport.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION`, `GLYPHRAY_ENABLE_MOUSE_INJECTION`, and `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` are explicit smoke-test flags until per-device input permissions are exposed in the host UI.
 - Gamepad packets are decoded on Windows, but virtual controller injection still needs a ViGEm/virtual HID backend.
@@ -311,7 +312,8 @@ flowchart LR
 
 Immediate engineering focus:
 
-- Promote the native permission dialog and trusted-device commands into a tray/settings UI with cryptographic device identity validation.
+- Promote the native permission dialog and trusted-device commands into a tray/settings UI.
+- Feed macOS SCStream frames into VideoToolbox and the shared transport.
 - Connect Android stylus UDP packets to the Windows native pen bridge in a full LAN smoke test.
 - Replace fallback capture with Windows Graphics Capture or Desktop Duplication.
 - Add a concrete low-latency H.264 encoder backend.

@@ -97,6 +97,7 @@ private extension MacEncoderSettings {
 enum MacHostError: Error, CustomStringConvertible {
     case frameworkUnavailable(String)
     case encoderUnavailable(OSStatus)
+    case captureUnavailable(String)
 
     var description: String {
         switch self {
@@ -104,6 +105,8 @@ enum MacHostError: Error, CustomStringConvertible {
             return "\(name) is unavailable on this platform"
         case .encoderUnavailable(let status):
             return "VideoToolbox encoder unavailable: \(status)"
+        case .captureUnavailable(let message):
+            return "Screen capture unavailable: \(message)"
         }
     }
 }

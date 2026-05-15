@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - Windows Trusted Identity And macOS Live Capture Start
+
+今日は Windows 版を完成形に近づけるため、trusted-device を IP 由来の仮IDから Android Keystore public key fingerprint ベースへ寄せた。Android の `PairingRequest` に Keystore 公開鍵 bytes を載せ、Windows host は SHA-256 fingerprint を保存する。次回以降は同じ fingerprint が trusted-device list にある場合だけ auto-approve するので、単なる同一IPよりはかなり製品らしい再接続に近づいた。まだ最終形には challenge/response proof が必要だが、危ない無条件自動承認ではない。
+
+macOS 側にも着手した。`MacLiveCaptureController` を追加し、ScreenCaptureKit の `SCStream` を短時間起動して frame count を取る live capture probe を SwiftUI から走らせられるようにした。まだ VideoToolbox への sample buffer 入力と shared transport 送信はこれからだが、display listing だけだった macOS host が実際に frame を掴みに行く段階へ進んだ。
+
+この時点の進捗見積もり: 93%。
+
 ## 2026-05-15 JST - Trusted Device Management
 
 今日は permission dialog の次に必要な trusted-device 管理を進めた。承認済み peer は `LOCALAPPDATA/GlyphRay/host-settings.conf` に trusted-device record として保存され、`trust list`、`trust forget <id>`、`trust clear` で確認・削除できる。record には id、label、last peer、approval timestamp、pen/touch/keyboard/mouse/gamepad の permission flags を持たせた。

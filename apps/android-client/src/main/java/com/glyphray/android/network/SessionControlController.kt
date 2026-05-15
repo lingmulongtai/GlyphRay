@@ -13,6 +13,7 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.glyphray.android.security.AndroidDeviceKeys
 import com.glyphray.android.video.RemoteVideoStreamController
 
 data class SessionControlState(
@@ -327,6 +328,7 @@ class SessionControlController(
 
 private class ControlUdpClient : Closeable {
     private val socket = DatagramSocket()
+    private val deviceKeys = AndroidDeviceKeys()
     private var remote: InetSocketAddress? = null
     private var nextTransportSequence = 1L
     private var nextFrameSequence = 1L
@@ -342,6 +344,7 @@ private class ControlUdpClient : Closeable {
         val frame = ProtocolFrameCodec.encodePairingRequest(
             sequence = nextFrameSequence++,
             deviceName = deviceName,
+            oneTimePublicKey = runCatching { deviceKeys.publicKeyBytes() }.getOrDefault(ByteArray(0)),
         )
         return sendControl(TransportMessageKind.pairingRequest, frame)
     }

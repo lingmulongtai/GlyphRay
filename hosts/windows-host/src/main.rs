@@ -5,7 +5,8 @@ use glyphray_transport::udp::UdpServer;
 use glyphray_transport::video::VideoPacketizer;
 use glyphray_transport::TransportPacket;
 use glyphray_windows_host::backend::{
-    trusted_device_id, HostBackendRuntime, PermissionPolicy, PermissionState,
+    trusted_device_id, trusted_device_id_from_public_key_fingerprint, HostBackendRuntime,
+    PermissionPolicy, PermissionState,
 };
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 use glyphray_windows_host::encoder::{EncoderSettings, PendingHardwareEncoder};
@@ -153,8 +154,21 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
             ) {
                 should_restart_video_pump = true;
             }
-            permission_dialogs.observe_backend_event(&event);
+            let auto_trusted = maybe_auto_approve_trusted_pairing(
+                &event,
+                &mut runtime,
+                &mut server,
+                &settings_store,
+            )?;
+            if auto_trusted.is_none() {
+                permission_dialogs.observe_backend_event(&event);
+            }
             print_backend_event(&event);
+            if let Some(events) = auto_trusted {
+                for event in events {
+                    print_backend_event(&event);
+                }
+            }
         }
         if should_restart_video_pump && host_encoder_override.is_none() {
             video_pump = create_runtime_video_pump(&runtime, host_encoder_override.as_ref());
@@ -532,7 +546,9 @@ impl PermissionDialogCoordinator {
     fn observe_backend_event(&mut self, event: &glyphray_windows_host::backend::BackendEvent) {
         use glyphray_windows_host::backend::BackendEvent;
         match event {
-            BackendEvent::PairingRequested { peer, device_name } => {
+            BackendEvent::PairingRequested {
+                peer, device_name, ..
+            } => {
                 if !self.enabled || !self.active_prompts.insert(*peer) {
                     return;
                 }
@@ -918,6 +934,38 @@ fn drain_console_commands(
     Ok(events)
 }
 
+fn maybe_auto_approve_trusted_pairing(
+    event: &glyphray_windows_host::backend::BackendEvent,
+    runtime: &mut HostBackendRuntime<Box<dyn PenInjector>>,
+    server: &mut UdpServer,
+    settings_store: &HostSettingsStore,
+) -> Result<Option<Vec<glyphray_windows_host::backend::BackendEvent>>, Box<dyn Error>> {
+    let glyphray_windows_host::backend::BackendEvent::PairingRequested {
+        peer,
+        public_key_fingerprint: Some(fingerprint),
+        ..
+    } = event
+    else {
+        return Ok(None);
+    };
+
+    let settings = settings_store.load()?;
+    let Some(device) = settings
+        .trusted_devices
+        .iter()
+        .find(|device| device.public_key_fingerprint.as_deref() == Some(fingerprint.as_str()))
+    else {
+        return Ok(None);
+    };
+
+    println!(
+        "Trusted device matched by public key fingerprint: id={} label=`{}` peer={peer}",
+        device.id, device.label
+    );
+    let events = approve_peer_and_record_trust(runtime, server, settings_store, *peer)?;
+    Ok(Some(events))
+}
+
 fn approve_peer_and_record_trust(
     runtime: &mut HostBackendRuntime<Box<dyn PenInjector>>,
     server: &mut UdpServer,
@@ -925,9 +973,13 @@ fn approve_peer_and_record_trust(
     peer: SocketAddr,
 ) -> Result<Vec<glyphray_windows_host::backend::BackendEvent>, Box<dyn Error>> {
     let label = pending_device_label(runtime, peer).unwrap_or_else(|| peer.to_string());
-    let id = trusted_device_id(peer);
-    let events = runtime.approve_peer_and_notify(server, peer)?;
-    match TrustedDevice::approved_now(id.clone(), label.clone(), peer.to_string())
+    let fingerprint = pending_public_key_fingerprint(runtime, peer);
+    let id = fingerprint
+        .as_deref()
+        .map(trusted_device_id_from_public_key_fingerprint)
+        .unwrap_or_else(|| trusted_device_id(peer));
+    let events = runtime.approve_peer_as_and_notify(server, peer, id.clone())?;
+    match TrustedDevice::approved_now(id.clone(), label.clone(), peer.to_string(), fingerprint)
         .and_then(|device| settings_store.upsert_trusted_device(device))
     {
         Ok(_) => println!("Trusted device recorded: id={id} label={label} peer={peer}"),
@@ -947,6 +999,17 @@ fn pending_device_label(
         .and_then(|session| session.device_id)
 }
 
+fn pending_public_key_fingerprint(
+    runtime: &HostBackendRuntime<Box<dyn PenInjector>>,
+    peer: SocketAddr,
+) -> Option<String> {
+    runtime
+        .session_snapshots()
+        .into_iter()
+        .find(|session| session.peer == peer)
+        .and_then(|session| session.device_public_key_fingerprint)
+}
+
 fn peer_is_pending(runtime: &HostBackendRuntime<Box<dyn PenInjector>>, peer: SocketAddr) -> bool {
     runtime
         .session_snapshots()
@@ -963,10 +1026,11 @@ fn print_trusted_devices(devices: &[TrustedDevice]) {
     println!("trusted devices={}", devices.len());
     for device in devices {
         println!(
-            "trusted id={} label=`{}` peer={} approved_unix_ms={} permissions=pen:{},touch:{},keyboard:{},mouse:{},gamepad:{}",
+            "trusted id={} label=`{}` peer={} public_key={} approved_unix_ms={} permissions=pen:{},touch:{},keyboard:{},mouse:{},gamepad:{}",
             device.id,
             device.label,
             device.last_peer,
+            device.public_key_fingerprint.as_deref().unwrap_or("-"),
             device.approved_unix_ms,
             device.permissions.allow_pen,
             device.permissions.allow_touch,
@@ -1099,8 +1163,15 @@ fn print_encoder_presets(presets: &[EncoderPreset]) {
 fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
     use glyphray_windows_host::backend::BackendEvent;
     match event {
-        BackendEvent::PairingRequested { peer, device_name } => {
+        BackendEvent::PairingRequested {
+            peer,
+            device_name,
+            public_key_fingerprint,
+        } => {
             println!("Pairing requested from {device_name} at {peer}.");
+            if let Some(fingerprint) = public_key_fingerprint {
+                println!("Device public key fingerprint: {fingerprint}");
+            }
             println!("Type `approve {peer}` to trust it or `reject {peer}` to deny it.");
         }
         BackendEvent::PairingResultQueued { peer, accepted } => {
@@ -1248,6 +1319,7 @@ mod tests {
             &glyphray_windows_host::backend::BackendEvent::PairingRequested {
                 peer,
                 device_name: "Tablet".to_string(),
+                public_key_fingerprint: None,
             },
         );
 

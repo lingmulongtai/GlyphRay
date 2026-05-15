@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 92%.
+Current overall progress estimate: 93%.
 
 ## Milestone 1
 
@@ -68,6 +68,7 @@ Current overall progress estimate: 92%.
 - [x] Add console approval/rejection flow with `PairingResult` responses.
 - [x] Add opt-in native Windows permission dialog for incoming pairing requests.
 - [x] Persist approved Windows host trusted-device records and add host console trust management commands.
+- [x] Attach Android Keystore public key material to pairing and auto-approve returning devices only when the stored public-key fingerprint matches.
 - [x] Queue host `DisplayInfo` after accepted pairing.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
 - [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.
@@ -121,6 +122,7 @@ Current overall progress estimate: 92%.
 - [x] Add macOS CGEvent input foundation.
 - [x] Add macOS permission/readiness diagnostics for Screen Recording, Accessibility, Input Monitoring, and audio.
 - [x] Add macOS VideoToolbox low-latency encoder smoke-test path.
+- [x] Add macOS ScreenCaptureKit live frame probe.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.

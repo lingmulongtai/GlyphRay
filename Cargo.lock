@@ -233,6 +233,7 @@ dependencies = [
  "glyphray-security",
  "glyphray-telemetry",
  "glyphray-transport",
+ "sha2",
  "thiserror",
  "tracing",
  "windows",

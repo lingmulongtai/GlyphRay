@@ -25,6 +25,7 @@ Current code includes:
 
 - SwiftUI shell with local readiness diagnostics.
 - ScreenCaptureKit display listing with display geometry labels.
+- ScreenCaptureKit live capture probe that opens an `SCStream`, counts screen frames for a short run, then stops.
 - Screen Recording and Accessibility permission checks/prompts.
 - Input Monitoring status note for manual review.
 - Audio permission status plumbing.
@@ -32,4 +33,4 @@ Current code includes:
 - CGEvent mouse, click, and keyboard posting foundation.
 - Keychain-backed secret store boundary with UI smoke test.
 
-Live capture-to-encode-to-transport streaming is still pending. The next macOS-specific step is to turn the ScreenCaptureKit display listing into an `SCStream`, feed frames into `VideoToolboxEncoder`, and send encoded access units through the shared transport.
+Live capture-to-encode-to-transport streaming is still pending. The live capture probe now verifies that an `SCStream` can produce frames; the next macOS-specific step is to feed those sample buffers into `VideoToolboxEncoder` and send encoded access units through the shared transport.

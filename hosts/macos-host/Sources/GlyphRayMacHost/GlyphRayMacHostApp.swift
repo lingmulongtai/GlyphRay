@@ -14,11 +14,13 @@ struct GlyphRayMacHostApp: App {
 @MainActor
 final class HostStatusModel: ObservableObject {
     private let captureController = ScreenCaptureController()
+    private let liveCaptureController = MacLiveCaptureController()
     private let permissionController = MacPermissionController()
     private let keychainStore = KeychainSecretStore()
 
     @Published var status: String = "Idle"
     @Published var captureStatus: String = "Capture idle"
+    @Published var liveCaptureStatus: String = "Live capture idle"
     @Published var encoderStatus: String = "Encoder idle"
     @Published var keychainStatus: String = "Keychain idle"
     @Published var permissions = MacPermissionSnapshot(
@@ -70,6 +72,18 @@ final class HostStatusModel: ObservableObject {
         }
     }
 
+    func startLiveCaptureProbe() {
+        liveCaptureStatus = "Starting ScreenCaptureKit stream..."
+        Task {
+            do {
+                let result = try await liveCaptureController.startFirstDisplayProbe()
+                liveCaptureStatus = "Captured \(result.frameCount) frame(s) from display \(result.displayID) at \(result.width)x\(result.height)"
+            } catch {
+                liveCaptureStatus = "Live capture unavailable: \(error)"
+            }
+        }
+    }
+
     func runKeychainSmokeTest() {
         keychainStatus = "Testing Keychain..."
         let account = "diagnostics-smoke-test"
@@ -97,6 +111,7 @@ struct ContentView: View {
                 .foregroundStyle(.secondary)
             Divider()
             Label(model.captureStatus, systemImage: "display")
+            Label(model.liveCaptureStatus, systemImage: "dot.radiowaves.left.and.right")
             Label(model.encoderStatus, systemImage: "video")
             Label(model.keychainStatus, systemImage: "key")
             Label("Screen Recording: \(model.permissions.screenRecording)", systemImage: "rectangle.on.rectangle")
@@ -117,6 +132,9 @@ struct ContentView: View {
                 }
                 Button("Encoder Smoke Test") {
                     model.startEncoderSmokeTest()
+                }
+                Button("Live Capture Probe") {
+                    model.startLiveCaptureProbe()
                 }
                 Button("Keychain Smoke Test") {
                     model.runKeychainSmokeTest()

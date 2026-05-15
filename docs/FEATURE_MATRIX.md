@@ -18,8 +18,8 @@ This document tracks product controls that must exist on both the Android client
 
 | Feature | Current status | Next implementation step |
 | --- | --- | --- |
-| Host approval | Console approval/rejection remains available. Windows host can also show an opt-in Win32 connection permission dialog with `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`; dialog results are routed back through the backend command queue and stale results are ignored when a session is no longer pending. Approved devices are recorded in host settings. | Promote this into a tray/settings UI and add cryptographic device identity validation before auto-approval. |
-| Trusted devices | Host settings persist trusted-device records with id, label, last peer, approval time, and input permission flags. Host console supports `trust list`, `trust forget <id>`, and `trust clear`. | Wire records to Android long-term device identity, add per-device permission editing, and expose the list in the host UI. |
+| Host approval | Console approval/rejection remains available. Windows host can also show an opt-in Win32 connection permission dialog with `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`; dialog results are routed back through the backend command queue and stale results are ignored when a session is no longer pending. Approved devices are recorded in host settings. Returning devices are auto-approved only when their Android public-key fingerprint matches a saved trusted record. | Promote this into a tray/settings UI and add a full challenge/response proof before beta. |
+| Trusted devices | Host settings persist trusted-device records with id, label, last peer, Android public-key SHA-256 fingerprint when available, approval time, and input permission flags. Host console supports `trust list`, `trust forget <id>`, and `trust clear`. | Add per-device permission editing and expose the list in the host UI. |
 
 ## Input Controls
 

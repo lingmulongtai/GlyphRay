@@ -85,6 +85,7 @@ cargo test --workspace
 - With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
 - With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a pairing request from Android, approve once in the Windows dialog and confirm `PairingResult accepted=true` plus `DisplayInfo`; repeat and reject once, confirming the client sees rejection.
 - After approving a device, run `trust list` and confirm the trusted-device id, label, last peer, approval timestamp, and permission flags are present. Run `trust forget <id>` and confirm only that record is removed; run `trust clear` on a disposable profile and confirm all records are removed.
+- Pair the same Android device twice and confirm the second request is auto-approved only when the saved Android public-key fingerprint matches. Delete the trusted record and confirm approval is required again.
 - Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
 
 ## macOS Manual Tests
@@ -93,6 +94,7 @@ cargo test --workspace
 - Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
 - Use the Screen Recording and Accessibility request buttons and confirm macOS opens the expected permission prompts.
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
+- Run the Live Capture Probe and confirm a short `SCStream` session reports at least one captured frame.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.

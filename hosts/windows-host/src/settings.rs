@@ -21,6 +21,7 @@ pub struct TrustedDevice {
     pub id: String,
     pub label: String,
     pub last_peer: String,
+    pub public_key_fingerprint: Option<String>,
     pub approved_unix_ms: u64,
     pub permissions: TrustedDevicePermissions,
 }
@@ -30,11 +31,15 @@ impl TrustedDevice {
         id: impl Into<String>,
         label: impl Into<String>,
         last_peer: impl Into<String>,
+        public_key_fingerprint: Option<String>,
     ) -> Result<Self, HostSettingsError> {
         Ok(Self {
             id: normalize_trusted_device_id(&id.into())?,
             label: normalize_trusted_device_label(&label.into()),
             last_peer: normalize_trusted_device_label(&last_peer.into()),
+            public_key_fingerprint: public_key_fingerprint
+                .map(|fingerprint| normalize_public_key_fingerprint(&fingerprint))
+                .transpose()?,
             approved_unix_ms: unix_now_ms(),
             permissions: TrustedDevicePermissions::default(),
         })
@@ -218,6 +223,12 @@ fn serialize_settings(settings: &HostSettings) -> String {
             "trusted_device.{index}.last_peer={}\n",
             device.last_peer
         ));
+        if let Some(fingerprint) = device.public_key_fingerprint.as_ref() {
+            output.push_str(&format!(
+                "trusted_device.{index}.public_key_fingerprint={}\n",
+                fingerprint
+            ));
+        }
         output.push_str(&format!(
             "trusted_device.{index}.approved_unix_ms={}\n",
             device.approved_unix_ms
@@ -425,6 +436,10 @@ fn parse_trusted_device_fields(
         id: normalize_trusted_device_id(required(values, "id")?)?,
         label: normalize_trusted_device_label(required(values, "label")?),
         last_peer: normalize_trusted_device_label(required(values, "last_peer")?),
+        public_key_fingerprint: values
+            .get("public_key_fingerprint")
+            .map(|fingerprint| normalize_public_key_fingerprint(fingerprint))
+            .transpose()?,
         approved_unix_ms: parse_required(values, "approved_unix_ms")?,
         permissions: TrustedDevicePermissions {
             allow_pen: parse_optional_bool(values, "allow_pen", true)?,
@@ -533,6 +548,21 @@ fn normalize_trusted_device_label(label: &str) -> String {
 
 fn trusted_device_id_eq(left: &str, right: &str) -> bool {
     left.eq_ignore_ascii_case(right)
+}
+
+fn normalize_public_key_fingerprint(fingerprint: &str) -> Result<String, HostSettingsError> {
+    let fingerprint = fingerprint.trim().to_ascii_lowercase();
+    if fingerprint.len() != 64
+        || !fingerprint
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase())
+    {
+        return Err(HostSettingsError::Parse(
+            "public key fingerprint must be a 64-character lowercase hex SHA-256 digest"
+                .to_string(),
+        ));
+    }
+    Ok(fingerprint)
 }
 
 fn unix_now_ms() -> u64 {
@@ -647,6 +677,9 @@ mod tests {
                 id: "trusted-tablet".to_string(),
                 label: "Studio Tablet".to_string(),
                 last_peer: "192.168.1.20:44999".to_string(),
+                public_key_fingerprint: Some(
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+                ),
                 approved_unix_ms: 1_770_000_000_000,
                 permissions: TrustedDevicePermissions::default(),
             }],
@@ -755,6 +788,9 @@ mod tests {
             id: "trusted-tablet".to_string(),
             label: "Tablet".to_string(),
             last_peer: "192.168.1.20:44999".to_string(),
+            public_key_fingerprint: Some(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            ),
             approved_unix_ms: 10,
             permissions: TrustedDevicePermissions::default(),
         };

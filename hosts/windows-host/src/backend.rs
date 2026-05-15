@@ -13,6 +13,7 @@ use glyphray_protocol::{
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::{ChannelKind, TransportError, TransportPacket};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -63,6 +64,7 @@ pub enum PermissionPolicy {
 pub struct ClientSession {
     pub peer: SocketAddr,
     pub device_id: Option<String>,
+    pub device_public_key_fingerprint: Option<String>,
     pub permission: PermissionState,
     pub packets_received: u64,
     pub last_seen: Instant,
@@ -75,6 +77,7 @@ pub struct ClientSession {
 pub struct SessionSnapshot {
     pub peer: SocketAddr,
     pub device_id: Option<String>,
+    pub device_public_key_fingerprint: Option<String>,
     pub permission: PermissionState,
     pub packets_received: u64,
     pub encoder_config: Option<EncoderConfig>,
@@ -147,6 +150,7 @@ impl SessionRegistry {
         self.sessions.entry(peer).or_insert_with(|| ClientSession {
             peer,
             device_id: None,
+            device_public_key_fingerprint: None,
             permission: PermissionState::Pending,
             packets_received: 0,
             last_seen: Instant::now(),
@@ -216,6 +220,7 @@ impl SessionRegistry {
             .map(|session| SessionSnapshot {
                 peer: session.peer,
                 device_id: session.device_id.clone(),
+                device_public_key_fingerprint: session.device_public_key_fingerprint.clone(),
                 permission: session.permission,
                 packets_received: session.packets_received,
                 encoder_config: session.encoder_config.clone(),
@@ -272,6 +277,7 @@ pub enum BackendEvent {
     PairingRequested {
         peer: SocketAddr,
         device_name: String,
+        public_key_fingerprint: Option<String>,
     },
     PairingResultQueued {
         peer: SocketAddr,
@@ -513,10 +519,13 @@ where
                     "pairing payload did not contain PairingRequest".to_string(),
                 ));
             };
+            let public_key_fingerprint = public_key_fingerprint(&request.one_time_public_key);
             session.device_id = Some(request.device_name.clone());
+            session.device_public_key_fingerprint = public_key_fingerprint.clone();
             outcome.events.push(BackendEvent::PairingRequested {
                 peer,
                 device_name: request.device_name,
+                public_key_fingerprint,
             });
             if self.permission_policy == PermissionPolicy::DevAutoApprove {
                 let device_id = trusted_device_id(peer);
@@ -821,6 +830,16 @@ where
         peer: SocketAddr,
     ) -> Result<Vec<BackendEvent>, BackendError> {
         let device_id = trusted_device_id(peer);
+        self.approve_peer_as_and_notify(server, peer, device_id)
+    }
+
+    pub fn approve_peer_as_and_notify(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let device_id = device_id.into();
         let response = self.router.approve_peer_with_response(peer, device_id)?;
         server.send_to(&response, peer)?;
         let displays = current_displays();
@@ -1117,6 +1136,28 @@ pub fn trusted_device_id(peer: SocketAddr) -> String {
     format!("trusted-{}", peer).replace([':', '.'], "-")
 }
 
+pub fn trusted_device_id_from_public_key_fingerprint(fingerprint: &str) -> String {
+    format!("trusted-key-{fingerprint}")
+}
+
+fn public_key_fingerprint(public_key: &[u8]) -> Option<String> {
+    if public_key.is_empty() {
+        return None;
+    }
+    let digest = Sha256::digest(public_key);
+    Some(hex_lower(&digest))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
 fn late_packet_event(peer: SocketAddr) -> BackendEvent {
     BackendEvent::PacketIgnored {
         peer,
@@ -1377,9 +1418,11 @@ mod tests {
         };
 
         let outcome = router.route_packet(peer, packet).expect("route");
+        let expected_fingerprint = public_key_fingerprint(&[4, 5, 6]).expect("fingerprint");
         assert!(outcome.events.contains(&BackendEvent::PairingRequested {
             peer,
-            device_name: "Galaxy Tab".to_string()
+            device_name: "Galaxy Tab".to_string(),
+            public_key_fingerprint: Some(expected_fingerprint),
         }));
     }
 
