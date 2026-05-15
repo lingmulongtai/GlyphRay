@@ -164,7 +164,7 @@ final class MacVideoTransportPacketizer {
 private extension Data {
     mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
         var littleEndian = value.littleEndian
-        withUnsafeBytes(of: &littleEndian) { bytes in
+        Swift.withUnsafeBytes(of: &littleEndian) { bytes in
             append(contentsOf: bytes)
         }
     }
