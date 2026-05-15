@@ -4,7 +4,9 @@ use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::video::VideoPacketizer;
 use glyphray_transport::TransportPacket;
-use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy, PermissionState};
+use glyphray_windows_host::backend::{
+    trusted_device_id, HostBackendRuntime, PermissionPolicy, PermissionState,
+};
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 use glyphray_windows_host::encoder::{EncoderSettings, PendingHardwareEncoder};
 use glyphray_windows_host::input::{
@@ -15,7 +17,7 @@ use glyphray_windows_host::input::{
 use glyphray_windows_host::permission_ui::{
     permission_dialog_enabled, prompt_pairing_decision, PairingDecision, PairingPrompt,
 };
-use glyphray_windows_host::settings::{EncoderPreset, HostSettingsStore};
+use glyphray_windows_host::settings::{EncoderPreset, HostSettingsStore, TrustedDevice};
 use glyphray_windows_host::startup::{StartupManager, StartupRegistration};
 use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
@@ -504,6 +506,9 @@ enum HostCommand {
     StartupStatus,
     StartupEnable,
     StartupDisable,
+    TrustList,
+    TrustForget(String),
+    TrustClear,
     Help,
 }
 
@@ -588,7 +593,17 @@ fn parse_host_command(line: &str) -> Option<HostCommand> {
         "sessions" => Some(HostCommand::Sessions),
         "encoder" => parse_encoder_command(parts.collect()),
         "startup" => parse_startup_command(parts.collect()),
+        "trust" => parse_trust_command(parts.collect()),
         "help" => Some(HostCommand::Help),
+        _ => None,
+    }
+}
+
+fn parse_trust_command(parts: Vec<&str>) -> Option<HostCommand> {
+    match parts.as_slice() {
+        [] | ["list"] => Some(HostCommand::TrustList),
+        ["forget", id] | ["remove", id] => Some(HostCommand::TrustForget((*id).to_string())),
+        ["clear"] => Some(HostCommand::TrustClear),
         _ => None,
     }
 }
@@ -649,7 +664,12 @@ fn drain_console_commands(
     while let Ok(command) = commands.try_recv() {
         match command {
             HostCommand::Approve(peer) => {
-                events.extend(runtime.approve_peer_and_notify(server, peer)?);
+                events.extend(approve_peer_and_record_trust(
+                    runtime,
+                    server,
+                    settings_store,
+                    peer,
+                )?);
             }
             HostCommand::Reject(peer) => {
                 events.extend(runtime.reject_peer_and_notify(
@@ -667,7 +687,12 @@ fn drain_console_commands(
                 }
                 match decision {
                     PairingDecision::Approve => {
-                        events.extend(runtime.approve_peer_and_notify(server, peer)?);
+                        events.extend(approve_peer_and_record_trust(
+                            runtime,
+                            server,
+                            settings_store,
+                            peer,
+                        )?);
                     }
                     PairingDecision::Reject => {
                         events.extend(runtime.reject_peer_and_notify(
@@ -854,10 +879,26 @@ fn drain_console_commands(
                 }
                 Err(error) => println!("startup disable failed: {error}"),
             },
+            HostCommand::TrustList => match settings_store.load() {
+                Ok(settings) => print_trusted_devices(&settings.trusted_devices),
+                Err(error) => println!("Loading trusted devices failed: {error}"),
+            },
+            HostCommand::TrustForget(id) => match settings_store.forget_trusted_device(&id) {
+                Ok((_, true)) => println!("Forgot trusted device `{id}`."),
+                Ok((_, false)) => println!("Trusted device `{id}` was not found."),
+                Err(error) => println!("Forgetting trusted device `{id}` failed: {error}"),
+            },
+            HostCommand::TrustClear => match settings_store.clear_trusted_devices() {
+                Ok(_) => println!("All trusted devices were removed."),
+                Err(error) => println!("Clearing trusted devices failed: {error}"),
+            },
             HostCommand::Help => {
                 println!("Commands:");
                 println!("  status");
                 println!("  sessions");
+                println!("  trust list");
+                println!("  trust forget <trusted-device-id>");
+                println!("  trust clear");
                 println!("  encoder status");
                 println!("  encoder override <width>x<height> <fps> <kbps>");
                 println!("  encoder save");
@@ -877,11 +918,63 @@ fn drain_console_commands(
     Ok(events)
 }
 
+fn approve_peer_and_record_trust(
+    runtime: &mut HostBackendRuntime<Box<dyn PenInjector>>,
+    server: &mut UdpServer,
+    settings_store: &HostSettingsStore,
+    peer: SocketAddr,
+) -> Result<Vec<glyphray_windows_host::backend::BackendEvent>, Box<dyn Error>> {
+    let label = pending_device_label(runtime, peer).unwrap_or_else(|| peer.to_string());
+    let id = trusted_device_id(peer);
+    let events = runtime.approve_peer_and_notify(server, peer)?;
+    match TrustedDevice::approved_now(id.clone(), label.clone(), peer.to_string())
+        .and_then(|device| settings_store.upsert_trusted_device(device))
+    {
+        Ok(_) => println!("Trusted device recorded: id={id} label={label} peer={peer}"),
+        Err(error) => println!("Recording trusted device `{id}` failed: {error}"),
+    }
+    Ok(events)
+}
+
+fn pending_device_label(
+    runtime: &HostBackendRuntime<Box<dyn PenInjector>>,
+    peer: SocketAddr,
+) -> Option<String> {
+    runtime
+        .session_snapshots()
+        .into_iter()
+        .find(|session| session.peer == peer)
+        .and_then(|session| session.device_id)
+}
+
 fn peer_is_pending(runtime: &HostBackendRuntime<Box<dyn PenInjector>>, peer: SocketAddr) -> bool {
     runtime
         .session_snapshots()
         .iter()
         .any(|session| session.peer == peer && session.permission == PermissionState::Pending)
+}
+
+fn print_trusted_devices(devices: &[TrustedDevice]) {
+    if devices.is_empty() {
+        println!("trusted devices=none");
+        return;
+    }
+
+    println!("trusted devices={}", devices.len());
+    for device in devices {
+        println!(
+            "trusted id={} label=`{}` peer={} approved_unix_ms={} permissions=pen:{},touch:{},keyboard:{},mouse:{},gamepad:{}",
+            device.id,
+            device.label,
+            device.last_peer,
+            device.approved_unix_ms,
+            device.permissions.allow_pen,
+            device.permissions.allow_touch,
+            device.permissions.allow_keyboard,
+            device.permissions.allow_mouse,
+            device.permissions.allow_gamepad
+        );
+    }
 }
 
 fn print_startup_registration(registration: StartupRegistration) {
@@ -1126,6 +1219,22 @@ mod tests {
         assert!(matches!(
             parse_host_command("startup disable"),
             Some(HostCommand::StartupDisable)
+        ));
+    }
+
+    #[test]
+    fn parses_trust_commands() {
+        assert!(matches!(
+            parse_host_command("trust list"),
+            Some(HostCommand::TrustList)
+        ));
+        assert!(matches!(
+            parse_host_command("trust forget trusted-tablet"),
+            Some(HostCommand::TrustForget(id)) if id == "trusted-tablet"
+        ));
+        assert!(matches!(
+            parse_host_command("trust clear"),
+            Some(HostCommand::TrustClear)
         ));
     }
 

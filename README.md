@@ -8,14 +8,14 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 91%**
+**Overall progress estimate: 92%**
 
 Last updated: 2026-05-15 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 91
-  "Remaining product work" : 9
+  "Implemented foundation" : 92
+  "Remaining product work" : 8
 ```
 
 | Area | Status | Progress |
@@ -23,14 +23,14 @@ pie title Overall Completion
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 92% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 89% |
-| Milestone 4 hardening and packaging | In progress | 80% |
+| Milestone 4 hardening and packaging | In progress | 82% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink      [##################--]  89%
-M4 Security + Packaging       [################----]  80%
+M4 Security + Packaging       [################----]  82%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -61,7 +61,7 @@ flowchart TB
 | Path | Purpose | Current State |
 | --- | --- | --- |
 | `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
-| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, native permission dialog, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, native permission dialog, trusted-device list management, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Secondary desktop host | SwiftUI shell, ScreenCaptureKit display enumeration, permission readiness UI, Keychain smoke test, VideoToolbox encoder smoke test |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
@@ -150,6 +150,7 @@ sequenceDiagram
 - Android low-latency `SurfaceView` and `MediaCodec` H.264 decoder foundation.
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, optional native permission dialogs, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
+- Windows host records approved devices into local host settings and exposes `trust list`, `trust forget <id>`, and `trust clear` management commands.
 - Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
 - Windows host can persist a default encoder override with `encoder save`, reload it on backend startup, clear it with `encoder clear`, and manage named stream presets with `encoder preset save|apply|delete|list`.
 - Windows host can show an opt-in Win32 connection permission dialog for incoming pairing requests with `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`.
@@ -205,6 +206,14 @@ For native host-side pairing approval during LAN tests:
 ```powershell
 $env:GLYPHRAY_ENABLE_PERMISSION_DIALOG='1'
 cargo run -p glyphray-windows-host -- serve
+```
+
+Trusted-device management commands are available in the running host console:
+
+```powershell
+trust list
+trust forget trusted-192-168-1-20-44999
+trust clear
 ```
 
 For local input-path smoke testing when you deliberately want to bypass approval:
@@ -279,11 +288,11 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 ## Current Limits
 
 - Rust tests and Android debug builds have been exercised on Windows. Android unit tests should be run with JDK 17.
-- The host router now has in-memory DoS guards, console-visible health counters, and an opt-in native permission dialog for pending peer approval. Production pairing still needs persistent trusted-device management.
+- The host router now has in-memory DoS guards, console-visible health counters, an opt-in native permission dialog, and a persisted trusted-device list. Production pairing still needs cryptographic device identity validation before trusted devices can auto-approve.
 - Windows capture currently has a GDI fallback; production should move to Windows Graphics Capture or Desktop Duplication.
 - Video fragments can now be queued to approved clients on the Video channel, but a concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction before real desktop video is useful.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
-- The permission dialog is a minimal Win32 prompt, not a full tray/settings UI yet. `GLYPHRAY_DEV_AUTO_APPROVE` remains only for local smoke tests.
+- The permission dialog and trusted-device commands are minimal host-console features, not a full tray/settings UI yet. `GLYPHRAY_DEV_AUTO_APPROVE` remains only for local smoke tests.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION`, `GLYPHRAY_ENABLE_MOUSE_INJECTION`, and `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` are explicit smoke-test flags until per-device input permissions are exposed in the host UI.
 - Gamepad packets are decoded on Windows, but virtual controller injection still needs a ViGEm/virtual HID backend.
@@ -302,7 +311,7 @@ flowchart LR
 
 Immediate engineering focus:
 
-- Promote the native permission dialog into a tray/settings UI with persistent trusted-device controls.
+- Promote the native permission dialog and trusted-device commands into a tray/settings UI with cryptographic device identity validation.
 - Connect Android stylus UDP packets to the Windows native pen bridge in a full LAN smoke test.
 - Replace fallback capture with Windows Graphics Capture or Desktop Duplication.
 - Add a concrete low-latency H.264 encoder backend.

@@ -1113,7 +1113,7 @@ fn now_us() -> u64 {
         .unwrap_or_default()
 }
 
-fn trusted_device_id(peer: SocketAddr) -> String {
+pub fn trusted_device_id(peer: SocketAddr) -> String {
     format!("trusted-{}", peer).replace([':', '.'], "-")
 }
 

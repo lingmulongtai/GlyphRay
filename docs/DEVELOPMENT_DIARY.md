@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - Trusted Device Management
+
+今日は permission dialog の次に必要な trusted-device 管理を進めた。承認済み peer は `LOCALAPPDATA/GlyphRay/host-settings.conf` に trusted-device record として保存され、`trust list`、`trust forget <id>`、`trust clear` で確認・削除できる。record には id、label、last peer、approval timestamp、pen/touch/keyboard/mouse/gamepad の permission flags を持たせた。
+
+ここで自動承認までは進めていない。現時点の trusted id はまだ host 側の管理記録であり、Android の長期 device identity / public key validation と結びついていないため、勝手に approval を bypass させるのは危ない。まず「信頼済みデバイスを見える・消せる」状態を作り、次に暗号ID検証と per-device permission UI につなげる。
+
+この時点の進捗見積もり: 92%。
+
 ## 2026-05-15 JST - Native Pairing Permission Dialog
 
 今日は Windows host の pairing approval を console だけの世界から一歩外に出した。`GLYPHRAY_ENABLE_PERMISSION_DIALOG=1` を付けて backend を起動すると、incoming pairing request に対して Win32 の yes/no permission dialog を出せる。dialog は helper thread で開き、backend polling は止めず、結果は console approval と同じ command queue に戻して `approve` / `reject` と同じ経路で `PairingResult` を返す。

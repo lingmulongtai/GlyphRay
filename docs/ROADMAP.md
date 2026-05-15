@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 91%.
+Current overall progress estimate: 92%.
 
 ## Milestone 1
 
@@ -67,6 +67,7 @@ Current overall progress estimate: 91%.
 - [x] Add backend permission gate for input packets.
 - [x] Add console approval/rejection flow with `PairingResult` responses.
 - [x] Add opt-in native Windows permission dialog for incoming pairing requests.
+- [x] Persist approved Windows host trusted-device records and add host console trust management commands.
 - [x] Queue host `DisplayInfo` after accepted pairing.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
 - [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.

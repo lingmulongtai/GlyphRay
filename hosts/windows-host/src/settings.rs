@@ -1,17 +1,65 @@
 use glyphray_protocol::{ColorSpace, EncoderConfig, VideoCodec};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct HostSettings {
     pub encoder_override: Option<EncoderConfig>,
     pub encoder_presets: Vec<EncoderPreset>,
+    pub trusted_devices: Vec<TrustedDevice>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EncoderPreset {
     pub name: String,
     pub config: EncoderConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedDevice {
+    pub id: String,
+    pub label: String,
+    pub last_peer: String,
+    pub approved_unix_ms: u64,
+    pub permissions: TrustedDevicePermissions,
+}
+
+impl TrustedDevice {
+    pub fn approved_now(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        last_peer: impl Into<String>,
+    ) -> Result<Self, HostSettingsError> {
+        Ok(Self {
+            id: normalize_trusted_device_id(&id.into())?,
+            label: normalize_trusted_device_label(&label.into()),
+            last_peer: normalize_trusted_device_label(&last_peer.into()),
+            approved_unix_ms: unix_now_ms(),
+            permissions: TrustedDevicePermissions::default(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustedDevicePermissions {
+    pub allow_pen: bool,
+    pub allow_touch: bool,
+    pub allow_keyboard: bool,
+    pub allow_mouse: bool,
+    pub allow_gamepad: bool,
+}
+
+impl Default for TrustedDevicePermissions {
+    fn default() -> Self {
+        Self {
+            allow_pen: true,
+            allow_touch: true,
+            allow_keyboard: true,
+            allow_mouse: true,
+            allow_gamepad: true,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -113,6 +161,38 @@ impl HostSettingsStore {
             .map(|preset| preset.config.clone()))
     }
 
+    pub fn upsert_trusted_device(
+        &self,
+        device: TrustedDevice,
+    ) -> Result<HostSettings, HostSettingsError> {
+        let mut settings = self.load()?;
+        upsert_trusted_device(&mut settings.trusted_devices, device);
+        self.save(&settings)?;
+        Ok(settings)
+    }
+
+    pub fn forget_trusted_device(
+        &self,
+        id: &str,
+    ) -> Result<(HostSettings, bool), HostSettingsError> {
+        let mut settings = self.load()?;
+        let id = normalize_trusted_device_id(id)?;
+        let original_len = settings.trusted_devices.len();
+        settings
+            .trusted_devices
+            .retain(|device| !trusted_device_id_eq(&device.id, &id));
+        let removed = settings.trusted_devices.len() != original_len;
+        self.save(&settings)?;
+        Ok((settings, removed))
+    }
+
+    pub fn clear_trusted_devices(&self) -> Result<HostSettings, HostSettingsError> {
+        let mut settings = self.load()?;
+        settings.trusted_devices.clear();
+        self.save(&settings)?;
+        Ok(settings)
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -130,6 +210,38 @@ fn serialize_settings(settings: &HostSettings) -> String {
             &format!("encoder_preset.{index}."),
             &preset.config,
         );
+    }
+    for (index, device) in settings.trusted_devices.iter().enumerate() {
+        output.push_str(&format!("trusted_device.{index}.id={}\n", device.id));
+        output.push_str(&format!("trusted_device.{index}.label={}\n", device.label));
+        output.push_str(&format!(
+            "trusted_device.{index}.last_peer={}\n",
+            device.last_peer
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.approved_unix_ms={}\n",
+            device.approved_unix_ms
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.allow_pen={}\n",
+            device.permissions.allow_pen
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.allow_touch={}\n",
+            device.permissions.allow_touch
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.allow_keyboard={}\n",
+            device.permissions.allow_keyboard
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.allow_mouse={}\n",
+            device.permissions.allow_mouse
+        ));
+        output.push_str(&format!(
+            "trusted_device.{index}.allow_gamepad={}\n",
+            device.permissions.allow_gamepad
+        ));
     }
     output
 }
@@ -182,6 +294,7 @@ fn parse_settings(raw: &str) -> Result<HostSettings, HostSettingsError> {
             None
         },
         encoder_presets: parse_encoder_presets(&values)?,
+        trusted_devices: parse_trusted_devices(&values)?,
     })
 }
 
@@ -273,6 +386,81 @@ fn upsert_encoder_preset(presets: &mut Vec<EncoderPreset>, preset: EncoderPreset
     presets.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
 }
 
+fn parse_trusted_devices(
+    values: &HashMap<String, String>,
+) -> Result<Vec<TrustedDevice>, HostSettingsError> {
+    let mut groups: BTreeMap<u32, HashMap<String, String>> = BTreeMap::new();
+    for (key, value) in values {
+        let Some(rest) = key.strip_prefix("trusted_device.") else {
+            continue;
+        };
+        let Some((index, field)) = rest.split_once('.') else {
+            return Err(HostSettingsError::Parse(format!(
+                "invalid trusted device key {key}"
+            )));
+        };
+        let index = index
+            .parse::<u32>()
+            .map_err(|error| HostSettingsError::Parse(format!("{key}: {error}")))?;
+        groups
+            .entry(index)
+            .or_default()
+            .insert(field.to_string(), value.clone());
+    }
+
+    let mut devices = Vec::new();
+    for (index, fields) in groups {
+        let device = parse_trusted_device_fields(&fields).map_err(|error| {
+            HostSettingsError::Parse(format!("trusted_device.{index}: {error}"))
+        })?;
+        upsert_trusted_device(&mut devices, device);
+    }
+    Ok(devices)
+}
+
+fn parse_trusted_device_fields(
+    values: &HashMap<String, String>,
+) -> Result<TrustedDevice, HostSettingsError> {
+    Ok(TrustedDevice {
+        id: normalize_trusted_device_id(required(values, "id")?)?,
+        label: normalize_trusted_device_label(required(values, "label")?),
+        last_peer: normalize_trusted_device_label(required(values, "last_peer")?),
+        approved_unix_ms: parse_required(values, "approved_unix_ms")?,
+        permissions: TrustedDevicePermissions {
+            allow_pen: parse_optional_bool(values, "allow_pen", true)?,
+            allow_touch: parse_optional_bool(values, "allow_touch", true)?,
+            allow_keyboard: parse_optional_bool(values, "allow_keyboard", true)?,
+            allow_mouse: parse_optional_bool(values, "allow_mouse", true)?,
+            allow_gamepad: parse_optional_bool(values, "allow_gamepad", true)?,
+        },
+    })
+}
+
+fn parse_optional_bool(
+    values: &HashMap<String, String>,
+    key: &str,
+    default: bool,
+) -> Result<bool, HostSettingsError> {
+    match values.get(key) {
+        Some(value) => value
+            .parse::<bool>()
+            .map_err(|error| HostSettingsError::Parse(format!("{key}: {error}"))),
+        None => Ok(default),
+    }
+}
+
+fn upsert_trusted_device(devices: &mut Vec<TrustedDevice>, device: TrustedDevice) {
+    if let Some(existing) = devices
+        .iter_mut()
+        .find(|existing| trusted_device_id_eq(&existing.id, &device.id))
+    {
+        *existing = device;
+    } else {
+        devices.push(device);
+    }
+    devices.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+}
+
 fn normalize_preset_name(name: &str) -> Result<String, HostSettingsError> {
     let name = name.trim();
     if name.is_empty() {
@@ -298,6 +486,60 @@ fn normalize_preset_name(name: &str) -> Result<String, HostSettingsError> {
 
 fn preset_name_eq(left: &str, right: &str) -> bool {
     left.eq_ignore_ascii_case(right)
+}
+
+fn normalize_trusted_device_id(id: &str) -> Result<String, HostSettingsError> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(HostSettingsError::Parse(
+            "trusted device id cannot be empty".to_string(),
+        ));
+    }
+    if id.len() > 128 {
+        return Err(HostSettingsError::Parse(
+            "trusted device id must be 128 characters or shorter".to_string(),
+        ));
+    }
+    if !id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(HostSettingsError::Parse(
+            "trusted device id must use ASCII letters, numbers, '-', '_', or '.'".to_string(),
+        ));
+    }
+    Ok(id.to_string())
+}
+
+fn normalize_trusted_device_label(label: &str) -> String {
+    let mut normalized = label
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '\r' | '\n' | '\t') {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    normalized.truncate(80);
+    let normalized = normalized.trim();
+    if normalized.is_empty() {
+        "Unknown device".to_string()
+    } else {
+        normalized.to_string()
+    }
+}
+
+fn trusted_device_id_eq(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
+}
+
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
 }
 
 fn required<'a>(
@@ -401,6 +643,13 @@ mod tests {
                     low_latency: true,
                 },
             }],
+            trusted_devices: vec![TrustedDevice {
+                id: "trusted-tablet".to_string(),
+                label: "Studio Tablet".to_string(),
+                last_peer: "192.168.1.20:44999".to_string(),
+                approved_unix_ms: 1_770_000_000_000,
+                permissions: TrustedDevicePermissions::default(),
+            }],
         };
 
         let serialized = serialize_settings(&settings);
@@ -490,6 +739,49 @@ mod tests {
             .load()
             .expect("load after delete")
             .encoder_presets
+            .is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn host_settings_store_upserts_and_forgets_trusted_devices() {
+        let path = std::env::temp_dir().join(format!(
+            "glyphray-host-settings-trust-test-{}.conf",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let store = HostSettingsStore::open_at(&path).expect("open settings store");
+        let first = TrustedDevice {
+            id: "trusted-tablet".to_string(),
+            label: "Tablet".to_string(),
+            last_peer: "192.168.1.20:44999".to_string(),
+            approved_unix_ms: 10,
+            permissions: TrustedDevicePermissions::default(),
+        };
+        let second = TrustedDevice {
+            label: "Tablet Renamed".to_string(),
+            approved_unix_ms: 20,
+            ..first.clone()
+        };
+
+        store
+            .upsert_trusted_device(first)
+            .expect("save trusted device");
+        store
+            .upsert_trusted_device(second.clone())
+            .expect("update trusted device");
+
+        let settings = store.load().expect("load");
+        assert_eq!(settings.trusted_devices, vec![second]);
+
+        let (_, removed) = store
+            .forget_trusted_device("TRUSTED-TABLET")
+            .expect("forget trusted device");
+        assert!(removed);
+        assert!(store
+            .load()
+            .expect("load after forget")
+            .trusted_devices
             .is_empty());
         let _ = std::fs::remove_file(path);
     }

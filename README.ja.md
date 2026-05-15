@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 91%**
+**全体進捗見積もり: 92%**
 
 最終更新: 2026-05-15 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 91
-  "残りの製品化作業" : 9
+  "実装済みの基盤" : 92
+  "残りの製品化作業" : 8
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -23,14 +23,14 @@ pie title 全体進捗
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 92% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 89% |
-| Milestone 4 security hardening / packaging | 進行中 | 80% |
+| Milestone 4 security hardening / packaging | 進行中 | 82% |
 | Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink     [##################--]  89%
-M4 Security + Packaging      [################----]  80%
+M4 Security + Packaging      [################----]  82%
 M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
@@ -61,7 +61,7 @@ flowchart TB
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
 | `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
-| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、approved-peer video fragment queueing、health/status metrics、pending peer hardening、native permission dialog、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
+| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、approved-peer video fragment queueing、health/status metrics、pending peer hardening、native permission dialog、trusted-device list management、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
 | `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、ScreenCaptureKit display enumeration、permission readiness UI、Keychain smoke test、VideoToolbox encoder smoke test |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
@@ -150,6 +150,7 @@ sequenceDiagram
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、optional native permission dialog、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
 - Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、approved-peer video fragment queueing、console-visible queue/backpressure health metrics。
+- Windows host は approved device を local host settings に記録し、`trust list`、`trust forget <id>`、`trust clear` で管理できる。
 - Windows host の video pump は approved client の `EncoderConfig` で再起動でき、host console の `encoder override` command でも stream 設定を変更できる。
 - Windows host は `encoder save` で default encoder override を保存し、backend startup 時に復元し、`encoder clear` で消せる。さらに `encoder preset save|apply|delete|list` で名前付き stream preset を管理できる。
 - Windows host は `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1` で incoming pairing request に対する Win32 connection permission dialog を出せる。
@@ -205,6 +206,14 @@ LAN test で host 側の native permission dialog を使う場合:
 ```powershell
 $env:GLYPHRAY_ENABLE_PERMISSION_DIALOG='1'
 cargo run -p glyphray-windows-host -- serve
+```
+
+起動中の host console では trusted-device 管理もできます。
+
+```powershell
+trust list
+trust forget trusted-192-168-1-20-44999
+trust clear
 ```
 
 approval を意図的に bypass して local input path を smoke test する場合だけ、明示的に development auto-approval を有効にします。
@@ -279,11 +288,11 @@ Start-Process .\website\index.html
 ## 現在の制限
 
 - Rust tests と Android debug build は Windows 上で確認済みです。Android unit tests は JDK 17 で実行してください。
-- host router には pending peer spam と outbound backpressure 向けの in-memory DoS guard / console-visible health counters、さらに opt-in native permission dialog が入りました。本番 pairing には persistent trusted-device management がまだ必要です。
+- host router には pending peer spam と outbound backpressure 向けの in-memory DoS guard / console-visible health counters、opt-in native permission dialog、永続 trusted-device list が入りました。本番 pairing で trusted device を自動承認するには、暗号化された device identity validation がまだ必要です。
 - Windows capture は現在 GDI fallback を含みます。本番向けには Windows Graphics Capture または Desktop Duplication へ移行する必要があります。
 - Video fragment は approved client へ Video channel で queue できるようになりましたが、実用的な desktop video には concrete H.264 hardware/software encoder backend がまだ必要です。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。
-- permission dialog は最小の Win32 prompt で、tray / settings UI ではまだありません。`GLYPHRAY_DEV_AUTO_APPROVE` は local smoke test 専用です。
+- permission dialog と trusted-device commands は最小の host-console 機能で、tray / settings UI ではまだありません。`GLYPHRAY_DEV_AUTO_APPROVE` は local smoke test 専用です。
 - `GLYPHRAY_ENABLE_PEN_INJECTION` は display negotiation / calibration が完全接続されるまで、一時的な 1920x1080 stretch mapping を使います。
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION`、`GLYPHRAY_ENABLE_MOUSE_INJECTION`、`GLYPHRAY_ENABLE_KEYBOARD_INJECTION` は per-device input permission が host UI に出るまで明示的な smoke-test flag です。
 - gamepad packet は Windows で decode できますが、仮想 controller 注入には ViGEm / virtual HID backend がまだ必要です。
@@ -302,7 +311,7 @@ flowchart LR
 
 直近の開発フォーカス:
 
-- native permission dialog を tray / settings UI と persistent trusted-device controls へ育てる。
+- native permission dialog と trusted-device commands を tray / settings UI に載せ、cryptographic device identity validation へつなげる。
 - Android stylus UDP packet を Windows native pen bridge まで通して LAN smoke test する。
 - fallback capture を Windows Graphics Capture または Desktop Duplication に置き換える。
 - low-latency H.264 encoder backend を実装する。
