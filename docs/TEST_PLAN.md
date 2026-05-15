@@ -83,6 +83,7 @@ cargo test --workspace
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
 - With `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`, confirm Android finger input is received by Windows as native touch input in a touch-aware app.
 - With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
+- With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a pairing request from Android, approve once in the Windows dialog and confirm `PairingResult accepted=true` plus `DisplayInfo`; repeat and reject once, confirming the client sees rejection.
 - Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
 
 ## macOS Manual Tests

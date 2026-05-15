@@ -7,6 +7,7 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Host session registry with pending/approved/rejected peers.
 - Pairing request routing.
 - Console approval/rejection commands that send `PairingResult`.
+- Optional native Windows permission dialog for incoming pairing requests.
 - Host monitor `DisplayInfo` response after accepted pairing.
 - Client `EncoderConfig` intake for resolution, refresh rate, bitrate, color space, codec, and low-latency settings.
 - Keyboard packet decode and opt-in `SendInput` injection for Bluetooth keyboard and special-key smoke tests.
@@ -31,7 +32,16 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 cargo run -p glyphray-windows-host -- serve
 ```
 
-For early LAN input testing before the host approval UI exists:
+For native host-side pairing approval during LAN tests:
+
+```powershell
+$env:GLYPHRAY_ENABLE_PERMISSION_DIALOG='1'
+cargo run -p glyphray-windows-host -- serve
+```
+
+When enabled, each incoming pairing request opens a Win32 yes/no dialog on a helper thread. The backend keeps polling while the prompt is open, and the dialog result is fed back through the same command queue as console approval. If the session has already been approved or rejected by the time the dialog returns, the stale result is ignored.
+
+For early LAN input testing when you intentionally want to bypass approval:
 
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
@@ -40,7 +50,7 @@ $env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
-`GLYPHRAY_DEV_AUTO_APPROVE` bypasses the approval UI for local smoke tests. `GLYPHRAY_ENABLE_PEN_INJECTION` connects the backend router to the native Win32 synthetic pen injector when that API is available. Both switches are intentionally explicit and must not become the production permission model.
+`GLYPHRAY_DEV_AUTO_APPROVE` bypasses approval for local smoke tests. `GLYPHRAY_ENABLE_PEN_INJECTION` connects the backend router to the native Win32 synthetic pen injector when that API is available. Both switches are intentionally explicit and must not become the production permission model.
 
 Without development auto-approval, the console loop prints incoming pairing requests. Use:
 
@@ -96,16 +106,16 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 - The backend loop is still console-driven.
 - The outbound control queue is a short-term nonblocking guard, not a full transport scheduler.
 - Per-IP rate limits are in-memory only and are visible through console `status`; they still need richer diagnostics UI before beta.
-- Peer approval is console-driven and still needs a native host UI prompt.
+- Peer approval has console and opt-in native dialog paths. It still needs tray/settings UI, trusted-device persistence, and per-device permission scopes before beta.
 - DisplayInfo uses current monitor enumeration and should later feed selected-monitor mapping and calibration.
 - Client encoder config is stored on the session but is not yet wired into the live capture/encode loop.
 - Keyboard packets can be injected with native Windows `SendInput` when `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1` is explicitly set.
 - Keyboard injection currently uses Windows virtual keys and needs layout-aware text/IME handling before beta.
-- `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once approval UI exists.
+- `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should be removed from normal user flows once trusted-device management exists.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
-- `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` is for explicit keyboard smoke tests only until the host permission UI exists.
+- `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` is for explicit keyboard smoke tests only until per-device input permissions exist.
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION` is for explicit native touch smoke tests only until monitor mapping/calibration is negotiated.
-- `GLYPHRAY_ENABLE_MOUSE_INJECTION` is for explicit mouse smoke tests only until the host permission UI exists.
+- `GLYPHRAY_ENABLE_MOUSE_INJECTION` is for explicit mouse smoke tests only until per-device input permissions exist.
 - Gamepad reports are decoded, but Windows virtual-controller injection needs a ViGEm or virtual HID backend.
 - Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.
 - Windows platform secret storage uses DPAPI-protected per-user files. Beta still needs migration and corrupted-store recovery tests.

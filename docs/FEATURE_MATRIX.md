@@ -14,6 +14,12 @@ This document tracks product controls that must exist on both the Android client
 | Display selection | Android receives host `DisplayInfo`, lets the user select a host display in video settings, and sends that display id with stylus, touch, and mouse input packets. Windows runtime maps input against the selected/default display geometry when available. | Add calibration profile persistence per host display and validate high-DPI/rotation behavior on hardware. |
 | Host-side controls | Host console supports `encoder status`, `encoder override <width>x<height> <fps> <kbps>`, `encoder save`, `encoder clear`, and named preset commands: `encoder preset list`, `encoder preset save <name>`, `encoder preset apply <name>`, and `encoder preset delete <name>`. Live pump restarts from host override, named preset, or approved client config. Saved host encoder overrides reload on backend startup. Android persists video/input preferences locally. | Add native host UI/tray controls and expose presets in a visual settings panel. |
 
+## Pairing And Permission
+
+| Feature | Current status | Next implementation step |
+| --- | --- | --- |
+| Host approval | Console approval/rejection remains available. Windows host can also show an opt-in Win32 connection permission dialog with `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`; dialog results are routed back through the backend command queue and stale results are ignored when a session is no longer pending. | Promote this into a tray/settings UI, persist trusted devices, and add per-device input permission scopes. |
+
 ## Input Controls
 
 | Feature | Current status | Next implementation step |

@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - Native Pairing Permission Dialog
+
+今日は Windows host の pairing approval を console だけの世界から一歩外に出した。`GLYPHRAY_ENABLE_PERMISSION_DIALOG=1` を付けて backend を起動すると、incoming pairing request に対して Win32 の yes/no permission dialog を出せる。dialog は helper thread で開き、backend polling は止めず、結果は console approval と同じ command queue に戻して `approve` / `reject` と同じ経路で `PairingResult` を返す。
+
+stale dialog result にも少しだけ気を配った。例えば console で先に approve/reject したあとに dialog が返ってきても、その peer が pending でなければ結果を無視する。まだ tray 常駐 UI や trusted-device list ではないけれど、接続許可をキーボードコマンドではなく GUI で選べるようになり、ホストアプリらしさが一段増した。
+
+この時点の進捗見積もり: 91%。
+
 ## 2026-05-15 JST - Named Encoder Presets
 
 今日は Windows host の stream control を、default override ひとつだけの保存から、名前付き preset の保存・適用・削除へ進めた。`encoder preset save studio-120` で現在の host override、または approved client から届いた `EncoderConfig` を名前付きで保存でき、`encoder preset apply studio-120` で active host override として即座に適用できる。`encoder status` には保存済み default override だけでなく、preset 一覧も出るようにした。

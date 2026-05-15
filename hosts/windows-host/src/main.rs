@@ -4,7 +4,7 @@ use glyphray_transport::discovery::LanDiscoverySocket;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::video::VideoPacketizer;
 use glyphray_transport::TransportPacket;
-use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy};
+use glyphray_windows_host::backend::{HostBackendRuntime, PermissionPolicy, PermissionState};
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 use glyphray_windows_host::encoder::{EncoderSettings, PendingHardwareEncoder};
 use glyphray_windows_host::input::{
@@ -12,13 +12,17 @@ use glyphray_windows_host::input::{
     KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
     StylusInputBridge, TouchInjector, TouchInputBridge,
 };
+use glyphray_windows_host::permission_ui::{
+    permission_dialog_enabled, prompt_pairing_decision, PairingDecision, PairingPrompt,
+};
 use glyphray_windows_host::settings::{EncoderPreset, HostSettingsStore};
 use glyphray_windows_host::startup::{StartupManager, StartupRegistration};
 use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
+use std::collections::HashSet;
 use std::error::Error;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -114,7 +118,20 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         );
     }
     let mut video_pump = create_runtime_video_pump(&runtime, host_encoder_override.as_ref());
-    let commands = spawn_console_command_reader();
+    let (command_tx, commands) = mpsc::channel();
+    spawn_console_command_reader(command_tx.clone());
+    let mut permission_dialogs = PermissionDialogCoordinator::new(
+        permission_policy == PermissionPolicy::RequireApproval && permission_dialog_enabled(),
+        command_tx,
+        runtime.config().host_name.clone(),
+    );
+    if permission_dialogs.enabled {
+        println!("Native permission dialogs are enabled for pairing requests.");
+    } else if permission_policy == PermissionPolicy::RequireApproval {
+        println!(
+            "Native permission dialogs are disabled. Set GLYPHRAY_ENABLE_PERMISSION_DIALOG=1 to approve pairing requests with a Windows dialog."
+        );
+    }
     let mut last_announce = Instant::now() - Duration::from_secs(2);
     let mut last_video_frame = Instant::now();
 
@@ -134,6 +151,7 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
             ) {
                 should_restart_video_pump = true;
             }
+            permission_dialogs.observe_backend_event(&event);
             print_backend_event(&event);
         }
         if should_restart_video_pump && host_encoder_override.is_none() {
@@ -469,6 +487,10 @@ fn create_runtime_input_bridge(
 enum HostCommand {
     Approve(SocketAddr),
     Reject(SocketAddr),
+    PermissionDialogResult {
+        peer: SocketAddr,
+        decision: PairingDecision,
+    },
     Status,
     Sessions,
     EncoderStatus,
@@ -485,8 +507,54 @@ enum HostCommand {
     Help,
 }
 
-fn spawn_console_command_reader() -> Receiver<HostCommand> {
-    let (tx, rx) = mpsc::channel();
+struct PermissionDialogCoordinator {
+    enabled: bool,
+    tx: Sender<HostCommand>,
+    host_name: String,
+    active_prompts: HashSet<SocketAddr>,
+}
+
+impl PermissionDialogCoordinator {
+    fn new(enabled: bool, tx: Sender<HostCommand>, host_name: String) -> Self {
+        Self {
+            enabled,
+            tx,
+            host_name,
+            active_prompts: HashSet::new(),
+        }
+    }
+
+    fn observe_backend_event(&mut self, event: &glyphray_windows_host::backend::BackendEvent) {
+        use glyphray_windows_host::backend::BackendEvent;
+        match event {
+            BackendEvent::PairingRequested { peer, device_name } => {
+                if !self.enabled || !self.active_prompts.insert(*peer) {
+                    return;
+                }
+
+                let prompt = PairingPrompt {
+                    device_name: device_name.clone(),
+                    peer: *peer,
+                    host_name: self.host_name.clone(),
+                };
+                let tx = self.tx.clone();
+                thread::spawn(move || {
+                    let decision = prompt_pairing_decision(&prompt);
+                    let _ = tx.send(HostCommand::PermissionDialogResult {
+                        peer: prompt.peer,
+                        decision,
+                    });
+                });
+            }
+            BackendEvent::PeerApproved { peer } | BackendEvent::PeerRejected { peer } => {
+                self.active_prompts.remove(peer);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn spawn_console_command_reader(tx: Sender<HostCommand>) {
     thread::spawn(move || {
         let stdin = std::io::stdin();
         loop {
@@ -503,7 +571,6 @@ fn spawn_console_command_reader() -> Receiver<HostCommand> {
             }
         }
     });
-    rx
 }
 
 fn parse_host_command(line: &str) -> Option<HostCommand> {
@@ -590,6 +657,26 @@ fn drain_console_commands(
                     peer,
                     "Rejected by host operator",
                 )?);
+            }
+            HostCommand::PermissionDialogResult { peer, decision } => {
+                if !peer_is_pending(runtime, peer) {
+                    println!(
+                        "Ignoring stale permission dialog result for {peer}; the session is no longer pending."
+                    );
+                    continue;
+                }
+                match decision {
+                    PairingDecision::Approve => {
+                        events.extend(runtime.approve_peer_and_notify(server, peer)?);
+                    }
+                    PairingDecision::Reject => {
+                        events.extend(runtime.reject_peer_and_notify(
+                            server,
+                            peer,
+                            "Rejected by host permission dialog",
+                        )?);
+                    }
+                }
             }
             HostCommand::Status => {
                 print_backend_status(runtime.health_snapshot());
@@ -788,6 +875,13 @@ fn drain_console_commands(
         }
     }
     Ok(events)
+}
+
+fn peer_is_pending(runtime: &HostBackendRuntime<Box<dyn PenInjector>>, peer: SocketAddr) -> bool {
+    runtime
+        .session_snapshots()
+        .iter()
+        .any(|session| session.peer == peer && session.permission == PermissionState::Pending)
 }
 
 fn print_startup_registration(registration: StartupRegistration) {
@@ -1033,6 +1127,23 @@ mod tests {
             parse_host_command("startup disable"),
             Some(HostCommand::StartupDisable)
         ));
+    }
+
+    #[test]
+    fn permission_dialog_coordinator_is_noop_when_disabled() {
+        let (tx, rx) = mpsc::channel();
+        let mut coordinator =
+            PermissionDialogCoordinator::new(false, tx, "GlyphRay Host".to_string());
+        let peer: SocketAddr = "127.0.0.1:44999".parse().expect("peer");
+        coordinator.observe_backend_event(
+            &glyphray_windows_host::backend::BackendEvent::PairingRequested {
+                peer,
+                device_name: "Tablet".to_string(),
+            },
+        );
+
+        assert!(coordinator.active_prompts.is_empty());
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
