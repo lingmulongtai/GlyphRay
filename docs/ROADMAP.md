@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 89%.
+Current overall progress estimate: 90%.
 
 ## Milestone 1
 
@@ -70,6 +70,7 @@ Current overall progress estimate: 89%.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
 - [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.
 - [x] Persist saved Windows host encoder override presets and reload them on backend startup.
+- [x] Add named Windows host encoder presets for quick stream-quality switching during hardware validation.
 - [x] Add native Windows keyboard injection for approved clients behind an explicit smoke-test flag.
 - [x] Add native Windows mouse injection for approved clients behind an explicit smoke-test flag.
 - [x] Add Android direct-touch protocol path and Windows native touch injection smoke-test path.

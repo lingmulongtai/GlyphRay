@@ -96,6 +96,7 @@ cargo test --workspace
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.
 - Run `encoder override 1920x1080 120 35000`, `encoder save`, restart the backend, and confirm `encoder status` reports the saved override before any client connects.
+- Run `encoder preset save studio-120`, `encoder preset list`, `encoder preset apply studio-120`, and `encoder preset delete studio-120`; confirm apply restarts the video pump when `GLYPHRAY_ENABLE_VIDEO_STREAM=1` is set and delete removes only the named preset, not the saved default override.
 - Post a safe CGEvent mouse move/click and keyboard test only after Accessibility permission is granted.
 
 ## Integration Tests To Add

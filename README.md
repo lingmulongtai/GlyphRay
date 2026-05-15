@@ -8,29 +8,29 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 89%**
+**Overall progress estimate: 90%**
 
-Last updated: 2026-05-13 JST
+Last updated: 2026-05-15 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 89
-  "Remaining product work" : 11
+  "Implemented foundation" : 90
+  "Remaining product work" : 10
 ```
 
 | Area | Status | Progress |
 | --- | --- | ---: |
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 92% |
-| Milestone 3 Android stylus to Windows Ink stream | In progress | 88% |
-| Milestone 4 hardening and packaging | In progress | 76% |
+| Milestone 3 Android stylus to Windows Ink stream | In progress | 89% |
+| Milestone 4 hardening and packaging | In progress | 78% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  92%
-M3 Stylus -> Windows Ink      [##################--]  88%
-M4 Security + Packaging       [###############-----]  76%
+M3 Stylus -> Windows Ink      [##################--]  89%
+M4 Security + Packaging       [################----]  78%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -151,7 +151,7 @@ sequenceDiagram
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
 - Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
-- Windows host can persist an encoder override with `encoder save`, reload it on backend startup, and clear it with `encoder clear`.
+- Windows host can persist a default encoder override with `encoder save`, reload it on backend startup, clear it with `encoder clear`, and manage named stream presets with `encoder preset save|apply|delete|list`.
 - Windows host supports per-user startup-at-login management with `startup status`, `startup enable`, and `startup disable`.
 - Windows runtime input bridges now derive their mapper from the selected display geometry instead of a fixed smoke-test rectangle when the display can be enumerated.
 - Windows stylus bridge now normalizes pen axes and smooths pressure before calling the native Win32 synthetic pen injector.
@@ -189,7 +189,7 @@ Run the Windows backend runtime:
 cargo run -p glyphray-windows-host -- serve
 ```
 
-While the backend is running, `encoder status`, `encoder override 1920x1080 120 35000`, `encoder save`, and `encoder clear` are available in the host console for stream-control smoke tests. `encoder save` persists the active host override, or the latest approved client `EncoderConfig`, and reloads it on the next backend start.
+While the backend is running, `encoder status`, `encoder override 1920x1080 120 35000`, `encoder save`, `encoder preset save studio-120`, `encoder preset apply studio-120`, `encoder preset delete studio-120`, and `encoder clear` are available in the host console for stream-control smoke tests. `encoder save` persists the active host override, or the latest approved client `EncoderConfig`, and reloads it on the next backend start. Named presets are stored alongside the default override for quick 60fps/120fps/bitrate switching during hardware validation.
 
 Manage user-logon startup:
 

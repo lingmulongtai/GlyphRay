@@ -61,7 +61,18 @@ Pending eviction currently scans pending sessions to find the oldest entry. This
 
 `status` prints a compact local health snapshot. The most useful early fields are outbound channel depths, queue high watermark, dropped outbound packets, late input drops, and pending rate-limited packets. This is intentionally local-only console output; it does not send telemetry to external services.
 
-`encoder save` persists the active host override, or the latest approved client `EncoderConfig`, to the local host settings file. The backend reloads that override on startup. `encoder clear` clears both the active override and the saved override.
+`encoder save` persists the active host override, or the latest approved client `EncoderConfig`, to the local host settings file. The backend reloads that default override on startup. `encoder clear` clears both the active override and the saved default override.
+
+Named stream presets are available for repeated hardware validation runs:
+
+```powershell
+encoder preset list
+encoder preset save studio-120
+encoder preset apply studio-120
+encoder preset delete studio-120
+```
+
+Preset names are ASCII tokens containing letters, numbers, `-`, `_`, or `.`. Applying a preset makes it the active host override and restarts the video pump when streaming is enabled.
 
 `startup status`, `startup enable`, and `startup disable` manage the current user's Windows startup registration. The implementation uses the HKCU Run key and launches the host with `serve` after user logon.
 

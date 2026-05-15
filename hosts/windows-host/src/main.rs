@@ -12,7 +12,7 @@ use glyphray_windows_host::input::{
     KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
     StylusInputBridge, TouchInjector, TouchInputBridge,
 };
-use glyphray_windows_host::settings::HostSettingsStore;
+use glyphray_windows_host::settings::{EncoderPreset, HostSettingsStore};
 use glyphray_windows_host::startup::{StartupManager, StartupRegistration};
 use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
@@ -474,6 +474,10 @@ enum HostCommand {
     EncoderStatus,
     EncoderOverride(EncoderConfig),
     EncoderSave,
+    EncoderPresetList,
+    EncoderPresetSave(String),
+    EncoderPresetApply(String),
+    EncoderPresetDelete(String),
     EncoderClear,
     StartupStatus,
     StartupEnable,
@@ -535,6 +539,12 @@ fn parse_encoder_command(parts: Vec<&str>) -> Option<HostCommand> {
     match parts.as_slice() {
         [] | ["status"] => Some(HostCommand::EncoderStatus),
         ["save"] => Some(HostCommand::EncoderSave),
+        ["preset"] | ["preset", "list"] => Some(HostCommand::EncoderPresetList),
+        ["preset", "save", name] => Some(HostCommand::EncoderPresetSave((*name).to_string())),
+        ["preset", "apply", name] => Some(HostCommand::EncoderPresetApply((*name).to_string())),
+        ["preset", "delete", name] | ["preset", "remove", name] => {
+            Some(HostCommand::EncoderPresetDelete((*name).to_string()))
+        }
         ["clear"] => Some(HostCommand::EncoderClear),
         ["override", size, fps, bitrate] => {
             let (width, height) = parse_size(size)?;
@@ -614,13 +624,18 @@ fn drain_console_commands(
                 }
             }
             HostCommand::EncoderStatus => {
-                let saved_override = settings_store
-                    .load()
-                    .ok()
-                    .and_then(|settings| settings.encoder_override);
+                let saved_settings = settings_store.load().ok();
+                let saved_override = saved_settings
+                    .as_ref()
+                    .and_then(|settings| settings.encoder_override.as_ref());
+                let saved_presets = saved_settings
+                    .as_ref()
+                    .map(|settings| settings.encoder_presets.as_slice())
+                    .unwrap_or(&[]);
                 print_encoder_status(
                     host_encoder_override.as_ref(),
-                    saved_override.as_ref(),
+                    saved_override,
+                    saved_presets,
                     runtime.latest_approved_encoder_config().as_ref(),
                     video_pump.as_ref(),
                 );
@@ -669,6 +684,62 @@ fn drain_console_commands(
                     Err(error) => println!("Saving encoder override failed: {error}"),
                 }
             }
+            HostCommand::EncoderPresetList => match settings_store.load() {
+                Ok(settings) => print_encoder_presets(&settings.encoder_presets),
+                Err(error) => println!("Loading encoder presets failed: {error}"),
+            },
+            HostCommand::EncoderPresetSave(name) => {
+                let config = host_encoder_override
+                    .clone()
+                    .or_else(|| runtime.latest_approved_encoder_config());
+                let Some(config) = config else {
+                    println!(
+                        "No host override or approved client EncoderConfig is available to save as a preset."
+                    );
+                    continue;
+                };
+
+                match settings_store.save_encoder_preset(&name, config.clone()) {
+                    Ok(_) => println!(
+                        "Saved encoder preset `{name}`: {}x{} {}fps {}kbps {:?} {:?}",
+                        config.width,
+                        config.height,
+                        config.max_fps,
+                        config.target_bitrate_kbps,
+                        config.codec,
+                        config.color_space
+                    ),
+                    Err(error) => println!("Saving encoder preset `{name}` failed: {error}"),
+                }
+            }
+            HostCommand::EncoderPresetApply(name) => {
+                match settings_store.load_encoder_preset(&name) {
+                    Ok(Some(config)) => {
+                        println!(
+                            "Applied encoder preset `{name}`: {}x{} {}fps {}kbps {:?} {:?}",
+                            config.width,
+                            config.height,
+                            config.max_fps,
+                            config.target_bitrate_kbps,
+                            config.codec,
+                            config.color_space
+                        );
+                        *host_encoder_override = Some(config);
+                        *video_pump =
+                            create_runtime_video_pump(runtime, host_encoder_override.as_ref());
+                        *last_video_frame = Instant::now();
+                    }
+                    Ok(None) => println!("Encoder preset `{name}` was not found."),
+                    Err(error) => println!("Loading encoder preset `{name}` failed: {error}"),
+                }
+            }
+            HostCommand::EncoderPresetDelete(name) => {
+                match settings_store.delete_encoder_preset(&name) {
+                    Ok((_, true)) => println!("Deleted encoder preset `{name}`."),
+                    Ok((_, false)) => println!("Encoder preset `{name}` was not found."),
+                    Err(error) => println!("Deleting encoder preset `{name}` failed: {error}"),
+                }
+            }
             HostCommand::EncoderClear => {
                 println!("Host encoder override cleared. Approved client EncoderConfig will be used when available.");
                 *host_encoder_override = None;
@@ -703,6 +774,10 @@ fn drain_console_commands(
                 println!("  encoder status");
                 println!("  encoder override <width>x<height> <fps> <kbps>");
                 println!("  encoder save");
+                println!("  encoder preset list");
+                println!("  encoder preset save <name>");
+                println!("  encoder preset apply <name>");
+                println!("  encoder preset delete <name>");
                 println!("  encoder clear");
                 println!("  startup status");
                 println!("  startup enable");
@@ -752,6 +827,7 @@ fn print_backend_status(snapshot: glyphray_windows_host::backend::BackendHealthS
 fn print_encoder_status(
     host_override: Option<&EncoderConfig>,
     saved_override: Option<&EncoderConfig>,
+    saved_presets: &[EncoderPreset],
     client_config: Option<&EncoderConfig>,
     pump: Option<&RuntimeVideoPump>,
 ) {
@@ -781,6 +857,8 @@ fn print_encoder_status(
         None => println!("encoder saved=none"),
     }
 
+    print_encoder_presets(saved_presets);
+
     match client_config {
         Some(config) => println!(
             "encoder client={}x{} {}fps {}kbps {:?} {:?}",
@@ -807,6 +885,27 @@ fn print_encoder_status(
             pump.settings.color_space
         ),
         None => println!("encoder pump=inactive"),
+    }
+}
+
+fn print_encoder_presets(presets: &[EncoderPreset]) {
+    if presets.is_empty() {
+        println!("encoder presets=none");
+        return;
+    }
+
+    println!("encoder presets={}", presets.len());
+    for preset in presets {
+        println!(
+            "encoder preset `{}`={}x{} {}fps {}kbps {:?} {:?}",
+            preset.name,
+            preset.config.width,
+            preset.config.height,
+            preset.config.max_fps,
+            preset.config.target_bitrate_kbps,
+            preset.config.codec,
+            preset.config.color_space
+        );
     }
 }
 
@@ -897,6 +996,26 @@ mod tests {
         assert!(matches!(
             parse_host_command("encoder save"),
             Some(HostCommand::EncoderSave)
+        ));
+    }
+
+    #[test]
+    fn parses_encoder_preset_commands() {
+        assert!(matches!(
+            parse_host_command("encoder preset list"),
+            Some(HostCommand::EncoderPresetList)
+        ));
+        assert!(matches!(
+            parse_host_command("encoder preset save studio-120"),
+            Some(HostCommand::EncoderPresetSave(name)) if name == "studio-120"
+        ));
+        assert!(matches!(
+            parse_host_command("encoder preset apply studio-120"),
+            Some(HostCommand::EncoderPresetApply(name)) if name == "studio-120"
+        ));
+        assert!(matches!(
+            parse_host_command("encoder preset delete studio-120"),
+            Some(HostCommand::EncoderPresetDelete(name)) if name == "studio-120"
         ));
     }
 

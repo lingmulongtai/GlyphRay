@@ -1,5 +1,13 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - Named Encoder Presets
+
+今日は Windows host の stream control を、default override ひとつだけの保存から、名前付き preset の保存・適用・削除へ進めた。`encoder preset save studio-120` で現在の host override、または approved client から届いた `EncoderConfig` を名前付きで保存でき、`encoder preset apply studio-120` で active host override として即座に適用できる。`encoder status` には保存済み default override だけでなく、preset 一覧も出るようにした。
+
+保存形式は既存の `LOCALAPPDATA/GlyphRay/host-settings.conf` を拡張し、`encoder_preset.<index>.*` の key=value として後方互換に寄せた。まだ tray UI ではないけれど、1080p60、1440p120、高bitrate、低bitrate のような検証パターンを console で素早く切り替えられるようになった。unit test では preset の round trip、case-insensitive update、delete、CLI parse を追加した。
+
+この時点の進捗見積もり: 90%。
+
 ## 2026-05-15 JST - Persistent Host Encoder Presets
 
 今日は Windows host 側の stream control を、console-only の一時設定から保存できる設定へ進めた。`encoder override <width>x<height> <fps> <kbps>` で作った host override、または approved client から届いた最新 `EncoderConfig` を `encoder save` で保存できる。backend startup 時には保存済み override を読み込み、`encoder clear` は active override と saved override の両方を消す。
