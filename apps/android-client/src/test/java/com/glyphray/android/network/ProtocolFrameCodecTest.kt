@@ -86,6 +86,52 @@ class ProtocolFrameCodecTest {
     }
 
     @Test
+    fun authChallengeFrameDecodesFromRustBincodeLayout() {
+        val nonce = ByteArray(32) { index -> index.toByte() }
+        val payload = ByteBuffer
+            .allocate(4 + 8 + 32 + 8)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(2)
+            .putLong(99)
+            .put(nonce)
+            .putLong(1_800_000)
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(encodeFrame(45, TransportMessageKind.authChallenge, payload))
+        val message = frame.message as ControlProtocolMessage.AuthChallenge
+
+        assertEquals(45, frame.sequence)
+        assertEquals(99, message.challengeId)
+        assertArrayEquals(nonce, message.nonce)
+        assertEquals(1_800_000, message.issuedAtUnixMs)
+    }
+
+    @Test
+    fun authResponseFrameUsesRustBincodeLayout() {
+        val frame = ProtocolFrameCodec.encodeAuthResponse(
+            sequence = 46,
+            challengeId = 99,
+            deviceId = "trusted-key-test",
+            signature = byteArrayOf(7, 8, 9),
+        )
+        val payload = frame.copyOfRange(24, frame.size)
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals(3, buffer.int)
+        assertEquals(99, buffer.long)
+
+        val deviceIdLength = buffer.long.toInt()
+        val deviceId = ByteArray(deviceIdLength)
+        buffer.get(deviceId)
+        assertEquals("trusted-key-test", deviceId.toString(Charsets.UTF_8))
+
+        val signatureLength = buffer.long.toInt()
+        val signature = ByteArray(signatureLength)
+        buffer.get(signature)
+        assertArrayEquals(byteArrayOf(7, 8, 9), signature)
+    }
+
+    @Test
     fun latencyPongFrameDecodesFromRustBincodeLayout() {
         val payload = ByteBuffer
             .allocate(36)

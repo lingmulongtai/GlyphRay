@@ -15,10 +15,35 @@ struct MacLiveCaptureProbeResult: Equatable {
     let frameCount: Int
 }
 
+struct MacLiveEncodeProbeResult: Equatable {
+    let displayID: UInt32
+    let width: Int
+    let height: Int
+    let capturedFrames: Int
+    let encodedFrames: Int
+    let encodedBytes: Int
+}
+
+struct MacLiveTransportProbeResult: Equatable {
+    let displayID: UInt32
+    let width: Int
+    let height: Int
+    let capturedFrames: Int
+    let encodedFrames: Int
+    let encodedBytes: Int
+    let videoDatagrams: Int
+    let transportBytes: Int
+}
+
 final class MacLiveCaptureController: NSObject {
     private let sampleQueue = DispatchQueue(label: "com.glyphray.mac.live-capture.samples")
     private var frameCount = 0
+    private var encodedFrameCount = 0
+    private var encodedBytes = 0
+    private var videoDatagramCount = 0
+    private var transportBytes = 0
     private var activeDisplay: MacDisplayDescriptor?
+    private var activeEncoder: VideoToolboxEncoder?
 
     #if canImport(ScreenCaptureKit)
     private var stream: SCStream?
@@ -68,6 +93,152 @@ final class MacLiveCaptureController: NSObject {
         #endif
     }
 
+    func startFirstDisplayEncodeProbe() async throws -> MacLiveEncodeProbeResult {
+        #if canImport(ScreenCaptureKit)
+        let content = try await SCShareableContent.current
+        guard let display = content.displays.first else {
+            throw MacHostError.captureUnavailable("No capture displays are available")
+        }
+
+        let descriptor = MacDisplayDescriptor(
+            id: display.displayID,
+            width: display.width,
+            height: display.height,
+            originX: Int(display.frame.origin.x),
+            originY: Int(display.frame.origin.y)
+        )
+        frameCount = 0
+        encodedFrameCount = 0
+        encodedBytes = 0
+
+        let encoder = VideoToolboxEncoder(
+            settings: MacEncoderSettings(
+                width: Int32(display.width),
+                height: Int32(display.height),
+                fps: 60,
+                bitrate: 20_000_000,
+                codec: .h264
+            ),
+            onFrame: { [weak self] frame in
+                self?.encodedFrameCount += 1
+                self?.encodedBytes += frame.byteCount
+            }
+        )
+        try encoder.start()
+        activeEncoder = encoder
+
+        let configuration = SCStreamConfiguration()
+        configuration.width = display.width
+        configuration.height = display.height
+        configuration.queueDepth = 3
+        configuration.showsCursor = true
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+
+        activeDisplay = descriptor
+        self.stream = stream
+        try await stream.startCapture()
+        try await Task.sleep(nanoseconds: 900_000_000)
+
+        try await stop()
+        encoder.stop()
+        activeEncoder = nil
+
+        return MacLiveEncodeProbeResult(
+            displayID: descriptor.id,
+            width: descriptor.width,
+            height: descriptor.height,
+            capturedFrames: frameCount,
+            encodedFrames: encodedFrameCount,
+            encodedBytes: encodedBytes
+        )
+        #else
+        throw MacHostError.frameworkUnavailable("ScreenCaptureKit")
+        #endif
+    }
+
+    func startFirstDisplayTransportProbe() async throws -> MacLiveTransportProbeResult {
+        #if canImport(ScreenCaptureKit)
+        let content = try await SCShareableContent.current
+        guard let display = content.displays.first else {
+            throw MacHostError.captureUnavailable("No capture displays are available")
+        }
+
+        let descriptor = MacDisplayDescriptor(
+            id: display.displayID,
+            width: display.width,
+            height: display.height,
+            originX: Int(display.frame.origin.x),
+            originY: Int(display.frame.origin.y)
+        )
+        frameCount = 0
+        encodedFrameCount = 0
+        encodedBytes = 0
+        videoDatagramCount = 0
+        transportBytes = 0
+
+        let packetizer = MacVideoTransportPacketizer()
+        let encoder = VideoToolboxEncoder(
+            settings: MacEncoderSettings(
+                width: Int32(display.width),
+                height: Int32(display.height),
+                fps: 60,
+                bitrate: 20_000_000,
+                codec: .h264
+            ),
+            onFrame: { [weak self] frame in
+                guard let self else {
+                    return
+                }
+                self.encodedFrameCount += 1
+                self.encodedBytes += frame.byteCount
+                if let report = try? packetizer.packetize(frame: frame) {
+                    self.videoDatagramCount += report.datagramCount
+                    self.transportBytes += report.byteCount
+                }
+            }
+        )
+        try encoder.start()
+        activeEncoder = encoder
+
+        let configuration = SCStreamConfiguration()
+        configuration.width = display.width
+        configuration.height = display.height
+        configuration.queueDepth = 3
+        configuration.showsCursor = true
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
+
+        activeDisplay = descriptor
+        self.stream = stream
+        try await stream.startCapture()
+        try await Task.sleep(nanoseconds: 900_000_000)
+
+        try await stop()
+        encoder.stop()
+        activeEncoder = nil
+
+        return MacLiveTransportProbeResult(
+            displayID: descriptor.id,
+            width: descriptor.width,
+            height: descriptor.height,
+            capturedFrames: frameCount,
+            encodedFrames: encodedFrameCount,
+            encodedBytes: encodedBytes,
+            videoDatagrams: videoDatagramCount,
+            transportBytes: transportBytes
+        )
+        #else
+        throw MacHostError.frameworkUnavailable("ScreenCaptureKit")
+        #endif
+    }
+
     func stop() async throws {
         #if canImport(ScreenCaptureKit)
         if let stream {
@@ -90,6 +261,11 @@ extension MacLiveCaptureController: SCStreamOutput {
             return
         }
         frameCount += 1
+        do {
+            try activeEncoder?.encode(sampleBuffer: sampleBuffer)
+        } catch {
+            activeEncoder = nil
+        }
     }
 }
 #endif

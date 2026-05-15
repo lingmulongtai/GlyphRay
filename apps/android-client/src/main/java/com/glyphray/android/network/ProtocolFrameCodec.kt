@@ -18,6 +18,27 @@ data class DecodedProtocolFrame(
 )
 
 sealed interface ControlProtocolMessage {
+    data class AuthChallenge(
+        val challengeId: Long,
+        val nonce: ByteArray,
+        val issuedAtUnixMs: Long,
+    ) : ControlProtocolMessage {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is AuthChallenge) return false
+            return challengeId == other.challengeId &&
+                nonce.contentEquals(other.nonce) &&
+                issuedAtUnixMs == other.issuedAtUnixMs
+        }
+
+        override fun hashCode(): Int {
+            var result = challengeId.hashCode()
+            result = 31 * result + nonce.contentHashCode()
+            result = 31 * result + issuedAtUnixMs.hashCode()
+            return result
+        }
+    }
+
     data class PairingResult(
         val accepted: Boolean,
         val trustedDeviceId: String?,
@@ -65,6 +86,21 @@ object ProtocolFrameCodec {
             deviceName = deviceName,
             pairingCodeHash = pairingCodeHash,
             oneTimePublicKey = oneTimePublicKey,
+        ),
+    )
+
+    fun encodeAuthResponse(
+        sequence: Long,
+        challengeId: Long,
+        deviceId: String,
+        signature: ByteArray,
+    ): ByteArray = encodeFrame(
+        messageKind = TransportMessageKind.authResponse,
+        sequence = sequence,
+        payload = BincodeMessageEncoder.authResponse(
+            challengeId = challengeId,
+            deviceId = deviceId,
+            signature = signature,
         ),
     )
 
@@ -251,6 +287,7 @@ object ProtocolFrameCodec {
         require(payload.crc32() == expectedCrc) { "Protocol payload checksum mismatch" }
 
         val message = when (messageKind) {
+            TransportMessageKind.authChallenge -> BincodeMessageEncoder.decodeAuthChallenge(payload)
             TransportMessageKind.pairingResult -> BincodeMessageEncoder.decodePairingResult(payload)
             TransportMessageKind.displayInfo -> BincodeMessageEncoder.decodeDisplayInfo(payload)
             TransportMessageKind.latencyPong -> BincodeMessageEncoder.decodeLatencyPong(payload)
@@ -261,6 +298,8 @@ object ProtocolFrameCodec {
 }
 
 private object BincodeMessageEncoder {
+    private const val authChallengeVariant = 2
+    private const val authResponseVariant = 3
     private const val pairingRequestVariant = 4
     private const val pairingResultVariant = 5
     private const val displayInfoVariant = 6
@@ -286,6 +325,22 @@ private object BincodeMessageEncoder {
             .putBincodeBytes(nameBytes)
             .putBincodeBytes(pairingCodeHash)
             .putBincodeBytes(oneTimePublicKey)
+            .array()
+    }
+
+    fun authResponse(
+        challengeId: Long,
+        deviceId: String,
+        signature: ByteArray,
+    ): ByteArray {
+        val deviceIdBytes = deviceId.toByteArray(Charsets.UTF_8)
+        return ByteBuffer
+            .allocate(4 + 8 + 8 + deviceIdBytes.size + 8 + signature.size)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(authResponseVariant)
+            .putLong(challengeId)
+            .putBincodeBytes(deviceIdBytes)
+            .putBincodeBytes(signature)
             .array()
     }
 
@@ -425,6 +480,20 @@ private object BincodeMessageEncoder {
             accepted = accepted,
             trustedDeviceId = buffer.readBincodeOptionString(),
             reason = buffer.readBincodeOptionString(),
+        )
+    }
+
+    fun decodeAuthChallenge(payload: ByteArray): ControlProtocolMessage.AuthChallenge {
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val variant = buffer.int
+        require(variant == authChallengeVariant) { "Payload did not contain AuthChallenge" }
+        val challengeId = buffer.long
+        val nonce = ByteArray(32)
+        buffer.get(nonce)
+        return ControlProtocolMessage.AuthChallenge(
+            challengeId = challengeId,
+            nonce = nonce,
+            issuedAtUnixMs = buffer.long,
         )
     }
 

@@ -1,5 +1,29 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - macOS Video Transport Packetizer
+
+macOS host を急ぎ足で前に出すため、今日は capture / encode の次の段、GlyphRay の Video channel packetizer を Swift 側に実装した。`MacVideoTransportPacketizer` は `MacEncodedFrame` を Rust 側と同じ encoded access unit に包み、`GLYF` fragment に分割し、さらに `GLYT` Video-channel datagram にする。CRC32 もSwift側で持たせたので、macOS host からAndroid clientへ送る直前の形まで作れる。
+
+SwiftUI には `Live Transport Probe` を追加した。ScreenCaptureKit で画面を掴み、VideoToolbox でH.264にし、packetizerでdatagram化して、captured / encoded / datagram count / transport bytes を表示する。まだ UDP 送信と pairing/control runtime はこれからだが、macOS host の映像経路は「掴む、圧縮する、GlyphRay形式に詰める」まで一本につながった。
+
+この時点の進捗見積もり: 94%。
+
+## 2026-05-15 JST - macOS SwiftPM CI
+
+Windows では Swift toolchain を入れられても `SwiftUI` / `ScreenCaptureKit` / `VideoToolbox` を使う macOS host の実ビルド検証には向かないので、GitHub Actions に `macOS host SwiftPM build` job を追加した。`macos-14` runner で `swift --version` と `swift build` を `hosts/macos-host` 配下で実行する。
+
+これで Windows 開発中でも、push / pull request ごとに macOS host のコンパイル崩れをGitHub側で拾える。ローカルWindowsはRust/Android、macOS API部分はActionsのmacOS runner、という役割分担がかなり自然になった。
+
+この時点の進捗見積もり: 94%。
+
+## 2026-05-15 JST - Signed Trusted Reconnect And macOS Encode Probe
+
+今日は Windows 版の trusted reconnect をもう一段固めた。前回は Android Keystore public key の fingerprint 一致までだったが、今回は `AuthChallenge` / `AuthResponse` を実際の接続経路に入れた。Windows host は trusted record に fingerprint と DER public key を保存し、returning device には challenge を返す。Android は Keystore の ECDSA private key で challenge payload に署名し、Windows は P-256 public key で検証してから `PairingResult accepted=true` を返す。
+
+macOS 側も、単なる frame count から一歩進めた。`VideoToolboxEncoder` に実 `CMSampleBuffer` を渡す `encode(sampleBuffer:)` と output callback を追加し、SwiftUI から `Live Encode Probe` を押すと ScreenCaptureKit の frame を低遅延 H.264 encoder に流し、encoded frame count / bytes を確認できる。まだ transport 送信は未接続だが、macOS の capture-to-encode 経路が見えてきた。
+
+この時点の進捗見積もり: 94%。
+
 ## 2026-05-15 JST - Windows Trusted Identity And macOS Live Capture Start
 
 今日は Windows 版を完成形に近づけるため、trusted-device を IP 由来の仮IDから Android Keystore public key fingerprint ベースへ寄せた。Android の `PairingRequest` に Keystore 公開鍵 bytes を載せ、Windows host は SHA-256 fingerprint を保存する。次回以降は同じ fingerprint が trusted-device list にある場合だけ auto-approve するので、単なる同一IPよりはかなり製品らしい再接続に近づいた。まだ最終形には challenge/response proof が必要だが、危ない無条件自動承認ではない。

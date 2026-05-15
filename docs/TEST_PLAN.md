@@ -85,17 +85,20 @@ cargo test --workspace
 - With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
 - With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a pairing request from Android, approve once in the Windows dialog and confirm `PairingResult accepted=true` plus `DisplayInfo`; repeat and reject once, confirming the client sees rejection.
 - After approving a device, run `trust list` and confirm the trusted-device id, label, last peer, approval timestamp, and permission flags are present. Run `trust forget <id>` and confirm only that record is removed; run `trust clear` on a disposable profile and confirm all records are removed.
-- Pair the same Android device twice and confirm the second request is auto-approved only when the saved Android public-key fingerprint matches. Delete the trusted record and confirm approval is required again.
+- Pair the same Android device twice and confirm the second request receives `AuthChallenge`, Android replies with `AuthResponse`, and the host accepts only when the saved Android public-key fingerprint and ECDSA signature verify. Delete the trusted record and confirm approval is required again.
 - Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
 
 ## macOS Manual Tests
 
 - Build the SwiftPM host on macOS 13+ with `swift build`.
+- Confirm GitHub Actions `CI / macOS host SwiftPM build` passes on `macos-14`.
 - Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
 - Use the Screen Recording and Accessibility request buttons and confirm macOS opens the expected permission prompts.
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
 - Run the Live Capture Probe and confirm a short `SCStream` session reports at least one captured frame.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
+- Run the Live Encode Probe and confirm captured frame count, encoded frame count, and encoded byte count are non-zero after Screen Recording permission is granted.
+- Run the Live Transport Probe and confirm captured frame count, encoded frame count, Video-channel datagram count, and transport byte count are non-zero.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.
@@ -113,7 +116,7 @@ cargo test --workspace
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
-- macOS SCStream-to-VideoToolbox encode loopback.
+- macOS control runtime plus SCStream-to-VideoToolbox-to-UDP client loopback.
 - macOS Keychain device identity persistence.
 - Transport reconnect under packet loss.
 - Outbound QoS queue backpressure behavior with a saturated UDP send buffer.

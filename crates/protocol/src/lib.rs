@@ -5,6 +5,7 @@ pub mod stylus_wire;
 pub const MAGIC: [u8; 4] = *b"GLYR";
 pub const WIRE_VERSION: u16 = 1;
 pub const HEADER_LEN: usize = 24;
+pub const TRUSTED_AUTH_CHALLENGE_DOMAIN: &[u8] = b"GlyphRay trusted device challenge v1";
 const MAX_PAYLOAD_LEN: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -202,6 +203,23 @@ pub fn decode_frame(bytes: &[u8]) -> Result<Frame, ProtocolError> {
     }
 
     Ok(Frame { sequence, message })
+}
+
+pub fn trusted_auth_challenge_payload(
+    trusted_device_id: &str,
+    challenge_id: u64,
+    nonce: &[u8; 32],
+) -> Vec<u8> {
+    let trusted_device_id = trusted_device_id.as_bytes();
+    let mut payload = Vec::with_capacity(
+        TRUSTED_AUTH_CHALLENGE_DOMAIN.len() + 8 + nonce.len() + 8 + trusted_device_id.len(),
+    );
+    payload.extend_from_slice(TRUSTED_AUTH_CHALLENGE_DOMAIN);
+    payload.extend_from_slice(&challenge_id.to_le_bytes());
+    payload.extend_from_slice(nonce);
+    payload.extend_from_slice(&(trusted_device_id.len() as u64).to_le_bytes());
+    payload.extend_from_slice(trusted_device_id);
+    payload
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -562,6 +580,17 @@ mod tests {
         encoded[last] ^= 0x11;
 
         assert_eq!(decode_frame(&encoded), Err(ProtocolError::ChecksumMismatch));
+    }
+
+    #[test]
+    fn trusted_auth_challenge_payload_is_stable() {
+        let payload = trusted_auth_challenge_payload("trusted-key-abc", 7, &[3_u8; 32]);
+        assert!(payload.starts_with(TRUSTED_AUTH_CHALLENGE_DOMAIN));
+        assert_eq!(
+            &payload[TRUSTED_AUTH_CHALLENGE_DOMAIN.len()..TRUSTED_AUTH_CHALLENGE_DOMAIN.len() + 8],
+            &7_u64.to_le_bytes()
+        );
+        assert_eq!(&payload[payload.len() - 15..], b"trusted-key-abc");
     }
 
     #[test]

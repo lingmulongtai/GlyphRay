@@ -154,17 +154,17 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
             ) {
                 should_restart_video_pump = true;
             }
-            let auto_trusted = maybe_auto_approve_trusted_pairing(
+            let trusted_challenge = maybe_challenge_trusted_pairing(
                 &event,
                 &mut runtime,
                 &mut server,
                 &settings_store,
             )?;
-            if auto_trusted.is_none() {
+            if trusted_challenge.is_none() {
                 permission_dialogs.observe_backend_event(&event);
             }
             print_backend_event(&event);
-            if let Some(events) = auto_trusted {
+            if let Some(events) = trusted_challenge {
                 for event in events {
                     print_backend_event(&event);
                 }
@@ -934,7 +934,7 @@ fn drain_console_commands(
     Ok(events)
 }
 
-fn maybe_auto_approve_trusted_pairing(
+fn maybe_challenge_trusted_pairing(
     event: &glyphray_windows_host::backend::BackendEvent,
     runtime: &mut HostBackendRuntime<Box<dyn PenInjector>>,
     server: &mut UdpServer,
@@ -950,11 +950,10 @@ fn maybe_auto_approve_trusted_pairing(
     };
 
     let settings = settings_store.load()?;
-    let Some(device) = settings
-        .trusted_devices
-        .iter()
-        .find(|device| device.public_key_fingerprint.as_deref() == Some(fingerprint.as_str()))
-    else {
+    let Some(device) = settings.trusted_devices.iter().find(|device| {
+        device.public_key_fingerprint.as_deref() == Some(fingerprint.as_str())
+            && device.public_key_der.is_some()
+    }) else {
         return Ok(None);
     };
 
@@ -962,7 +961,7 @@ fn maybe_auto_approve_trusted_pairing(
         "Trusted device matched by public key fingerprint: id={} label=`{}` peer={peer}",
         device.id, device.label
     );
-    let events = approve_peer_and_record_trust(runtime, server, settings_store, *peer)?;
+    let events = runtime.challenge_peer_as_and_notify(server, *peer, device.id.clone())?;
     Ok(Some(events))
 }
 
@@ -974,13 +973,20 @@ fn approve_peer_and_record_trust(
 ) -> Result<Vec<glyphray_windows_host::backend::BackendEvent>, Box<dyn Error>> {
     let label = pending_device_label(runtime, peer).unwrap_or_else(|| peer.to_string());
     let fingerprint = pending_public_key_fingerprint(runtime, peer);
+    let public_key_der = pending_public_key_der(runtime, peer);
     let id = fingerprint
         .as_deref()
         .map(trusted_device_id_from_public_key_fingerprint)
         .unwrap_or_else(|| trusted_device_id(peer));
     let events = runtime.approve_peer_as_and_notify(server, peer, id.clone())?;
-    match TrustedDevice::approved_now(id.clone(), label.clone(), peer.to_string(), fingerprint)
-        .and_then(|device| settings_store.upsert_trusted_device(device))
+    match TrustedDevice::approved_now(
+        id.clone(),
+        label.clone(),
+        peer.to_string(),
+        fingerprint,
+        public_key_der,
+    )
+    .and_then(|device| settings_store.upsert_trusted_device(device))
     {
         Ok(_) => println!("Trusted device recorded: id={id} label={label} peer={peer}"),
         Err(error) => println!("Recording trusted device `{id}` failed: {error}"),
@@ -1010,6 +1016,17 @@ fn pending_public_key_fingerprint(
         .and_then(|session| session.device_public_key_fingerprint)
 }
 
+fn pending_public_key_der(
+    runtime: &HostBackendRuntime<Box<dyn PenInjector>>,
+    peer: SocketAddr,
+) -> Option<Vec<u8>> {
+    runtime
+        .session_snapshots()
+        .into_iter()
+        .find(|session| session.peer == peer)
+        .and_then(|session| session.device_public_key_der)
+}
+
 fn peer_is_pending(runtime: &HostBackendRuntime<Box<dyn PenInjector>>, peer: SocketAddr) -> bool {
     runtime
         .session_snapshots()
@@ -1026,11 +1043,12 @@ fn print_trusted_devices(devices: &[TrustedDevice]) {
     println!("trusted devices={}", devices.len());
     for device in devices {
         println!(
-            "trusted id={} label=`{}` peer={} public_key={} approved_unix_ms={} permissions=pen:{},touch:{},keyboard:{},mouse:{},gamepad:{}",
+            "trusted id={} label=`{}` peer={} public_key={} public_key_der={} bytes approved_unix_ms={} permissions=pen:{},touch:{},keyboard:{},mouse:{},gamepad:{}",
             device.id,
             device.label,
             device.last_peer,
             device.public_key_fingerprint.as_deref().unwrap_or("-"),
+            device.public_key_der.as_ref().map(Vec::len).unwrap_or(0),
             device.approved_unix_ms,
             device.permissions.allow_pen,
             device.permissions.allow_touch,
@@ -1176,6 +1194,17 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
         }
         BackendEvent::PairingResultQueued { peer, accepted } => {
             println!("PairingResult queued for {peer}: accepted={accepted}");
+        }
+        BackendEvent::AuthChallengeQueued { peer, challenge_id } => {
+            println!(
+                "Trusted-device auth challenge queued for {peer}: challenge_id={challenge_id}"
+            );
+        }
+        BackendEvent::TrustedDeviceAuthenticated {
+            peer,
+            trusted_device_id,
+        } => {
+            println!("Trusted device authenticated: peer={peer} id={trusted_device_id}");
         }
         BackendEvent::DisplayInfoQueued { peer, displays } => {
             println!("DisplayInfo queued for {peer}: {displays} display(s)");

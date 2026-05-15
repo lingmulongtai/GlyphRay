@@ -284,6 +284,18 @@ class SessionControlController(
 
     private fun handleControlMessage(message: ControlProtocolMessage) {
         when (message) {
+            is ControlProtocolMessage.AuthChallenge -> {
+                state = state.copy(
+                    responsesReceived = state.responsesReceived + 1,
+                    lastAction = "Trusted auth challenge received",
+                    lastError = null,
+                )
+                executor.execute {
+                    sendControl("Trusted auth response") { client ->
+                        client.sendAuthResponse(message)
+                    }
+                }
+            }
             is ControlProtocolMessage.PairingResult -> {
                 state = state.copy(
                     responsesReceived = state.responsesReceived + 1,
@@ -347,6 +359,22 @@ private class ControlUdpClient : Closeable {
             oneTimePublicKey = runCatching { deviceKeys.publicKeyBytes() }.getOrDefault(ByteArray(0)),
         )
         return sendControl(TransportMessageKind.pairingRequest, frame)
+    }
+
+    fun sendAuthResponse(challenge: ControlProtocolMessage.AuthChallenge): Int {
+        val trustedDeviceId = deviceKeys.trustedDeviceId()
+        val signature = deviceKeys.signTrustedChallenge(
+            challengeId = challenge.challengeId,
+            nonce = challenge.nonce,
+            trustedDeviceId = trustedDeviceId,
+        )
+        val frame = ProtocolFrameCodec.encodeAuthResponse(
+            sequence = nextFrameSequence++,
+            challengeId = challenge.challengeId,
+            deviceId = trustedDeviceId,
+            signature = signature,
+        )
+        return sendControl(TransportMessageKind.authResponse, frame)
     }
 
     fun sendLatencyPing(): Int {

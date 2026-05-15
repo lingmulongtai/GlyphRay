@@ -26,6 +26,8 @@ Current code includes:
 - SwiftUI shell with local readiness diagnostics.
 - ScreenCaptureKit display listing with display geometry labels.
 - ScreenCaptureKit live capture probe that opens an `SCStream`, counts screen frames for a short run, then stops.
+- ScreenCaptureKit-to-VideoToolbox live encode probe that feeds captured `CMSampleBuffer` images into the low-latency H.264 encoder and counts encoded frames/bytes.
+- GlyphRay video transport packetizer probe that wraps encoded H.264 frames into `GLYF` fragments and `GLYT` Video-channel datagrams.
 - Screen Recording and Accessibility permission checks/prompts.
 - Input Monitoring status note for manual review.
 - Audio permission status plumbing.
@@ -33,4 +35,4 @@ Current code includes:
 - CGEvent mouse, click, and keyboard posting foundation.
 - Keychain-backed secret store boundary with UI smoke test.
 
-Live capture-to-encode-to-transport streaming is still pending. The live capture probe now verifies that an `SCStream` can produce frames; the next macOS-specific step is to feed those sample buffers into `VideoToolboxEncoder` and send encoded access units through the shared transport.
+Live UDP streaming is still pending. The live transport probe now verifies that an `SCStream` can produce frames, those sample buffers can be passed into `VideoToolboxEncoder`, and encoded access units can be packetized into GlyphRay Video-channel datagrams. The next macOS-specific step is to add the pairing/control runtime and send those datagrams to approved clients.

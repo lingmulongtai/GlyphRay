@@ -5,8 +5,14 @@ import android.security.keystore.KeyProperties
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
+import java.security.MessageDigest
 import java.security.PublicKey
+import java.security.Signature
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.spec.ECGenParameterSpec
+
+private val trustedChallengeDomain = "GlyphRay trusted device challenge v1".toByteArray(Charsets.UTF_8)
 
 class AndroidDeviceKeys(
     private val alias: String = "glyphray_device_identity_v1",
@@ -21,6 +27,20 @@ class AndroidDeviceKeys(
     }
 
     fun publicKeyBytes(): ByteArray = publicKey().encoded
+
+    fun trustedDeviceId(): String = "trusted-key-${publicKeyBytes().sha256Hex()}"
+
+    fun signTrustedChallenge(
+        challengeId: Long,
+        nonce: ByteArray,
+        trustedDeviceId: String = trustedDeviceId(),
+    ): ByteArray {
+        require(nonce.size == 32) { "GlyphRay auth challenge nonce must be 32 bytes" }
+        val signer = Signature.getInstance("SHA256withECDSA")
+        signer.initSign(ensureKeyPair().private)
+        signer.update(trustedChallengePayload(trustedDeviceId, challengeId, nonce))
+        return signer.sign()
+    }
 
     private fun ensureKeyPair(): KeyPair {
         val existing = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
@@ -46,3 +66,24 @@ class AndroidDeviceKeys(
     }
 }
 
+private fun trustedChallengePayload(
+    trustedDeviceId: String,
+    challengeId: Long,
+    nonce: ByteArray,
+): ByteArray {
+    val deviceIdBytes = trustedDeviceId.toByteArray(Charsets.UTF_8)
+    return ByteBuffer
+        .allocate(trustedChallengeDomain.size + 8 + nonce.size + 8 + deviceIdBytes.size)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .put(trustedChallengeDomain)
+        .putLong(challengeId)
+        .put(nonce)
+        .putLong(deviceIdBytes.size.toLong())
+        .put(deviceIdBytes)
+        .array()
+}
+
+private fun ByteArray.sha256Hex(): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(this)
+    return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
+}

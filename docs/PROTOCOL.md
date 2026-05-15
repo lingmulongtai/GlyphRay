@@ -63,6 +63,8 @@ The complete encoded access unit inside the fragment stream is:
 
 Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 
+The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams.
+
 ## Message Families
 
 - Handshake: `ClientHello`, `HostHello`
@@ -73,6 +75,22 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 - Input: `StylusInputBatch`, `TouchInputBatch`, `MouseInput`, `KeyboardInput`, `GamepadInput`
 - Control: `LatencyPing`, `LatencyPong`, `ErrorMessage`, `Disconnect`
 - Optional later: `ClipboardMessage`
+
+## Trusted Device Authentication
+
+After a manual approval, the Windows host stores the Android Keystore public key DER and its SHA-256 fingerprint in the trusted-device record. On a later pairing request with the same fingerprint, the host sends `AuthChallenge` instead of approving immediately.
+
+The Android client signs this stable payload with `SHA256withECDSA` over its Keystore EC P-256 private key:
+
+| Field | Encoding |
+| --- | --- |
+| domain | ASCII bytes `GlyphRay trusted device challenge v1` |
+| challenge id | little-endian `u64` |
+| nonce | 32 raw bytes |
+| trusted device id length | little-endian `u64` |
+| trusted device id | UTF-8 bytes |
+
+The client returns `AuthResponse { challenge_id, device_id, signature }`. The host verifies the DER ECDSA signature with the saved public key before sending an accepted `PairingResult`.
 
 ## EncoderConfig
 
@@ -87,7 +105,7 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 - keyframe interval
 - low-latency mode flag
 
-The Windows host currently stores approved-client requests. The live capture/encode loop still needs to consume this stored config.
+The Windows host stores approved-client requests and the opt-in live capture/encode loop consumes them for FPS, bitrate, codec, color space, and keyframe settings. Resolution scaling is still pending, so the host may keep capture-native dimensions until the scaler lands.
 
 ## StylusInputBatch
 

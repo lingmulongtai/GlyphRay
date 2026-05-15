@@ -84,6 +84,30 @@ final class HostStatusModel: ObservableObject {
         }
     }
 
+    func startLiveEncodeProbe() {
+        liveCaptureStatus = "Starting ScreenCaptureKit -> VideoToolbox probe..."
+        Task {
+            do {
+                let result = try await liveCaptureController.startFirstDisplayEncodeProbe()
+                liveCaptureStatus = "Captured \(result.capturedFrames), encoded \(result.encodedFrames) frame(s) / \(result.encodedBytes) bytes from display \(result.displayID) at \(result.width)x\(result.height)"
+            } catch {
+                liveCaptureStatus = "Live encode unavailable: \(error)"
+            }
+        }
+    }
+
+    func startLiveTransportProbe() {
+        liveCaptureStatus = "Starting capture -> encode -> video packetizer probe..."
+        Task {
+            do {
+                let result = try await liveCaptureController.startFirstDisplayTransportProbe()
+                liveCaptureStatus = "Captured \(result.capturedFrames), encoded \(result.encodedFrames), packetized \(result.videoDatagrams) datagram(s) / \(result.transportBytes) bytes from display \(result.displayID)"
+            } catch {
+                liveCaptureStatus = "Live transport unavailable: \(error)"
+            }
+        }
+    }
+
     func runKeychainSmokeTest() {
         keychainStatus = "Testing Keychain..."
         let account = "diagnostics-smoke-test"
@@ -135,6 +159,12 @@ struct ContentView: View {
                 }
                 Button("Live Capture Probe") {
                     model.startLiveCaptureProbe()
+                }
+                Button("Live Encode Probe") {
+                    model.startLiveEncodeProbe()
+                }
+                Button("Live Transport Probe") {
+                    model.startLiveTransportProbe()
                 }
                 Button("Keychain Smoke Test") {
                     model.runKeychainSmokeTest()

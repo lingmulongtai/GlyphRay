@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   pull_request:
   push:
@@ -35,3 +38,14 @@ jobs:
         run: ./gradlew :apps:android-client:testDebugUnitTest
       - name: Assemble debug
         run: ./gradlew :apps:android-client:assembleDebug
+
+  macos-host:
+    name: macOS host SwiftPM build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift toolchain
+        run: swift --version
+      - name: Build macOS host
+        working-directory: hosts/macos-host
+        run: swift build

@@ -23,6 +23,8 @@ enum class TransportChannel(val wireId: Int) {
 
 object TransportMessageKind {
     const val videoFrame = 9
+    const val authChallenge = 3
+    const val authResponse = 4
     const val pairingRequest = 5
     const val pairingResult = 6
     const val displayInfo = 7

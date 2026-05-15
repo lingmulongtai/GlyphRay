@@ -6,13 +6,18 @@ use crate::input::{
 };
 use glyphray_protocol::stylus_wire::{decode_stylus_batch, StylusWireError};
 use glyphray_protocol::{
-    decode_frame, encode_frame, DisplayDescriptor, DisplayInfo, EncoderConfig, GamepadInput,
-    KeyboardInput, LatencyPing, LatencyPong, Message, MessageKind, MouseInput, PairingResult,
-    TouchInputBatch,
+    decode_frame, encode_frame, trusted_auth_challenge_payload, AuthChallenge, AuthResponse,
+    DisplayDescriptor, DisplayInfo, EncoderConfig, GamepadInput, KeyboardInput, LatencyPing,
+    LatencyPong, Message, MessageKind, MouseInput, PairingResult, TouchInputBatch,
 };
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::udp::UdpServer;
 use glyphray_transport::{ChannelKind, TransportError, TransportPacket};
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::{Signature, VerifyingKey};
+use p256::pkcs8::DecodePublicKey;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
@@ -34,6 +39,7 @@ const OUTBOUND_QOS_SCHEDULE: [ChannelKind; 8] = [
     ChannelKind::Control,
 ];
 const LATE_INPUT_PACKET_REASON: &str = "late input packet";
+const TRUSTED_AUTH_CHALLENGE_TTL_MS: u64 = 30_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
@@ -64,7 +70,9 @@ pub enum PermissionPolicy {
 pub struct ClientSession {
     pub peer: SocketAddr,
     pub device_id: Option<String>,
+    pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
+    pub pending_auth_challenge: Option<PendingAuthChallenge>,
     pub permission: PermissionState,
     pub packets_received: u64,
     pub last_seen: Instant,
@@ -73,11 +81,22 @@ pub struct ClientSession {
     pub last_input_timestamp_us: Option<u64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingAuthChallenge {
+    pub challenge_id: u64,
+    pub nonce: [u8; 32],
+    pub issued_at_unix_ms: u64,
+    pub expected_device_id: String,
+    pub public_key_der: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionSnapshot {
     pub peer: SocketAddr,
     pub device_id: Option<String>,
+    pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
+    pub has_pending_auth_challenge: bool,
     pub permission: PermissionState,
     pub packets_received: u64,
     pub encoder_config: Option<EncoderConfig>,
@@ -150,7 +169,9 @@ impl SessionRegistry {
         self.sessions.entry(peer).or_insert_with(|| ClientSession {
             peer,
             device_id: None,
+            device_public_key_der: None,
             device_public_key_fingerprint: None,
+            pending_auth_challenge: None,
             permission: PermissionState::Pending,
             packets_received: 0,
             last_seen: Instant::now(),
@@ -220,7 +241,9 @@ impl SessionRegistry {
             .map(|session| SessionSnapshot {
                 peer: session.peer,
                 device_id: session.device_id.clone(),
+                device_public_key_der: session.device_public_key_der.clone(),
                 device_public_key_fingerprint: session.device_public_key_fingerprint.clone(),
+                has_pending_auth_challenge: session.pending_auth_challenge.is_some(),
                 permission: session.permission,
                 packets_received: session.packets_received,
                 encoder_config: session.encoder_config.clone(),
@@ -278,6 +301,14 @@ pub enum BackendEvent {
         peer: SocketAddr,
         device_name: String,
         public_key_fingerprint: Option<String>,
+    },
+    AuthChallengeQueued {
+        peer: SocketAddr,
+        challenge_id: u64,
+    },
+    TrustedDeviceAuthenticated {
+        peer: SocketAddr,
+        trusted_device_id: String,
     },
     PairingResultQueued {
         peer: SocketAddr,
@@ -444,6 +475,45 @@ where
         self.build_pairing_result(true, Some(device_id), None)
     }
 
+    pub fn challenge_peer_with_response(
+        &mut self,
+        peer: SocketAddr,
+        expected_device_id: impl Into<String>,
+    ) -> Result<(u64, TransportPacket), BackendError> {
+        let expected_device_id = expected_device_id.into();
+        let session = self.sessions.ensure_pending(peer);
+        let public_key_der = session.device_public_key_der.clone().ok_or_else(|| {
+            BackendError::Protocol(
+                "trusted authentication requires a pairing public key".to_string(),
+            )
+        })?;
+
+        let challenge = new_auth_challenge();
+        session.pending_auth_challenge = Some(PendingAuthChallenge {
+            challenge_id: challenge.challenge_id,
+            nonce: challenge.nonce,
+            issued_at_unix_ms: challenge.issued_at_unix_ms,
+            expected_device_id,
+            public_key_der,
+        });
+
+        let response = Message::AuthChallenge(challenge.clone());
+        let payload = encode_frame(self.next_outbound_sequence, &response)
+            .map_err(|err| BackendError::Protocol(err.to_string()))?;
+        let sequence = self.next_outbound_sequence;
+        self.next_outbound_sequence += 1;
+        Ok((
+            challenge.challenge_id,
+            TransportPacket {
+                sequence,
+                channel: ChannelKind::Control,
+                message_kind: MessageKind::AuthChallenge,
+                enqueue_timestamp_us: now_us(),
+                payload,
+            },
+        ))
+    }
+
     pub fn reject_peer_with_response(
         &mut self,
         peer: SocketAddr,
@@ -519,9 +589,16 @@ where
                     "pairing payload did not contain PairingRequest".to_string(),
                 ));
             };
-            let public_key_fingerprint = public_key_fingerprint(&request.one_time_public_key);
+            let public_key_der = if request.one_time_public_key.is_empty() {
+                None
+            } else {
+                Some(request.one_time_public_key)
+            };
+            let public_key_fingerprint = public_key_der.as_deref().and_then(public_key_fingerprint);
             session.device_id = Some(request.device_name.clone());
+            session.device_public_key_der = public_key_der;
             session.device_public_key_fingerprint = public_key_fingerprint.clone();
+            session.pending_auth_challenge = None;
             outcome.events.push(BackendEvent::PairingRequested {
                 peer,
                 device_name: request.device_name,
@@ -538,6 +615,51 @@ where
                     peer,
                     accepted: true,
                 });
+            }
+            return Ok(outcome);
+        }
+
+        if packet.message_kind == MessageKind::AuthResponse {
+            let frame = decode_frame(&packet.payload)
+                .map_err(|err| BackendError::Protocol(err.to_string()))?;
+            let Message::AuthResponse(response) = frame.message else {
+                return Err(BackendError::Protocol(
+                    "auth payload did not contain AuthResponse".to_string(),
+                ));
+            };
+            let auth_result = verify_pending_auth_response(session, &response);
+            match auth_result {
+                Ok(trusted_device_id) => {
+                    session.permission = PermissionState::Approved;
+                    session.device_id = Some(trusted_device_id.clone());
+                    session.pending_auth_challenge = None;
+                    let response =
+                        self.build_pairing_result(true, Some(trusted_device_id.clone()), None)?;
+                    outcome.outbound.push((peer, response));
+                    outcome
+                        .events
+                        .push(BackendEvent::TrustedDeviceAuthenticated {
+                            peer,
+                            trusted_device_id,
+                        });
+                    outcome.events.push(BackendEvent::PairingResultQueued {
+                        peer,
+                        accepted: true,
+                    });
+                }
+                Err(reason) => {
+                    session.permission = PermissionState::Rejected;
+                    session.pending_auth_challenge = None;
+                    let response = self.build_pairing_result(false, None, Some(reason.clone()))?;
+                    outcome.outbound.push((peer, response));
+                    outcome
+                        .events
+                        .push(BackendEvent::PacketIgnored { peer, reason });
+                    outcome.events.push(BackendEvent::PairingResultQueued {
+                        peer,
+                        accepted: false,
+                    });
+                }
             }
             return Ok(outcome);
         }
@@ -859,6 +981,22 @@ where
         ])
     }
 
+    pub fn challenge_peer_as_and_notify(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+        expected_device_id: impl Into<String>,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let (challenge_id, response) = self
+            .router
+            .challenge_peer_with_response(peer, expected_device_id)?;
+        server.send_to(&response, peer)?;
+        Ok(vec![BackendEvent::AuthChallengeQueued {
+            peer,
+            challenge_id,
+        }])
+    }
+
     pub fn reject_peer_and_notify(
         &mut self,
         server: &mut UdpServer,
@@ -1132,6 +1270,55 @@ fn now_us() -> u64 {
         .unwrap_or_default()
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
+}
+
+fn new_auth_challenge() -> AuthChallenge {
+    let mut nonce = [0_u8; 32];
+    OsRng.fill_bytes(&mut nonce);
+    AuthChallenge {
+        challenge_id: OsRng.next_u64(),
+        nonce,
+        issued_at_unix_ms: now_ms(),
+    }
+}
+
+fn verify_pending_auth_response(
+    session: &ClientSession,
+    response: &AuthResponse,
+) -> Result<String, String> {
+    let Some(challenge) = session.pending_auth_challenge.as_ref() else {
+        return Err("auth response arrived without a pending challenge".to_string());
+    };
+    if response.challenge_id != challenge.challenge_id {
+        return Err("auth response challenge id did not match".to_string());
+    }
+    if response.device_id != challenge.expected_device_id {
+        return Err("auth response device id did not match the trusted device".to_string());
+    }
+    if now_ms().saturating_sub(challenge.issued_at_unix_ms) > TRUSTED_AUTH_CHALLENGE_TTL_MS {
+        return Err("auth challenge expired".to_string());
+    }
+
+    let verifying_key = VerifyingKey::from_public_key_der(&challenge.public_key_der)
+        .map_err(|error| format!("trusted device public key was invalid: {error}"))?;
+    let signature = Signature::from_der(&response.signature)
+        .map_err(|error| format!("auth response signature was invalid: {error}"))?;
+    let payload = trusted_auth_challenge_payload(
+        &challenge.expected_device_id,
+        challenge.challenge_id,
+        &challenge.nonce,
+    );
+    verifying_key
+        .verify(&payload, &signature)
+        .map_err(|_| "trusted device signature verification failed".to_string())?;
+    Ok(challenge.expected_device_id.clone())
+}
+
 pub fn trusted_device_id(peer: SocketAddr) -> String {
     format!("trusted-{}", peer).replace([':', '.'], "-")
 }
@@ -1240,9 +1427,9 @@ mod tests {
     use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, SourceRect};
     use glyphray_protocol::stylus_wire::encode_stylus_batch;
     use glyphray_protocol::{
-        ColorSpace, EncoderConfig, GamepadInput, KeyboardInput, MouseInput, PairingRequest,
-        StylusAction, StylusInputBatch, StylusSample, StylusToolType, TouchAction, TouchInputBatch,
-        TouchSample, VideoCodec,
+        AuthResponse, ColorSpace, EncoderConfig, GamepadInput, KeyboardInput, MouseInput,
+        PairingRequest, StylusAction, StylusInputBatch, StylusSample, StylusToolType, TouchAction,
+        TouchInputBatch, TouchSample, VideoCodec,
     };
 
     #[derive(Default)]
@@ -1424,6 +1611,75 @@ mod tests {
             device_name: "Galaxy Tab".to_string(),
             public_key_fingerprint: Some(expected_fingerprint),
         }));
+    }
+
+    #[test]
+    fn trusted_auth_response_approves_pending_peer() {
+        use p256::ecdsa::signature::Signer;
+        use p256::ecdsa::{Signature, SigningKey};
+        use p256::elliptic_curve::rand_core::OsRng as P256OsRng;
+        use p256::pkcs8::EncodePublicKey;
+
+        let signing_key = SigningKey::random(&mut P256OsRng);
+        let public_key_der = signing_key
+            .verifying_key()
+            .to_public_key_der()
+            .expect("public key DER")
+            .as_bytes()
+            .to_vec();
+        let fingerprint = public_key_fingerprint(&public_key_der).expect("fingerprint");
+        let device_id = trusted_device_id_from_public_key_fingerprint(&fingerprint);
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50011".parse().expect("peer");
+        let message = Message::PairingRequest(PairingRequest {
+            device_name: "Galaxy Tab".to_string(),
+            pairing_code_hash: vec![],
+            one_time_public_key: public_key_der,
+        });
+        let packet = TransportPacket {
+            sequence: 1,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::PairingRequest,
+            enqueue_timestamp_us: 0,
+            payload: encode_frame(1, &message).expect("encode"),
+        };
+        router.route_packet(peer, packet).expect("pairing");
+        let (_, challenge_packet) = router
+            .challenge_peer_with_response(peer, device_id.clone())
+            .expect("challenge");
+        let challenge_frame = decode_frame(&challenge_packet.payload).expect("challenge frame");
+        let Message::AuthChallenge(challenge) = challenge_frame.message else {
+            panic!("expected AuthChallenge");
+        };
+        let payload =
+            trusted_auth_challenge_payload(&device_id, challenge.challenge_id, &challenge.nonce);
+        let signature: Signature = signing_key.sign(&payload);
+        let auth_response = Message::AuthResponse(AuthResponse {
+            challenge_id: challenge.challenge_id,
+            device_id: device_id.clone(),
+            signature: signature.to_der().as_bytes().to_vec(),
+        });
+        let auth_packet = TransportPacket {
+            sequence: 2,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::AuthResponse,
+            enqueue_timestamp_us: 0,
+            payload: encode_frame(2, &auth_response).expect("auth response"),
+        };
+
+        let outcome = router.route_packet(peer, auth_packet).expect("auth");
+
+        assert!(outcome
+            .events
+            .contains(&BackendEvent::TrustedDeviceAuthenticated {
+                peer,
+                trusted_device_id: device_id,
+            }));
+        assert!(outcome.events.contains(&BackendEvent::PairingResultQueued {
+            peer,
+            accepted: true,
+        }));
+        assert!(router.sessions.is_approved(peer));
     }
 
     #[test]

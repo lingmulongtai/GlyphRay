@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 93%.
+Current overall progress estimate: 94%.
 
 ## Milestone 1
 
@@ -20,6 +20,7 @@ Current overall progress estimate: 93%.
 - [x] Add Windows pen diagnostic CLI.
 - [x] Add macOS host shell.
 - [x] Add initial docs and CI.
+- [x] Add GitHub Actions macOS SwiftPM build verification for the macOS host.
 - [x] Add visual README and Japanese README for repository onboarding.
 - [x] Add frontend-only GitHub Pages download site.
 
@@ -68,7 +69,7 @@ Current overall progress estimate: 93%.
 - [x] Add console approval/rejection flow with `PairingResult` responses.
 - [x] Add opt-in native Windows permission dialog for incoming pairing requests.
 - [x] Persist approved Windows host trusted-device records and add host console trust management commands.
-- [x] Attach Android Keystore public key material to pairing and auto-approve returning devices only when the stored public-key fingerprint matches.
+- [x] Attach Android Keystore public key material to pairing and require signed `AuthChallenge` / `AuthResponse` proof before approving returning trusted devices.
 - [x] Queue host `DisplayInfo` after accepted pairing.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
 - [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.
@@ -123,10 +124,12 @@ Current overall progress estimate: 93%.
 - [x] Add macOS permission/readiness diagnostics for Screen Recording, Accessibility, Input Monitoring, and audio.
 - [x] Add macOS VideoToolbox low-latency encoder smoke-test path.
 - [x] Add macOS ScreenCaptureKit live frame probe.
+- [x] Add macOS ScreenCaptureKit-to-VideoToolbox live encode probe.
+- [x] Add macOS encoded-frame packetizer for GlyphRay Video-channel datagrams.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.
-- [ ] Complete macOS host live capture and encode stream.
+- [ ] Complete macOS host control runtime and UDP video send loop for approved clients.
 - [ ] Add Windows/macOS audio capture and Android playback.
 - [ ] Implement relay server/client.
 - [ ] Prepare signed beta release.

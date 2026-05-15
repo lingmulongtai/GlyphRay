@@ -22,6 +22,7 @@ pub struct TrustedDevice {
     pub label: String,
     pub last_peer: String,
     pub public_key_fingerprint: Option<String>,
+    pub public_key_der: Option<Vec<u8>>,
     pub approved_unix_ms: u64,
     pub permissions: TrustedDevicePermissions,
 }
@@ -32,6 +33,7 @@ impl TrustedDevice {
         label: impl Into<String>,
         last_peer: impl Into<String>,
         public_key_fingerprint: Option<String>,
+        public_key_der: Option<Vec<u8>>,
     ) -> Result<Self, HostSettingsError> {
         Ok(Self {
             id: normalize_trusted_device_id(&id.into())?,
@@ -40,6 +42,7 @@ impl TrustedDevice {
             public_key_fingerprint: public_key_fingerprint
                 .map(|fingerprint| normalize_public_key_fingerprint(&fingerprint))
                 .transpose()?,
+            public_key_der,
             approved_unix_ms: unix_now_ms(),
             permissions: TrustedDevicePermissions::default(),
         })
@@ -227,6 +230,12 @@ fn serialize_settings(settings: &HostSettings) -> String {
             output.push_str(&format!(
                 "trusted_device.{index}.public_key_fingerprint={}\n",
                 fingerprint
+            ));
+        }
+        if let Some(public_key_der) = device.public_key_der.as_ref() {
+            output.push_str(&format!(
+                "trusted_device.{index}.public_key_der_hex={}\n",
+                hex_lower(public_key_der)
             ));
         }
         output.push_str(&format!(
@@ -440,6 +449,10 @@ fn parse_trusted_device_fields(
             .get("public_key_fingerprint")
             .map(|fingerprint| normalize_public_key_fingerprint(fingerprint))
             .transpose()?,
+        public_key_der: values
+            .get("public_key_der_hex")
+            .map(|public_key_der| decode_hex(public_key_der))
+            .transpose()?,
         approved_unix_ms: parse_required(values, "approved_unix_ms")?,
         permissions: TrustedDevicePermissions {
             allow_pen: parse_optional_bool(values, "allow_pen", true)?,
@@ -565,6 +578,45 @@ fn normalize_public_key_fingerprint(fingerprint: &str) -> Result<String, HostSet
     Ok(fingerprint)
 }
 
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn decode_hex(hex: &str) -> Result<Vec<u8>, HostSettingsError> {
+    let hex = hex.trim();
+    if hex.len() % 2 != 0 || hex.len() > 8192 {
+        return Err(HostSettingsError::Parse(
+            "public key DER hex must have an even length of 8192 characters or less".to_string(),
+        ));
+    }
+
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    let bytes = hex.as_bytes();
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_nibble(pair[0])?;
+        let low = hex_nibble(pair[1])?;
+        out.push((high << 4) | low);
+    }
+    Ok(out)
+}
+
+fn hex_nibble(byte: u8) -> Result<u8, HostSettingsError> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(HostSettingsError::Parse(
+            "public key DER hex must contain only hex characters".to_string(),
+        )),
+    }
+}
+
 fn unix_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -680,6 +732,7 @@ mod tests {
                 public_key_fingerprint: Some(
                     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
                 ),
+                public_key_der: Some(vec![0x30, 0x59, 0x30, 0x13]),
                 approved_unix_ms: 1_770_000_000_000,
                 permissions: TrustedDevicePermissions::default(),
             }],
@@ -791,6 +844,7 @@ mod tests {
             public_key_fingerprint: Some(
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             ),
+            public_key_der: Some(vec![0x30, 0x59, 0x30, 0x13]),
             approved_unix_ms: 10,
             permissions: TrustedDevicePermissions::default(),
         };

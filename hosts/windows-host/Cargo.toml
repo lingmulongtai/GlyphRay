@@ -13,6 +13,8 @@ glyphray-protocol = { path = "../../crates/protocol" }
 glyphray-security = { path = "../../crates/security" }
 glyphray-telemetry = { path = "../../crates/telemetry" }
 glyphray-transport = { path = "../../crates/transport" }
+p256.workspace = true
+rand.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
