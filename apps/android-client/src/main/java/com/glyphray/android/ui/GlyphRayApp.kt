@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.glyphray.android.network.AndroidManualHostStore
 import com.glyphray.android.input.StylusDiagnosticsController
+import com.glyphray.android.network.AndroidSessionPreferencesStore
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.network.HostDiscoveryController
 import com.glyphray.android.network.SessionControlController
@@ -78,14 +79,22 @@ enum class GlyphRayScreen(val label: String, val icon: ImageVector) {
 fun GlyphRayApp() {
     var screen by remember { mutableStateOf(GlyphRayScreen.Hosts) }
     var selectedHost by remember { mutableStateOf<DiscoveredHost?>(null) }
-    var sessionFullscreen by remember { mutableStateOf(false) }
     val context = LocalContext.current.applicationContext
     val diagnosticsController = remember { StylusDiagnosticsController() }
+    val sessionPreferencesStore = remember(context) { AndroidSessionPreferencesStore(context) }
+    val initialSessionPreferences = remember(sessionPreferencesStore) { sessionPreferencesStore.load() }
+    var sessionFullscreen by remember(initialSessionPreferences) {
+        mutableStateOf(initialSessionPreferences.inputSettings.fullscreenMode)
+    }
     val hostDiscoveryController = remember(context) {
         HostDiscoveryController(manualHostStore = AndroidManualHostStore(context))
     }
-    val sessionControlController = remember { SessionControlController() }
-
+    val sessionControlController = remember(initialSessionPreferences) {
+        SessionControlController(
+            initialVideoSettings = initialSessionPreferences.videoSettings,
+            initialInputSettings = initialSessionPreferences.inputSettings,
+        )
+    }
     DisposableEffect(hostDiscoveryController) {
         hostDiscoveryController.startContinuousScan()
         onDispose { hostDiscoveryController.close() }
@@ -159,9 +168,9 @@ fun GlyphRayApp() {
                     fullscreen = sessionFullscreen,
                     onFullscreenChange = { fullscreen ->
                         sessionFullscreen = fullscreen
-                        sessionControlController.updateInputSettings(
-                            sessionControlController.state.inputSettings.copy(fullscreenMode = fullscreen),
-                        )
+                        val settings = sessionControlController.state.inputSettings.copy(fullscreenMode = fullscreen)
+                        sessionControlController.updateInputSettings(settings)
+                        sessionPreferencesStore.saveInputSettings(settings)
                     },
                     onVideoSettings = { screen = GlyphRayScreen.Video },
                     onSpecialKey = sessionControlController::sendSpecialKey,
@@ -174,8 +183,14 @@ fun GlyphRayApp() {
                 GlyphRayScreen.Pen -> PenSettingsScreen(onDiagnostics = { screen = GlyphRayScreen.Diagnostics })
                 GlyphRayScreen.Video -> VideoSettingsScreen(
                     controlState = sessionControlController.state,
-                    onSettingsChange = sessionControlController::updateVideoSettings,
-                    onInputSettingsChange = sessionControlController::updateInputSettings,
+                    onSettingsChange = { settings ->
+                        sessionControlController.updateVideoSettings(settings)
+                        sessionPreferencesStore.saveVideoSettings(settings)
+                    },
+                    onInputSettingsChange = { settings ->
+                        sessionControlController.updateInputSettings(settings)
+                        sessionPreferencesStore.saveInputSettings(settings)
+                    },
                     onApply = sessionControlController::sendEncoderConfig,
                 )
                 GlyphRayScreen.Security -> SecuritySettingsScreen()

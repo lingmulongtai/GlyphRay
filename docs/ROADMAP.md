@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 87%.
+Current overall progress estimate: 89%.
 
 ## Milestone 1
 
@@ -36,6 +36,7 @@ Current overall progress estimate: 87%.
 - [x] Add Android display-info decode for host monitor negotiation.
 - [x] Add Android host display selector and attach selected display id to stylus/touch/mouse packets.
 - [x] Add Android video/session setting controls for resolution, refresh, bitrate, color space, codec, fullscreen, touch mode, keyboard, and special keys.
+- [x] Persist Android video/input session preferences across app restarts.
 - [x] Polish Android host list, connection readiness, session cockpit, settings, security, and diagnostics UI/UX.
 - [x] Add and persist Android manual host entries for Tailscale/overlay-network endpoints.
 - [x] Add Android video fragment reassembly and decoder feed controller.
@@ -68,6 +69,7 @@ Current overall progress estimate: 87%.
 - [x] Queue host `DisplayInfo` after accepted pairing.
 - [x] Accept client `EncoderConfig` and decode keyboard packets on the host backend.
 - [x] Implement host-side encoder override CLI and connect approved-client settings to the live capture/encode loop.
+- [x] Persist saved Windows host encoder override presets and reload them on backend startup.
 - [x] Add native Windows keyboard injection for approved clients behind an explicit smoke-test flag.
 - [x] Add native Windows mouse injection for approved clients behind an explicit smoke-test flag.
 - [x] Add Android direct-touch protocol path and Windows native touch injection smoke-test path.
@@ -99,7 +101,7 @@ Current overall progress estimate: 87%.
 - [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
 - [x] Add Windows WiX MSI build script and macOS pkgbuild script.
-- [ ] Add Windows startup-at-login and service/agent architecture plan.
+- [x] Add Windows user-logon startup CLI and service/agent architecture plan.
 - [ ] Move control/video packet transmission onto a dedicated send worker or mio/tokio event loop with explicit backpressure metrics.
 - [ ] Replace O(N) pending-session eviction with heap/indexed eviction if reused for relay-scale workloads.
 - [ ] Validate and document lock-screen/pre-login limitations for capture and input.

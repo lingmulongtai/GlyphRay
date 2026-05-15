@@ -40,7 +40,10 @@ data class SessionControlState(
         get() = displays.firstOrNull { it.primary } ?: displays.firstOrNull()
 }
 
-class SessionControlController : Closeable {
+class SessionControlController(
+    initialVideoSettings: ClientVideoSettings = ClientVideoSettings(),
+    initialInputSettings: ClientInputSettings = ClientInputSettings(),
+) : Closeable {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val receiverExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: ControlUdpClient? = null
@@ -48,7 +51,12 @@ class SessionControlController : Closeable {
     @Volatile private var receiving = false
     @Volatile private var videoStreamController: RemoteVideoStreamController? = null
 
-    var state by mutableStateOf(SessionControlState())
+    var state by mutableStateOf(
+        SessionControlState(
+            videoSettings = initialVideoSettings,
+            inputSettings = initialInputSettings,
+        ),
+    )
         private set
 
     fun connect(host: DiscoveredHost) {

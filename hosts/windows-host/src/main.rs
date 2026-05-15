@@ -12,6 +12,8 @@ use glyphray_windows_host::input::{
     KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
     StylusInputBridge, TouchInjector, TouchInputBridge,
 };
+use glyphray_windows_host::settings::HostSettingsStore;
+use glyphray_windows_host::startup::{StartupManager, StartupRegistration};
 use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
 use std::error::Error;
@@ -22,8 +24,16 @@ use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let config = HostConfig::default();
-    if std::env::args().any(|arg| arg == "serve") {
-        return run_backend(config);
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("serve") => return run_backend(config),
+        Some("startup") => return run_startup_command(args.next().as_deref()),
+        Some(other) => {
+            println!("Unknown command: {other}");
+            print_top_level_help();
+            return Ok(());
+        }
+        None => {}
     }
 
     println!("GlyphRay Windows Host");
@@ -31,11 +41,36 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Default display id: {}", config.default_display_id);
     println!("Control port: {}", config.control_port);
     println!("Discovery port: {}", config.discovery_port);
-    println!("Run `glyphray-windows-host serve` to start the backend runtime.");
+    print_top_level_help();
 
     match create_pen_injector() {
         Ok(_) => println!("Synthetic pen injector is available."),
         Err(err) => println!("Synthetic pen injector unavailable: {err}"),
+    }
+    Ok(())
+}
+
+fn print_top_level_help() {
+    println!("Run `glyphray-windows-host serve` to start the backend runtime.");
+    println!(
+        "Run `glyphray-windows-host startup status|enable|disable` to manage user-logon startup."
+    );
+}
+
+fn run_startup_command(action: Option<&str>) -> Result<(), Box<dyn Error>> {
+    match action.unwrap_or("status") {
+        "status" => print_startup_registration(StartupManager::status()?),
+        "enable" => {
+            let registration = StartupManager::enable()?;
+            println!("User-logon startup enabled.");
+            print_startup_registration(registration);
+        }
+        "disable" => {
+            let registration = StartupManager::disable()?;
+            println!("User-logon startup disabled.");
+            print_startup_registration(registration);
+        }
+        _ => println!("Usage: glyphray-windows-host startup status|enable|disable"),
     }
     Ok(())
 }
@@ -65,7 +100,19 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         mouse_bridge,
         permission_policy,
     );
-    let mut host_encoder_override: Option<EncoderConfig> = None;
+    let settings_store = HostSettingsStore::open()?;
+    let mut host_encoder_override = settings_store.load()?.encoder_override;
+    if let Some(config) = host_encoder_override.as_ref() {
+        println!(
+            "Loaded saved encoder override: {}x{} {}fps {}kbps {:?} {:?}",
+            config.width,
+            config.height,
+            config.max_fps,
+            config.target_bitrate_kbps,
+            config.codec,
+            config.color_space
+        );
+    }
     let mut video_pump = create_runtime_video_pump(&runtime, host_encoder_override.as_ref());
     let commands = spawn_console_command_reader();
     let mut last_announce = Instant::now() - Duration::from_secs(2);
@@ -121,6 +168,7 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
             &mut host_encoder_override,
             &mut video_pump,
             &mut last_video_frame,
+            &settings_store,
         )? {
             print_backend_event(&event);
         }
@@ -425,7 +473,11 @@ enum HostCommand {
     Sessions,
     EncoderStatus,
     EncoderOverride(EncoderConfig),
+    EncoderSave,
     EncoderClear,
+    StartupStatus,
+    StartupEnable,
+    StartupDisable,
     Help,
 }
 
@@ -464,7 +516,17 @@ fn parse_host_command(line: &str) -> Option<HostCommand> {
         "status" => Some(HostCommand::Status),
         "sessions" => Some(HostCommand::Sessions),
         "encoder" => parse_encoder_command(parts.collect()),
+        "startup" => parse_startup_command(parts.collect()),
         "help" => Some(HostCommand::Help),
+        _ => None,
+    }
+}
+
+fn parse_startup_command(parts: Vec<&str>) -> Option<HostCommand> {
+    match parts.as_slice() {
+        [] | ["status"] => Some(HostCommand::StartupStatus),
+        ["enable"] => Some(HostCommand::StartupEnable),
+        ["disable"] => Some(HostCommand::StartupDisable),
         _ => None,
     }
 }
@@ -472,6 +534,7 @@ fn parse_host_command(line: &str) -> Option<HostCommand> {
 fn parse_encoder_command(parts: Vec<&str>) -> Option<HostCommand> {
     match parts.as_slice() {
         [] | ["status"] => Some(HostCommand::EncoderStatus),
+        ["save"] => Some(HostCommand::EncoderSave),
         ["clear"] => Some(HostCommand::EncoderClear),
         ["override", size, fps, bitrate] => {
             let (width, height) = parse_size(size)?;
@@ -503,6 +566,7 @@ fn drain_console_commands(
     host_encoder_override: &mut Option<EncoderConfig>,
     video_pump: &mut Option<RuntimeVideoPump>,
     last_video_frame: &mut Instant,
+    settings_store: &HostSettingsStore,
 ) -> Result<Vec<glyphray_windows_host::backend::BackendEvent>, Box<dyn Error>> {
     let mut events = Vec::new();
     while let Ok(command) = commands.try_recv() {
@@ -550,8 +614,13 @@ fn drain_console_commands(
                 }
             }
             HostCommand::EncoderStatus => {
+                let saved_override = settings_store
+                    .load()
+                    .ok()
+                    .and_then(|settings| settings.encoder_override);
                 print_encoder_status(
                     host_encoder_override.as_ref(),
+                    saved_override.as_ref(),
                     runtime.latest_approved_encoder_config().as_ref(),
                     video_pump.as_ref(),
                 );
@@ -570,25 +639,87 @@ fn drain_console_commands(
                 *video_pump = create_runtime_video_pump(runtime, host_encoder_override.as_ref());
                 *last_video_frame = Instant::now();
             }
+            HostCommand::EncoderSave => {
+                let config = host_encoder_override
+                    .clone()
+                    .or_else(|| runtime.latest_approved_encoder_config());
+                let Some(config) = config else {
+                    println!(
+                        "No host override or approved client EncoderConfig is available to save."
+                    );
+                    continue;
+                };
+
+                match settings_store.save_encoder_override(config.clone()) {
+                    Ok(_) => {
+                        println!(
+                            "Saved encoder override: {}x{} {}fps {}kbps {:?} {:?}",
+                            config.width,
+                            config.height,
+                            config.max_fps,
+                            config.target_bitrate_kbps,
+                            config.codec,
+                            config.color_space
+                        );
+                        *host_encoder_override = Some(config);
+                        *video_pump =
+                            create_runtime_video_pump(runtime, host_encoder_override.as_ref());
+                        *last_video_frame = Instant::now();
+                    }
+                    Err(error) => println!("Saving encoder override failed: {error}"),
+                }
+            }
             HostCommand::EncoderClear => {
                 println!("Host encoder override cleared. Approved client EncoderConfig will be used when available.");
                 *host_encoder_override = None;
+                if let Err(error) = settings_store.clear_encoder_override() {
+                    println!("Clearing saved encoder override failed: {error}");
+                }
                 *video_pump = create_runtime_video_pump(runtime, host_encoder_override.as_ref());
                 *last_video_frame = Instant::now();
             }
+            HostCommand::StartupStatus => match StartupManager::status() {
+                Ok(registration) => print_startup_registration(registration),
+                Err(error) => println!("startup status failed: {error}"),
+            },
+            HostCommand::StartupEnable => match StartupManager::enable() {
+                Ok(registration) => {
+                    println!("User-logon startup enabled.");
+                    print_startup_registration(registration);
+                }
+                Err(error) => println!("startup enable failed: {error}"),
+            },
+            HostCommand::StartupDisable => match StartupManager::disable() {
+                Ok(registration) => {
+                    println!("User-logon startup disabled.");
+                    print_startup_registration(registration);
+                }
+                Err(error) => println!("startup disable failed: {error}"),
+            },
             HostCommand::Help => {
                 println!("Commands:");
                 println!("  status");
                 println!("  sessions");
                 println!("  encoder status");
                 println!("  encoder override <width>x<height> <fps> <kbps>");
+                println!("  encoder save");
                 println!("  encoder clear");
+                println!("  startup status");
+                println!("  startup enable");
+                println!("  startup disable");
                 println!("  approve <ip:port>");
                 println!("  reject <ip:port>");
             }
         }
     }
     Ok(events)
+}
+
+fn print_startup_registration(registration: StartupRegistration) {
+    println!("startup enabled={}", registration.enabled);
+    if let Some(command) = registration.command {
+        println!("startup command={command}");
+    }
 }
 
 fn print_backend_status(snapshot: glyphray_windows_host::backend::BackendHealthSnapshot) {
@@ -620,6 +751,7 @@ fn print_backend_status(snapshot: glyphray_windows_host::backend::BackendHealthS
 
 fn print_encoder_status(
     host_override: Option<&EncoderConfig>,
+    saved_override: Option<&EncoderConfig>,
     client_config: Option<&EncoderConfig>,
     pump: Option<&RuntimeVideoPump>,
 ) {
@@ -634,6 +766,19 @@ fn print_encoder_status(
             config.color_space
         ),
         None => println!("encoder override=none"),
+    }
+
+    match saved_override {
+        Some(config) => println!(
+            "encoder saved={}x{} {}fps {}kbps {:?} {:?}",
+            config.width,
+            config.height,
+            config.max_fps,
+            config.target_bitrate_kbps,
+            config.codec,
+            config.color_space
+        ),
+        None => println!("encoder saved=none"),
     }
 
     match client_config {
@@ -745,6 +890,30 @@ mod tests {
         assert_eq!(config.target_bitrate_kbps, 35_000);
         assert_eq!(config.codec, VideoCodec::H264);
         assert_eq!(config.color_space, ColorSpace::Rec709);
+    }
+
+    #[test]
+    fn parses_encoder_save_command() {
+        assert!(matches!(
+            parse_host_command("encoder save"),
+            Some(HostCommand::EncoderSave)
+        ));
+    }
+
+    #[test]
+    fn parses_startup_commands() {
+        assert!(matches!(
+            parse_host_command("startup status"),
+            Some(HostCommand::StartupStatus)
+        ));
+        assert!(matches!(
+            parse_host_command("startup enable"),
+            Some(HostCommand::StartupEnable)
+        ));
+        assert!(matches!(
+            parse_host_command("startup disable"),
+            Some(HostCommand::StartupDisable)
+        ));
     }
 
     #[test]

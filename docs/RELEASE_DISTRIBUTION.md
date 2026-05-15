@@ -16,7 +16,7 @@ Before beta:
 
 - Replace placeholder upgrade GUID with production identity.
 - Add code signing.
-- Add service/agent split and startup-at-login option.
+- Wire the existing `startup status|enable|disable` host commands into installer UI/tray UI, then add the service/agent split.
 - Add clear permission copy for pen, touch, mouse, keyboard, and gamepad injection.
 - Add uninstall cleanup for services, firewall rules, and trusted device state.
 

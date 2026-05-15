@@ -61,6 +61,10 @@ Pending eviction currently scans pending sessions to find the oldest entry. This
 
 `status` prints a compact local health snapshot. The most useful early fields are outbound channel depths, queue high watermark, dropped outbound packets, late input drops, and pending rate-limited packets. This is intentionally local-only console output; it does not send telemetry to external services.
 
+`encoder save` persists the active host override, or the latest approved client `EncoderConfig`, to the local host settings file. The backend reloads that override on startup. `encoder clear` clears both the active override and the saved override.
+
+`startup status`, `startup enable`, and `startup disable` manage the current user's Windows startup registration. The implementation uses the HKCU Run key and launches the host with `serve` after user logon.
+
 The video pump currently uses the existing capture/encoder abstraction and queues fragmented encoded access units to approved peers. The queueing path is real, but the default `PendingHardwareEncoder` is still a placeholder; production video still needs a concrete H.264 hardware/software encoder backend.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.

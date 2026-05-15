@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 87%**
+**全体進捗見積もり: 89%**
 
 最終更新: 2026-05-13 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 87
-  "残りの製品化作業" : 13
+  "実装済みの基盤" : 89
+  "残りの製品化作業" : 11
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -23,14 +23,14 @@ pie title 全体進捗
 | Milestone 1 基盤構築 | 完了 | 100% |
 | Milestone 2 映像・transport 基盤 | 進行中 | 92% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 88% |
-| Milestone 4 security hardening / packaging | 進行中 | 71% |
+| Milestone 4 security hardening / packaging | 進行中 | 76% |
 | Milestone 5 macOS / audio / relay | 進行中 | 42% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink     [##################--]  88%
-M4 Security + Packaging      [##############------]  71%
+M4 Security + Packaging      [###############-----]  76%
 M5 macOS + Audio + Relay     [########------------]  42%
 ```
 
@@ -141,6 +141,7 @@ sequenceDiagram
 - pairing 後に host monitor geometry を受け取る Android display-info receiver。
 - Android video settings で discovery 済み host display を選択でき、選択 display id は stylus / touch / mouse input packet に乗る。
 - resolution、refresh rate、bitrate、color space、codec、touch mode、fullscreen mode、Bluetooth keyboard / mouse capture、game controller capture、special-key overlay の Android video/session settings。
+- Android は video / input preferences を保存し、stream quality、touch mode、capture toggle、fullscreen preference が app restart 後も残る。
 - Android session fullscreen は system bar を隠す immersive mode に入り、active session 中は画面スリープを抑制する。
 - Tailscale IP / MagicDNS / direct endpoint 用の Android manual host entry。保存した endpoint は次回起動時に host list へ復元される。
 - remote session の描画面から stylus、native touch、Bluetooth mouse、keyboard、gamepad input を拾い、QoS-aware background worker で UDP 送信する Android bridge。
@@ -150,6 +151,8 @@ sequenceDiagram
 - Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
 - Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、approved-peer video fragment queueing、console-visible queue/backpressure health metrics。
 - Windows host の video pump は approved client の `EncoderConfig` で再起動でき、host console の `encoder override` command でも stream 設定を変更できる。
+- Windows host は `encoder save` で encoder override を保存し、backend startup 時に復元し、`encoder clear` で消せる。
+- Windows host は `startup status`、`startup enable`、`startup disable` で per-user startup-at-login を管理できる。
 - Windows runtime input bridge は、display enumeration ができる場合、固定の smoke-test rectangle ではなく選択 display geometry から mapper を作る。
 - Windows stylus bridge は Win32 synthetic pen injector に渡す前に pen axis を正規化し、pressure を平滑化する。
 - LAN stylus path の smoke test 用 development auto-approval mode。
@@ -186,7 +189,15 @@ Windows backend runtime:
 cargo run -p glyphray-windows-host -- serve
 ```
 
-backend 起動中は host console で `encoder status`、`encoder override 1920x1080 120 35000`、`encoder clear` を使い、stream-control smoke test ができます。
+backend 起動中は host console で `encoder status`、`encoder override 1920x1080 120 35000`、`encoder save`、`encoder clear` を使い、stream-control smoke test ができます。`encoder save` は active host override、または最新の approved client `EncoderConfig` を保存し、次回 backend startup 時に復元します。
+
+user-logon startup の管理:
+
+```powershell
+cargo run -p glyphray-windows-host -- startup status
+cargo run -p glyphray-windows-host -- startup enable
+cargo run -p glyphray-windows-host -- startup disable
+```
 
 host approval UI がまだ無い段階で LAN input path を smoke test する場合だけ、明示的に development auto-approval を有効にします。
 
@@ -238,6 +249,7 @@ macOS host はまだ Phase 2/5 の基盤です。native pen injection の主戦�
 | [docs/WINDOWS_INK_INJECTION.md](docs/WINDOWS_INK_INJECTION.md) | Windows native pen injection notes |
 | [docs/ANDROID_STYLUS_CAPTURE.md](docs/ANDROID_STYLUS_CAPTURE.md) | Android stylus capture / packetization |
 | [docs/BACKEND.md](docs/BACKEND.md) | Windows backend runtime notes |
+| [docs/WINDOWS_STARTUP_AND_SERVICE.md](docs/WINDOWS_STARTUP_AND_SERVICE.md) | startup-at-login 実装と service/agent 制約 |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | milestone checklist |
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | latency / telemetry targets |

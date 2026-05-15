@@ -12,7 +12,7 @@ This document tracks product controls that must exist on both the Android client
 | Color space | Protocol now carries `ColorSpace` and Android can request sRGB, Display P3, Rec.709, or Rec.2020 PQ. | Wire through encoder, decoder, and render surface metadata. |
 | Codec | Protocol and Android settings support H.264, H.265, and AV1 preferences. H.264 remains the first real implementation target. | Add host encoder capability negotiation and client decoder fallback. |
 | Display selection | Android receives host `DisplayInfo`, lets the user select a host display in video settings, and sends that display id with stylus, touch, and mouse input packets. Windows runtime maps input against the selected/default display geometry when available. | Add calibration profile persistence per host display and validate high-DPI/rotation behavior on hardware. |
-| Host-side controls | Host console supports `encoder status`, `encoder override <width>x<height> <fps> <kbps>`, and `encoder clear`; live pump restarts from host override or approved client config. | Add native host UI and persistent presets. |
+| Host-side controls | Host console supports `encoder status`, `encoder override <width>x<height> <fps> <kbps>`, `encoder save`, and `encoder clear`; live pump restarts from host override or approved client config. Saved host encoder overrides reload on backend startup. Android persists video/input preferences locally. | Add native host UI and richer named presets. |
 
 ## Input Controls
 
@@ -45,6 +45,6 @@ This document tracks product controls that must exist on both the Android client
 
 | Feature | Current status | Next implementation step |
 | --- | --- | --- |
-| Start at boot/login | Not implemented yet. | Add Windows installer option for user-logon startup and a background service supervisor. |
+| Start at boot/login | Windows host supports per-user startup-at-login through `startup status`, `startup enable`, and `startup disable`, backed by the HKCU Run key. | Add installer UI, tray UI control, and a background service supervisor. |
 | Connect before Windows login | Not implemented. Windows capture/input APIs are constrained by interactive desktop, secure desktop, and user session boundaries. | Split into service broker plus per-user capture agent, document what is impossible on the lock screen, and require explicit security review. |
 | Run without active desktop session | Not implemented. | Investigate service + agent model, but do not promise creative-app control before user login until native API validation is complete. |

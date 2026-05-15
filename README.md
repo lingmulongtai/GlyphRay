@@ -8,14 +8,14 @@ The product goal is Parsec-like speed and simplicity with an original brand, UI,
 
 ## Current Progress
 
-**Overall progress estimate: 87%**
+**Overall progress estimate: 89%**
 
 Last updated: 2026-05-13 JST
 
 ```mermaid
 pie title Overall Completion
-  "Implemented foundation" : 87
-  "Remaining product work" : 13
+  "Implemented foundation" : 89
+  "Remaining product work" : 11
 ```
 
 | Area | Status | Progress |
@@ -23,14 +23,14 @@ pie title Overall Completion
 | Milestone 1 foundation | Complete | 100% |
 | Milestone 2 video and transport foundation | In progress | 92% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 88% |
-| Milestone 4 hardening and packaging | In progress | 71% |
+| Milestone 4 hardening and packaging | In progress | 76% |
 | Milestone 5 macOS, audio, relay readiness | In progress | 42% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink      [##################--]  88%
-M4 Security + Packaging       [##############------]  71%
+M4 Security + Packaging       [###############-----]  76%
 M5 macOS + Audio + Relay      [########------------]  42%
 ```
 
@@ -141,6 +141,7 @@ sequenceDiagram
 - Android display-info receiver for host monitor geometry after pairing.
 - Android video settings can select a discovered host display, and the selected display id is sent with stylus, touch, and mouse input packets.
 - Android video/session settings for resolution, refresh rate, bitrate, color space, codec, touch mode, fullscreen mode, Bluetooth keyboard/mouse capture, game controller capture, and special-key overlay.
+- Android persists video and input preferences so stream quality, touch mode, capture toggles, and fullscreen preference survive app restarts.
 - Android session fullscreen now hides system bars with immersive mode and keeps the screen awake during active sessions.
 - Android manual host entry for Tailscale IP / MagicDNS / direct endpoint use, with saved endpoints restored into the host list.
 - Android remote-session input bridge that sends stylus, native touch, Bluetooth mouse, keyboard, and gamepad packets over UDP on QoS-aware background workers.
@@ -150,6 +151,8 @@ sequenceDiagram
 - Windows backend runtime with LAN discovery, UDP server routing, session registry, pairing request handling, console approval/rejection, `PairingResult`, display-info responses, encoder config intake, opt-in keyboard/mouse/touch injection, gamepad decode, permission gating, and latency pong replies.
 - Windows backend hardening for pending-session caps, per-IP pending attempt rate limiting, late input packet dropping, channel-aware nonblocking QoS outbound queues, approved-peer video fragment queueing, and console-visible queue/backpressure health metrics.
 - Windows host video pump can restart from approved client `EncoderConfig` and has a console `encoder override` command for host-side stream control.
+- Windows host can persist an encoder override with `encoder save`, reload it on backend startup, and clear it with `encoder clear`.
+- Windows host supports per-user startup-at-login management with `startup status`, `startup enable`, and `startup disable`.
 - Windows runtime input bridges now derive their mapper from the selected display geometry instead of a fixed smoke-test rectangle when the display can be enumerated.
 - Windows stylus bridge now normalizes pen axes and smooths pressure before calling the native Win32 synthetic pen injector.
 - Windows development auto-approval mode for local LAN stylus-path smoke testing.
@@ -186,7 +189,15 @@ Run the Windows backend runtime:
 cargo run -p glyphray-windows-host -- serve
 ```
 
-While the backend is running, `encoder status`, `encoder override 1920x1080 120 35000`, and `encoder clear` are available in the host console for stream-control smoke tests.
+While the backend is running, `encoder status`, `encoder override 1920x1080 120 35000`, `encoder save`, and `encoder clear` are available in the host console for stream-control smoke tests. `encoder save` persists the active host override, or the latest approved client `EncoderConfig`, and reloads it on the next backend start.
+
+Manage user-logon startup:
+
+```powershell
+cargo run -p glyphray-windows-host -- startup status
+cargo run -p glyphray-windows-host -- startup enable
+cargo run -p glyphray-windows-host -- startup disable
+```
 
 For local input-path smoke testing before the host approval UI exists:
 
@@ -238,6 +249,7 @@ The macOS host is still a Phase 2/5 foundation. Windows remains the primary plat
 | [docs/WINDOWS_INK_INJECTION.md](docs/WINDOWS_INK_INJECTION.md) | Windows native pen injection notes |
 | [docs/ANDROID_STYLUS_CAPTURE.md](docs/ANDROID_STYLUS_CAPTURE.md) | Android stylus capture and packetization |
 | [docs/BACKEND.md](docs/BACKEND.md) | Windows backend runtime notes |
+| [docs/WINDOWS_STARTUP_AND_SERVICE.md](docs/WINDOWS_STARTUP_AND_SERVICE.md) | Startup-at-login implementation and service/agent constraints |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Milestone checklist |
 | [docs/TEST_PLAN.md](docs/TEST_PLAN.md) | Validation plan |
 | [docs/PERFORMANCE_TARGETS.md](docs/PERFORMANCE_TARGETS.md) | Latency and telemetry targets |

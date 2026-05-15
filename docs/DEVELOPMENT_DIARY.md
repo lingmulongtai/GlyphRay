@@ -1,5 +1,23 @@
 # GlyphRay Development Diary
 
+## 2026-05-15 JST - Persistent Host Encoder Presets
+
+今日は Windows host 側の stream control を、console-only の一時設定から保存できる設定へ進めた。`encoder override <width>x<height> <fps> <kbps>` で作った host override、または approved client から届いた最新 `EncoderConfig` を `encoder save` で保存できる。backend startup 時には保存済み override を読み込み、`encoder clear` は active override と saved override の両方を消す。
+
+保存形式は `LOCALAPPDATA/GlyphRay/host-settings.conf` の小さな key=value file にした。まだ named preset UI ではないけれど、実機で何度も 120fps / 高bitrate / 指定display の検証をするとき、毎回 console に同じ設定を打つ必要がなくなる。unit test では encode/decode、store persist、clear を検証した。
+
+この時点の進捗見積もり: 89%。
+
+## 2026-05-15 JST - Startup And Saved Session Preferences
+
+今日は beta に近づけるための「毎回やり直さなくていい」部分を進めた。Android は video / input preferences を SharedPreferences に保存するようにし、resolution、codec、color space、FPS、bitrate、touch mode、Bluetooth keyboard / mouse / gamepad toggle、fullscreen preference が app restart 後も残るようになった。接続テストのたびに同じ設定を入れ直す小さな摩耗を減らす狙い。
+
+Windows host には user-logon startup の管理を追加した。`glyphray-windows-host startup status|enable|disable` で HKCU Run key を読み書きし、live host console からも `startup status` / `startup enable` / `startup disable` を実行できる。pre-login 接続はまだ約束しないまま、user logon 後の最短起動を実装で一歩進めた。
+
+あわせて `docs/WINDOWS_STARTUP_AND_SERVICE.md` を追加し、今できる user-logon startup と、今後必要な service broker + per-user agent 分離、lock screen / secure desktop の制約を明文化した。検証として Rust workspace tests、Android unit tests、Android debug build を通した。
+
+この時点の進捗見積もり: 88%。
+
 ## 2026-05-13 JST - Persistence, Touch Modes, Display Mapping, DPAPI
 
 今日は「100%に限りなく近づける」方向で、見た目よりも実機運用で効く土台を進めた。Android の manual host entry は、その場限りではなく SharedPreferences に保存され、次回起動時に host list へ復元されるようになった。Tailscale IP や MagicDNS name でつなぐ検証が、毎回打ち直しではなくなる。
