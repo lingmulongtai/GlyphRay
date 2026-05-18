@@ -1,5 +1,21 @@
 # GlyphRay Development Diary
 
+## 2026-05-18 JST - macOS Signed Trusted Reconnect
+
+今日は macOS host の trusted client persistence を、単にKeychainへ保存するだけの状態から一段進めた。Android の Keystore public key DER から SHA-256 fingerprint と `trusted-key-...` id を作り、初回pairing時にKeychainへ保存する。次に同じAndroidがpairingしてきた場合、macOS host は即承認せず `AuthChallenge` を返し、Android の `SHA256withECDSA` 署名付き `AuthResponse` を CryptoKit で検証してから `PairingResult accepted=true` を返す流れにした。
+
+SwiftUI 側にも pending auth challenge の数と、trusted client が public key を持っているかを見えるようにした。これで Windows 版に入っている「戻ってきた端末を公開鍵で確認してから承認する」思想が、macOS の軽量 control runtime にも入った。まだ macOS CI と実機Androidでの検証、encrypted session transport、reconnect、backpressure ownership は残るが、macOS host はただのprobeからかなり実セッションらしくなった。
+
+この時点の進捗見積もり: 98%。
+
+## 2026-05-18 JST - macOS Trusted Client Persistence
+
+今日は macOS host の control runtime に、Keychain-backed な trusted client list を足した。Android から `PairingRequest` が来て `PairingResult` を返したあと、その client id、device name、endpoint、public-key fingerprint を `MacTrustedClientStore` 経由で Keychain に保存する。host 起動時には保存済み client を復元し、最新 endpoint を video target に戻せるようにした。
+
+SwiftUI には `Clear Trust` も追加した。まだこれは「本番の信頼」ではなく、ローカル再接続を楽にするための永続化で、署名付き challenge/response と encrypted transport はこれから。ただ、毎回pairingして初期状態に戻るだけのprobeからは一歩抜け、macOS host が client state を持つようになった。
+
+この時点の進捗見積もり: 98%。
+
 ## 2026-05-18 JST - macOS Lightweight Control Pairing Runtime
 
 今日は macOS host を「手入力でUDP送信するだけ」から一歩進め、Android client からの manual host 接続を受けられる軽量 control runtime を追加した。`MacControlRuntime` は `44999/UDP` で `GLYT` Control datagram と `GLYR` protocol frame を読み、`PairingRequest` を受けると `PairingResult` を返す。さらに `LatencyPing` への `LatencyPong` と、Android から送られる `EncoderConfig` の記録にも対応した。

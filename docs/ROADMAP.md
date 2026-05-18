@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 97%.
+Current overall progress estimate: 98%.
 
 ## Milestone 1
 
@@ -130,10 +130,12 @@ Current overall progress estimate: 97%.
 - [x] Add macOS continuous UDP video stream start/stop path for manual receiver loopback.
 - [x] Add macOS lightweight UDP control runtime for Android manual-host `PairingRequest`, `PairingResult`, latency pong, and client video preference intake.
 - [x] Add macOS LAN discovery advertiser for Android host-list visibility on local networks.
+- [x] Persist macOS approved client records in Keychain and restore them on host startup.
+- [x] Add macOS signed returning-client `AuthChallenge` / `AuthResponse` verification using Android Keystore public-key DER and SHA-256 trusted ids.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.
-- [ ] Harden the macOS lightweight control/discovery runtime with trusted-device identity, reconnect, and backpressure-aware stream ownership.
+- [ ] Harden the macOS lightweight control/discovery runtime with macOS CI/real-device validation, encrypted transport, reconnect, and backpressure-aware stream ownership.
 - [ ] Add Windows/macOS audio capture and Android playback.
 - [ ] Implement relay server/client.
 - [ ] Prepare signed beta release.

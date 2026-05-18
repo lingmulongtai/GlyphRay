@@ -7,7 +7,7 @@ Before beta:
 - Complete Android LAN receive loop into `RemoteVideoStreamController`.
 - Validate native pen injection in Krita, OneNote, Clip Studio Paint, Photoshop, and Blender Grease Pencil where possible.
 - Validate Windows DPAPI-backed secret store migration, corrupted-store recovery, and backup/restore behavior.
-- Wire macOS Keychain storage into device identity and trusted-host persistence.
+- Validate macOS Keychain trusted-client persistence, signed Android `AuthChallenge` / `AuthResponse`, corrupted-store recovery, and replay/expiry failures.
 - Complete macOS first-run permission onboarding.
 - Add installer signing and update strategy.
 - Add crash-safe logging that redacts keyboard and secret material.

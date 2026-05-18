@@ -65,9 +65,11 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 
 The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams. The VideoToolbox H.264 path converts length-prefixed NAL units into Annex B and prepends SPS/PPS on keyframes so Android decoder integration has the expected stream shape. `MacUdpDatagramSender.swift` can send generated datagrams to a manual UDP target for smoke testing, and `MacUdpVideoPublisher.swift` keeps a continuous Video-channel stream running for manual receiver loopback before the approved-client runtime lands.
 
-`MacControlRuntime.swift` also understands the shared `GLYT` Control channel and `GLYR` protocol frame headers for the initial macOS host path. It accepts Android `PairingRequest`, sends `PairingResult`, responds to `LatencyPing`, and records `EncoderConfig`. This implementation intentionally supports only the messages needed for manual Android-to-macOS loopback; trusted-device proof and encrypted session transport still need to be added before production use.
+`MacControlRuntime.swift` also understands the shared `GLYT` Control channel and `GLYR` protocol frame headers for the initial macOS host path. It accepts Android `PairingRequest`, sends `PairingResult`, responds to `LatencyPing`, records `EncoderConfig`, and can issue signed trusted-device `AuthChallenge` messages for returning Android clients. This implementation still needs encrypted session transport and reconnect/backpressure ownership before production use.
 
 `MacLanDiscoveryAdvertiser.swift` emits `GLYD` discovery advertisements using the same host advertisement shape as the Rust transport crate. It marks H.264 support and pairing-required mode, but not Windows Ink support because native Windows Ink-style pen injection remains Windows-specific.
+
+`MacTrustedClientStore.swift` persists approved macOS client metadata through Keychain so the host can restore the most recent Android client endpoint on launch. Stored records include endpoint metadata, SHA-256 public-key fingerprint, and public-key DER when Android provides Keystore identity material. Returning clients with a matching fingerprint are challenged and must return a valid ECDSA `AuthResponse` before approval.
 
 ## Message Families
 
@@ -82,7 +84,7 @@ The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `
 
 ## Trusted Device Authentication
 
-After a manual approval, the Windows host stores the Android Keystore public key DER and its SHA-256 fingerprint in the trusted-device record. On a later pairing request with the same fingerprint, the host sends `AuthChallenge` instead of approving immediately.
+After a manual approval, the Windows host and macOS host store the Android Keystore public key DER and its SHA-256 fingerprint in trusted-device state. On a later pairing request with the same fingerprint, the host sends `AuthChallenge` instead of approving immediately.
 
 The Android client signs this stable payload with `SHA256withECDSA` over its Keystore EC P-256 private key:
 

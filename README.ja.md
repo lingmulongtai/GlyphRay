@@ -8,14 +8,14 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**全体進捗見積もり: 97%**
+**全体進捗見積もり: 98%**
 
 最終更新: 2026-05-18 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済みの基盤" : 97
-  "残りの製品化作業" : 3
+  "実装済みの基盤" : 98
+  "残りの製品化作業" : 2
 ```
 
 | 領域 | 状態 | 進捗 |
@@ -24,14 +24,14 @@ pie title 全体進捗
 | Milestone 2 映像・transport 基盤 | 進行中 | 92% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 90% |
 | Milestone 4 security hardening / packaging | 進行中 | 84% |
-| Milestone 5 macOS / audio / relay | 進行中 | 72% |
+| Milestone 5 macOS / audio / relay | 進行中 | 82% |
 
 ```text
 M1 基盤構築                  [####################] 100%
 M2 映像 + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink     [##################--]  90%
 M4 Security + Packaging      [#################---]  84%
-M5 macOS + Audio + Relay     [##############------]  72%
+M5 macOS + Audio + Relay     [################----]  82%
 ```
 
 開発日記: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -62,7 +62,7 @@ flowchart TB
 | --- | --- | --- |
 | `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、Android Keystore public-key pairing identity、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
 | `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、approved-peer video fragment queueing、health/status metrics、pending peer hardening、native permission dialog、signed trusted-device challenge/response、GDI capture fallback、encoder abstraction、Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、UDP control pairing runtime、LAN discovery advertiser、ScreenCaptureKit display enumeration、live capture probe、live capture-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay video packetizer、manual UDP send probe、continuous UDP video stream start/stop path、permission readiness UI、Keychain smoke test |
+| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、UDP control pairing runtime、Keychain trusted-client persistence、signed Android trusted-device challenge/response path、LAN discovery advertiser、ScreenCaptureKit display enumeration、live capture probe、live capture-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay video packetizer、manual UDP send probe、continuous UDP video stream start/stop path、permission readiness UI |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
 | `crates/transport` | realtime packet layer | UDP `GLYT`、LAN discovery `GLYD`、video fragmentation、reusable UDP buffers、secure datagram、reconnect、bitrate / keyframe adaptation logic |
@@ -163,7 +163,7 @@ sequenceDiagram
 - Windows monitor enumeration、GDI capture fallback、encoder abstraction、streaming pipeline の形。
 - ChaCha20-Poly1305 session cipher、replay guard、secure datagram codec、reconnect、adaptive bitrate decision、packet loss 時の keyframe recovery signaling 基盤。
 - Windows `PlatformSecretStore` は Windows 上で DPAPI 保護の per-user secret file を使う。non-Windows build では in-memory fallback を使う。
-- macOS SwiftUI shell、UDP control pairing runtime、LAN discovery advertiser、ScreenCaptureKit display diagnostics、live capture frame probe、ScreenCaptureKit-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay Video-channel packetizer、manual UDP send probe、continuous UDP video stream start/stop path、permission readiness checks、CGEvent mouse / keyboard 基盤、Keychain secret-store smoke test、audio permission plumbing。
+- macOS SwiftUI shell、UDP control pairing runtime、Keychain-backed trusted-client persistence、SHA-256 Android public-key trusted id、returning Android client 向け signed `AuthChallenge` / `AuthResponse` 検証、LAN discovery advertiser、ScreenCaptureKit display diagnostics、live capture frame probe、ScreenCaptureKit-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay Video-channel packetizer、manual UDP send probe、continuous UDP video stream start/stop path、permission readiness checks、CGEvent mouse / keyboard 基盤、Keychain secret-store smoke test、audio permission plumbing。
 - Rust tests、Android unit tests、Android debug build、`macos-14` 上の macOS SwiftPM host build 用 GitHub Actions CI。
 - GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。
 
@@ -295,7 +295,7 @@ Start-Process .\website\index.html
 - Video fragment は approved client へ Video channel で queue できるようになりましたが、実用的な desktop video には concrete H.264 hardware/software encoder backend がまだ必要です。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。
 - permission dialog と trusted-device commands は最小の host-console 機能で、tray / settings UI ではまだありません。`GLYPHRAY_DEV_AUTO_APPROVE` は local smoke test 専用です。
-- macOS live capture は UDP control pairing listener、LAN discovery advertisement、ScreenCaptureKit frame capture、VideoToolbox encode、GlyphRay Video-channel packetizer、manual UDP send probe、continuous UDP video stream start/stop path まで進みました。通常セッション経路にするには trusted-device identity、reconnect、backpressure ownership の hardening がまだ必要です。
+- macOS live capture は UDP control pairing listener、Keychain trusted-client persistence、signed returning-client challenge/response、LAN discovery advertisement、ScreenCaptureKit frame capture、VideoToolbox encode、GlyphRay Video-channel packetizer、manual UDP send probe、continuous UDP video stream start/stop path まで進みました。通常セッション経路にするには macOS CI / 実機検証、encrypted session transport、reconnect、backpressure ownership の hardening がまだ必要です。
 - `GLYPHRAY_ENABLE_PEN_INJECTION` は display negotiation / calibration が完全接続されるまで、一時的な 1920x1080 stretch mapping を使います。
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION`、`GLYPHRAY_ENABLE_MOUSE_INJECTION`、`GLYPHRAY_ENABLE_KEYBOARD_INJECTION` は per-device input permission が host UI に出るまで明示的な smoke-test flag です。
 - gamepad packet は Windows で decode できますが、仮想 controller 注入には ViGEm / virtual HID backend がまだ必要です。
@@ -315,7 +315,7 @@ flowchart LR
 直近の開発フォーカス:
 
 - native permission dialog と trusted-device commands を tray / settings UI に載せる。
-- lightweight macOS pairing / discovery runtime を hardened trusted-device identity、reconnect、backpressure-aware stream ownership に置き換える。
+- lightweight macOS pairing / discovery runtime を encrypted transport、reconnect、backpressure-aware stream ownership で固める。
 - Android stylus UDP packet を Windows native pen bridge まで通して LAN smoke test する。
 - fallback capture を Windows Graphics Capture または Desktop Duplication に置き換える。
 - low-latency H.264 encoder backend を実装する。

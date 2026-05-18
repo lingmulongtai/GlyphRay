@@ -25,6 +25,8 @@ Current code includes:
 
 - SwiftUI shell with local readiness diagnostics.
 - Lightweight UDP control runtime on the GlyphRay control port. It accepts Android manual-host `PairingRequest` messages, returns `PairingResult`, records the approved client endpoint, replies to latency pings, and records client video preferences.
+- Keychain-backed trusted-client persistence for approved macOS clients. The host restores saved clients on launch and includes a UI clear action for local smoke testing.
+- Signed returning-client authentication. The first accepted Android client stores its Keystore public-key DER and SHA-256 trusted id; later matching pairing requests receive `AuthChallenge`, and the host verifies the Android ECDSA `AuthResponse` before sending an accepted `PairingResult`.
 - LAN discovery advertiser that sends `GLYD` host advertisements for Android host-list visibility on local networks.
 - ScreenCaptureKit display listing with display geometry labels.
 - ScreenCaptureKit live capture probe that opens an `SCStream`, counts screen frames for a short run, then stops.
@@ -40,7 +42,7 @@ Current code includes:
 - CGEvent mouse, click, and keyboard posting foundation.
 - Keychain-backed secret store boundary with UI smoke test.
 
-Approved-client live streaming is partially wired. The control runtime can learn the Android client endpoint from a pairing request and the UI automatically copies that endpoint into the video target fields. Starting Control also starts a `GLYD` discovery advertiser so Android can discover the macOS host on networks that allow broadcast. The UDP send probe and continuous stream path verify that an `SCStream` can produce frames, those sample buffers can be passed into `VideoToolboxEncoder`, encoded access units can be packetized into GlyphRay Video-channel datagrams, and those datagrams can be sent over UDP. The next macOS-specific step is to harden this with trusted-device identity, reconnect, and explicit backpressure behavior.
+Approved-client live streaming is partially wired. The control runtime can learn the Android client endpoint from a pairing request, persists approved client records in Keychain, and the UI automatically copies the newest endpoint into the video target fields. Starting Control also starts a `GLYD` discovery advertiser so Android can discover the macOS host on networks that allow broadcast. The UDP send probe and continuous stream path verify that an `SCStream` can produce frames, those sample buffers can be passed into `VideoToolboxEncoder`, encoded access units can be packetized into GlyphRay Video-channel datagrams, and those datagrams can be sent over UDP. The next macOS-specific step is to validate the signed trusted-device path on macOS CI and real Android hardware, then harden it with encrypted transport, reconnect, and explicit backpressure behavior.
 
 Manual loopback flow:
 
@@ -49,3 +51,5 @@ Manual loopback flow:
 3. Connect and send pairing from Android.
 4. Confirm macOS lists the approved client and copies its endpoint into the UDP target fields.
 5. Press `Start UDP Stream` after Screen Recording permission is granted.
+
+The current trusted-client persistence stores local endpoint, public-key fingerprint, and public-key DER metadata. Returning clients now have a signed challenge/response path, but it still needs macOS CI, real-device replay/expiry testing, and encrypted session transport before production trust semantics.

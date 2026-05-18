@@ -51,6 +51,8 @@ final class HostStatusModel: ObservableObject {
                 self?.applyDiscoverySnapshot(snapshot)
             }
         }
+        applyControlSnapshot(controlRuntime.snapshot())
+        applyDiscoverySnapshot(discoveryAdvertiser.snapshot())
         refreshReadiness()
     }
 
@@ -189,6 +191,10 @@ final class HostStatusModel: ObservableObject {
         discoveryAdvertiser.stop()
     }
 
+    func clearTrustedClients() {
+        controlRuntime.clearTrustedClients()
+    }
+
     func stopUdpStream() {
         liveCaptureStatus = "Stopping UDP video stream..."
         Task {
@@ -217,7 +223,7 @@ final class HostStatusModel: ObservableObject {
 
     private func applyControlSnapshot(_ snapshot: MacControlRuntimeSnapshot) {
         approvedClients = snapshot.acceptedClients
-        controlStatus = "\(snapshot.lastEvent) · requests \(snapshot.pairingRequestsReceived) · clients \(snapshot.acceptedClients.count)"
+        controlStatus = "\(snapshot.lastEvent) · requests \(snapshot.pairingRequestsReceived) · clients \(snapshot.acceptedClients.count) · auth \(snapshot.pendingAuthChallenges)"
         if let target = snapshot.lastApprovedTarget {
             udpTargetHost = target.host
             udpTargetPort = "\(target.port)"
@@ -297,6 +303,9 @@ struct ContentView: View {
                     Button("Stop Control") {
                         model.stopControlRuntime()
                     }
+                    Button("Clear Trust") {
+                        model.clearTrustedClients()
+                    }
                     Button("UDP Send Probe") {
                         model.startUdpSendProbe()
                     }
@@ -322,7 +331,7 @@ struct ContentView: View {
             if !model.approvedClients.isEmpty {
                 Divider()
                 ForEach(model.approvedClients) { client in
-                    Text("\(client.deviceName) · \(client.target.host):\(client.target.port) · \(client.id)")
+                    Text("\(client.deviceName) · \(client.target.host):\(client.target.port) · \(client.id) · key \(client.publicKeyStatusLabel)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

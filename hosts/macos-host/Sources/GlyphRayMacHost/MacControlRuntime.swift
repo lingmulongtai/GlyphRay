@@ -5,16 +5,22 @@ import Network
 #endif
 
 private let macControlDefaultPort: UInt16 = 44_999
+private let macTrustedAuthChallengeTTLMS: UInt64 = 30_000
 
-struct MacPairingClient: Identifiable, Equatable {
+struct MacPairingClient: Identifiable, Equatable, Codable {
     let id: String
     let deviceName: String
     let target: MacUdpSendTarget
     let publicKeyFingerprint: String?
+    let publicKeyDER: Data?
     let pairedAtUnixMs: UInt64
+
+    var publicKeyStatusLabel: String {
+        publicKeyFingerprint == nil ? "none" : "sha256"
+    }
 }
 
-struct MacClientVideoPreference: Equatable {
+struct MacClientVideoPreference: Equatable, Codable {
     let displayID: UInt32
     let codec: UInt32
     let colorSpace: UInt32
@@ -33,24 +39,51 @@ struct MacControlRuntimeSnapshot: Equatable {
     let acceptedClients: [MacPairingClient]
     let lastApprovedTarget: MacUdpSendTarget?
     let lastVideoPreference: MacClientVideoPreference?
+    let pendingAuthChallenges: Int
     let lastEvent: String
+}
+
+private struct MacPendingAuthChallenge {
+    let challengeID: UInt64
+    let nonce: Data
+    let issuedAtUnixMs: UInt64
+    let expectedDeviceID: String
+    let publicKeyDER: Data
+    let deviceName: String
 }
 
 final class MacControlRuntime {
     var onSnapshot: ((MacControlRuntimeSnapshot) -> Void)?
 
+    private let trustedClientStore: MacTrustedClientStore
     private let queue = DispatchQueue(label: "com.glyphray.mac.control-runtime")
     private var bindPort: UInt16 = macControlDefaultPort
     private var pairingRequestsReceived: UInt64 = 0
     private var acceptedClients: [MacPairingClient] = []
     private var lastApprovedTarget: MacUdpSendTarget?
     private var lastVideoPreference: MacClientVideoPreference?
+    private var pendingAuthChallenges: [String: MacPendingAuthChallenge] = [:]
     private var lastEvent = "Control runtime idle"
 
     #if canImport(Network)
     private var listener: NWListener?
     private var connections: [NWConnection] = []
     #endif
+
+    init(trustedClientStore: MacTrustedClientStore = MacTrustedClientStore()) {
+        self.trustedClientStore = trustedClientStore
+        do {
+            acceptedClients = try trustedClientStore.load()
+            lastApprovedTarget = acceptedClients.first?.target
+            if acceptedClients.isEmpty {
+                lastEvent = "Control runtime idle"
+            } else {
+                lastEvent = "Loaded \(acceptedClients.count) trusted macOS client(s)"
+            }
+        } catch {
+            lastEvent = "Trusted client load failed: \(error)"
+        }
+    }
 
     func start(port: UInt16 = macControlDefaultPort) throws {
         #if canImport(Network)
@@ -101,6 +134,21 @@ final class MacControlRuntime {
     func snapshot() -> MacControlRuntimeSnapshot {
         queue.sync {
             makeSnapshot()
+        }
+    }
+
+    func clearTrustedClients() {
+        queue.async {
+            do {
+                try self.trustedClientStore.clear()
+                self.acceptedClients.removeAll()
+                self.pendingAuthChallenges.removeAll()
+                self.lastApprovedTarget = nil
+                self.lastEvent = "Trusted macOS clients cleared"
+            } catch {
+                self.lastEvent = "Trusted client clear failed: \(error)"
+            }
+            self.publishSnapshot()
         }
     }
 
@@ -163,6 +211,8 @@ final class MacControlRuntime {
         }
 
         switch frame.messageKind {
+        case .authResponse:
+            handleAuthResponse(frame: frame, connection: connection)
         case .pairingRequest:
             handlePairingRequest(frame: frame, connection: connection)
         case .encoderConfig:
@@ -190,38 +240,221 @@ final class MacControlRuntime {
         }
 
         pairingRequestsReceived += 1
-        let fingerprint = request.oneTimePublicKey.isEmpty ? nil : shortFingerprint(for: request.oneTimePublicKey)
-        let trustedID = fingerprint.map { "mac-\($0)" } ?? "mac-\(target.host)-\(target.port)"
+        let publicKeyDER = request.oneTimePublicKey.isEmpty ? nil : request.oneTimePublicKey
+        let fingerprint = publicKeyDER.map(MacTrustedIdentity.publicKeyFingerprint)
+        let trustedID = publicKeyDER
+            .map(MacTrustedIdentity.trustedDeviceID(forPublicKeyDER:))
+            ?? "trusted-\(target.host)-\(target.port)"
+
+        if publicKeyDER != nil,
+           let existing = acceptedClients.first(where: {
+               $0.publicKeyFingerprint == fingerprint && $0.publicKeyDER != nil
+           }),
+           let storedPublicKeyDER = existing.publicKeyDER {
+            queueTrustedAuthChallenge(
+                expectedDeviceID: existing.id,
+                publicKeyDER: storedPublicKeyDER,
+                deviceName: request.deviceName,
+                target: target,
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            return
+        }
+
         let client = MacPairingClient(
             id: trustedID,
             deviceName: request.deviceName,
             target: target,
             publicKeyFingerprint: fingerprint,
+            publicKeyDER: publicKeyDER,
             pairedAtUnixMs: currentUnixMilliseconds()
         )
 
+        acceptTrustedClient(
+            client,
+            successEvent: "Accepted \(request.deviceName) at \(target.host):\(target.port)"
+        )
+        sendPairingResult(
+            accepted: true,
+            trustedDeviceID: trustedID,
+            reason: nil,
+            frameSequence: frame.sequence,
+            connection: connection
+        )
+        publishSnapshot()
+    }
+
+    private func handleAuthResponse(frame: MacProtocolFrame, connection: NWConnection) {
+        guard
+            let response = try? MacAuthResponse.decode(frame.payload),
+            let target = MacUdpSendTarget(endpoint: connection.endpoint)
+        else {
+            lastEvent = "Ignored malformed auth response"
+            publishSnapshot()
+            return
+        }
+
+        let challengeKey = target.storageKey
+        guard let pending = pendingAuthChallenges.removeValue(forKey: challengeKey) else {
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "auth response arrived without a pending challenge",
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            lastEvent = "Rejected auth response without pending challenge"
+            publishSnapshot()
+            return
+        }
+
+        let reject: (String) -> Void = { reason in
+            self.sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: reason,
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            self.lastEvent = "Trusted auth rejected: \(reason)"
+            self.publishSnapshot()
+        }
+
+        guard response.challengeID == pending.challengeID else {
+            reject("auth response challenge id did not match")
+            return
+        }
+        guard response.deviceID == pending.expectedDeviceID else {
+            reject("auth response device id did not match")
+            return
+        }
+        let nowMs = currentUnixMilliseconds()
+        let challengeAgeMs = nowMs >= pending.issuedAtUnixMs ? nowMs - pending.issuedAtUnixMs : 0
+        guard challengeAgeMs <= macTrustedAuthChallengeTTLMS else {
+            reject("auth challenge expired")
+            return
+        }
+
+        do {
+            try MacTrustedIdentity.verifyTrustedSignature(
+                publicKeyDER: pending.publicKeyDER,
+                trustedDeviceID: pending.expectedDeviceID,
+                challengeID: pending.challengeID,
+                nonce: pending.nonce,
+                signatureDER: response.signature
+            )
+        } catch {
+            reject("\(error)")
+            return
+        }
+
+        let client = MacPairingClient(
+            id: pending.expectedDeviceID,
+            deviceName: pending.deviceName,
+            target: target,
+            publicKeyFingerprint: MacTrustedIdentity.publicKeyFingerprint(pending.publicKeyDER),
+            publicKeyDER: pending.publicKeyDER,
+            pairedAtUnixMs: currentUnixMilliseconds()
+        )
+        acceptTrustedClient(
+            client,
+            successEvent: "Trusted client authenticated: \(pending.deviceName)"
+        )
+        sendPairingResult(
+            accepted: true,
+            trustedDeviceID: pending.expectedDeviceID,
+            reason: nil,
+            frameSequence: frame.sequence,
+            connection: connection
+        )
+        publishSnapshot()
+    }
+
+    private func queueTrustedAuthChallenge(
+        expectedDeviceID: String,
+        publicKeyDER: Data,
+        deviceName: String,
+        target: MacUdpSendTarget,
+        frameSequence: UInt64,
+        connection: NWConnection
+    ) {
+        do {
+            let challenge = MacPendingAuthChallenge(
+                challengeID: try MacTrustedIdentity.makeChallengeID(),
+                nonce: try MacTrustedIdentity.makeChallengeNonce(),
+                issuedAtUnixMs: currentUnixMilliseconds(),
+                expectedDeviceID: expectedDeviceID,
+                publicKeyDER: publicKeyDER,
+                deviceName: deviceName
+            )
+            pendingAuthChallenges[target.storageKey] = challenge
+            let responseFrame = MacProtocolFrame.encode(
+                sequence: frameSequence,
+                messageKind: .authChallenge,
+                payload: MacAuthChallenge.encode(challenge)
+            )
+            let responseDatagram = MacTransportDatagram.encode(
+                channel: .control,
+                messageKind: .authChallenge,
+                sequence: frameSequence,
+                timestampUs: monotonicMicroseconds(),
+                payload: responseFrame
+            )
+            connection.send(content: responseDatagram, completion: .contentProcessed { _ in })
+            lastEvent = "Trusted client matched; auth challenge sent to \(deviceName)"
+        } catch {
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "\(error)",
+                frameSequence: frameSequence,
+                connection: connection
+            )
+            lastEvent = "Trusted auth challenge failed: \(error)"
+        }
+        publishSnapshot()
+    }
+
+    private func acceptTrustedClient(_ client: MacPairingClient, successEvent: String) {
         acceptedClients.removeAll { $0.id == client.id || $0.target == client.target }
         acceptedClients.insert(client, at: 0)
         if acceptedClients.count > 8 {
             acceptedClients.removeLast(acceptedClients.count - 8)
         }
-        lastApprovedTarget = target
-        lastEvent = "Accepted \(request.deviceName) at \(target.host):\(target.port)"
+        lastApprovedTarget = client.target
+        do {
+            try trustedClientStore.save(acceptedClients)
+            lastEvent = successEvent
+        } catch {
+            lastEvent = "\(successEvent), trusted client save failed: \(error)"
+        }
+    }
 
+    private func sendPairingResult(
+        accepted: Bool,
+        trustedDeviceID: String?,
+        reason: String?,
+        frameSequence: UInt64,
+        connection: NWConnection
+    ) {
         let responseFrame = MacProtocolFrame.encode(
-            sequence: frame.sequence,
+            sequence: frameSequence,
             messageKind: .pairingResult,
-            payload: MacPairingResult.accepted(trustedDeviceID: trustedID)
+            payload: MacPairingResult.encode(
+                accepted: accepted,
+                trustedDeviceID: trustedDeviceID,
+                reason: reason
+            )
         )
         let responseDatagram = MacTransportDatagram.encode(
             channel: .control,
             messageKind: .pairingResult,
-            sequence: frame.sequence,
+            sequence: frameSequence,
             timestampUs: monotonicMicroseconds(),
             payload: responseFrame
         )
         connection.send(content: responseDatagram, completion: .contentProcessed { _ in })
-        publishSnapshot()
     }
 
     private func handleLatencyPing(
@@ -269,6 +502,7 @@ final class MacControlRuntime {
             acceptedClients: acceptedClients,
             lastApprovedTarget: lastApprovedTarget,
             lastVideoPreference: lastVideoPreference,
+            pendingAuthChallenges: pendingAuthChallenges.count,
             lastEvent: lastEvent
         )
     }
@@ -411,14 +645,46 @@ private struct MacPairingRequest {
     }
 }
 
+private enum MacAuthChallenge {
+    static func encode(_ challenge: MacPendingAuthChallenge) -> Data {
+        var out = Data()
+        out.appendLittleEndian(UInt32(2))
+        out.appendLittleEndian(challenge.challengeID)
+        out.append(challenge.nonce)
+        out.appendLittleEndian(challenge.issuedAtUnixMs)
+        return out
+    }
+}
+
+private struct MacAuthResponse {
+    let challengeID: UInt64
+    let deviceID: String
+    let signature: Data
+
+    static func decode(_ payload: Data) throws -> MacAuthResponse {
+        var reader = MacBinaryReader(payload)
+        guard try reader.readUInt32() == 3 else {
+            throw MacHostError.transportUnavailable("Payload did not contain AuthResponse")
+        }
+        return MacAuthResponse(
+            challengeID: try reader.readUInt64(),
+            deviceID: try reader.readBincodeString(),
+            signature: try reader.readBincodeBytes()
+        )
+    }
+}
+
 private enum MacPairingResult {
-    static func accepted(trustedDeviceID: String) -> Data {
+    static func encode(
+        accepted: Bool,
+        trustedDeviceID: String?,
+        reason: String?
+    ) -> Data {
         var out = Data()
         out.appendLittleEndian(UInt32(5))
-        out.append(UInt8(1))
-        out.appendLittleEndian(UInt32(1))
-        out.appendBincodeString(trustedDeviceID)
-        out.appendLittleEndian(UInt32(0))
+        out.append(accepted ? UInt8(1) : UInt8(0))
+        out.appendBincodeOptionString(trustedDeviceID)
+        out.appendBincodeOptionString(reason)
         return out
     }
 }
@@ -556,6 +822,15 @@ private extension Data {
         appendLittleEndian(UInt64(bytes.count))
         append(bytes)
     }
+
+    mutating func appendBincodeOptionString(_ string: String?) {
+        guard let string else {
+            appendLittleEndian(UInt32(0))
+            return
+        }
+        appendLittleEndian(UInt32(1))
+        appendBincodeString(string)
+    }
 }
 
 #if canImport(Network)
@@ -569,17 +844,18 @@ private extension MacUdpSendTarget {
 }
 #endif
 
+private extension MacUdpSendTarget {
+    var storageKey: String {
+        "\(host):\(port)"
+    }
+}
+
 private func currentUnixMilliseconds() -> UInt64 {
     UInt64((Date().timeIntervalSince1970 * 1_000).rounded())
 }
 
 private func monotonicMicroseconds() -> UInt64 {
     DispatchTime.now().uptimeNanoseconds / 1_000
-}
-
-private func shortFingerprint(for data: Data) -> String {
-    let crc = macControlCRC32(data)
-    return String(format: "%08x", crc)
 }
 
 private func macControlCRC32(_ data: Data) -> UInt32 {
