@@ -99,6 +99,8 @@ cargo test --workspace
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Live Encode Probe and confirm captured frame count, encoded frame count, and encoded byte count are non-zero after Screen Recording permission is granted.
 - Run the Live Transport Probe and confirm captured frame count, encoded frame count, Video-channel datagram count, and transport byte count are non-zero.
+- Run a local UDP listener on the typed target port, then run UDP Send Probe and confirm the listener receives `GLYT` Video-channel datagrams.
+- Run the continuous UDP stream path against a local UDP listener, leave it active for at least ten seconds, then stop it and confirm the UI reports non-zero encoded frames, scheduled datagrams, and scheduled bytes.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.
@@ -116,7 +118,7 @@ cargo test --workspace
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
-- macOS control runtime plus SCStream-to-VideoToolbox-to-UDP client loopback.
+- macOS approved-client control runtime plus SCStream-to-VideoToolbox-to-UDP Android client loopback.
 - macOS Keychain device identity persistence.
 - Transport reconnect under packet loss.
 - Outbound QoS queue backpressure behavior with a saturated UDP send buffer.

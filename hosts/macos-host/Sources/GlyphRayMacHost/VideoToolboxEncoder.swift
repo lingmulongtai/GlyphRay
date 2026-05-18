@@ -132,7 +132,7 @@ final class VideoToolboxEncoder {
         guard status == noErr, let sampleBuffer, let frameRef else {
             return
         }
-        guard let payload = copyPayload(from: sampleBuffer) else {
+        guard let payload = copyPayload(from: sampleBuffer, codec: settings.codec) else {
             return
         }
 
@@ -209,7 +209,31 @@ private extension CMSampleBuffer {
     }
 }
 
-private func copyPayload(from sampleBuffer: CMSampleBuffer) -> Data? {
+private func copyPayload(from sampleBuffer: CMSampleBuffer, codec: MacVideoCodec) -> Data? {
+    switch codec {
+    case .h264:
+        return copyH264AnnexBPayload(from: sampleBuffer)
+    case .hevc:
+        return copyLengthPrefixedPayload(from: sampleBuffer)
+    }
+}
+
+private func copyH264AnnexBPayload(from sampleBuffer: CMSampleBuffer) -> Data? {
+    guard let lengthPrefixedPayload = copyLengthPrefixedPayload(from: sampleBuffer) else {
+        return nil
+    }
+
+    var out = Data()
+    if sampleBuffer.isKeyframe {
+        appendH264ParameterSets(from: sampleBuffer, to: &out)
+    }
+    guard appendAnnexBNalUnits(from: lengthPrefixedPayload, to: &out) else {
+        return lengthPrefixedPayload
+    }
+    return out
+}
+
+private func copyLengthPrefixedPayload(from sampleBuffer: CMSampleBuffer) -> Data? {
     guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
         return nil
     }
@@ -225,12 +249,68 @@ private func copyPayload(from sampleBuffer: CMSampleBuffer) -> Data? {
     }
     return status == noErr ? data : nil
 }
+
+private func appendH264ParameterSets(from sampleBuffer: CMSampleBuffer, to out: inout Data) {
+    guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+        return
+    }
+
+    for index in 0..<2 {
+        var parameterSet: UnsafePointer<UInt8>?
+        var parameterSetSize = 0
+        var parameterSetCount = 0
+        var nalUnitHeaderLength = Int32(0)
+        let status = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDescription,
+            parameterSetIndex: index,
+            parameterSetPointerOut: &parameterSet,
+            parameterSetSizeOut: &parameterSetSize,
+            parameterSetCountOut: &parameterSetCount,
+            nalUnitHeaderLengthOut: &nalUnitHeaderLength
+        )
+        guard status == noErr, let parameterSet, parameterSetSize > 0 else {
+            continue
+        }
+        appendAnnexBStartCode(to: &out)
+        out.append(parameterSet, count: parameterSetSize)
+    }
+}
+
+private func appendAnnexBNalUnits(from payload: Data, to out: inout Data) -> Bool {
+    let bytes = [UInt8](payload)
+    var offset = 0
+    var appendedAnyUnit = false
+
+    while offset + 4 <= bytes.count {
+        let length = (Int(bytes[offset]) << 24)
+            | (Int(bytes[offset + 1]) << 16)
+            | (Int(bytes[offset + 2]) << 8)
+            | Int(bytes[offset + 3])
+        offset += 4
+
+        guard length > 0, offset + length <= bytes.count else {
+            return false
+        }
+
+        appendAnnexBStartCode(to: &out)
+        out.append(contentsOf: bytes[offset..<(offset + length)])
+        offset += length
+        appendedAnyUnit = true
+    }
+
+    return appendedAnyUnit && offset == bytes.count
+}
+
+private func appendAnnexBStartCode(to out: inout Data) {
+    out.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
+}
 #endif
 
 enum MacHostError: Error, CustomStringConvertible {
     case frameworkUnavailable(String)
     case encoderUnavailable(OSStatus)
     case captureUnavailable(String)
+    case transportUnavailable(String)
 
     var description: String {
         switch self {
@@ -240,6 +320,8 @@ enum MacHostError: Error, CustomStringConvertible {
             return "VideoToolbox encoder unavailable: \(status)"
         case .captureUnavailable(let message):
             return "Screen capture unavailable: \(message)"
+        case .transportUnavailable(let message):
+            return "Transport unavailable: \(message)"
         }
     }
 }

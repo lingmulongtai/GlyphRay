@@ -1,5 +1,23 @@
 # GlyphRay Development Diary
 
+## 2026-05-18 JST - macOS Continuous UDP Video Stream
+
+今日は macOS host の映像経路を、単発の `UDP Send Probe` から連続送信に近づけた。`MacUdpVideoPublisher` を追加し、`Start UDP Stream` / `Stop Stream` で `ScreenCaptureKit -> VideoToolbox -> GLYF/GLYT packetizer -> UDP publisher` を起動・停止できるようにした。まだ approved-client session runtime ではなく手入力の host / port 宛てだが、H.264 frame を継続的に Video channel datagram として出し続ける入口ができた。
+
+ついでに重要な形式差も潰した。VideoToolbox のH.264出力は長さprefix付きNALになりやすいので、sender側でAnnex Bへ変換し、keyframeにはSPS/PPSを付けるようにした。AndroidのMediaCodec受信経路と接続するときに、ここが未処理だと「packetは届くがdecodeできない」状態になりやすいので、先に整えた。
+
+次はこの manual target を Android client の pairing/control runtime から得た approved endpoint に差し替え、reconnect、backpressure、receiver acknowledgement を入れる。Windowsに比べるとmacOSはまだ遅れているが、display listing だけの段階からはかなり抜けて、実際の映像送信の形が見えてきた。
+
+この時点の進捗見積もり: 96%。
+
+## 2026-05-18 JST - macOS Manual UDP Video Send Probe
+
+今日は macOS host の映像経路をもう一段先に進めた。前回は `ScreenCaptureKit -> VideoToolbox -> GLYF/GLYT packetizer` までだったが、今回は `MacUdpDatagramSender` を追加し、生成した Video-channel datagram を実際にUDP送信できるようにした。SwiftUI には target host / port の入力欄と `UDP Send Probe` ボタンを追加した。
+
+このprobeはまだ正式な approved-client session runtime ではないが、macOSで画面を掴み、H.264へ圧縮し、GlyphRay形式に分割し、手動ターゲットへ送るところまで確認できる。次の焦点は、手動ターゲットをpairing/control runtimeから得た approved Android client に置き換え、continuous video send loop と reconnect/backpressure を持たせること。
+
+この時点の進捗見積もり: 95%。
+
 ## 2026-05-15 JST - macOS Video Transport Packetizer
 
 macOS host を急ぎ足で前に出すため、今日は capture / encode の次の段、GlyphRay の Video channel packetizer を Swift 側に実装した。`MacVideoTransportPacketizer` は `MacEncodedFrame` を Rust 側と同じ encoded access unit に包み、`GLYF` fragment に分割し、さらに `GLYT` Video-channel datagram にする。CRC32 もSwift側で持たせたので、macOS host からAndroid clientへ送る直前の形まで作れる。

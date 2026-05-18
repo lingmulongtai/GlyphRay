@@ -63,7 +63,7 @@ The complete encoded access unit inside the fragment stream is:
 
 Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 
-The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams.
+The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams. The VideoToolbox H.264 path converts length-prefixed NAL units into Annex B and prepends SPS/PPS on keyframes so Android decoder integration has the expected stream shape. `MacUdpDatagramSender.swift` can send generated datagrams to a manual UDP target for smoke testing, and `MacUdpVideoPublisher.swift` keeps a continuous Video-channel stream running for manual receiver loopback before the approved-client runtime lands.
 
 ## Message Families
 

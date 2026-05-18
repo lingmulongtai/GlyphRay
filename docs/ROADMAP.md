@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 94%.
+Current overall progress estimate: 96%.
 
 ## Milestone 1
 
@@ -126,10 +126,12 @@ Current overall progress estimate: 94%.
 - [x] Add macOS ScreenCaptureKit live frame probe.
 - [x] Add macOS ScreenCaptureKit-to-VideoToolbox live encode probe.
 - [x] Add macOS encoded-frame packetizer for GlyphRay Video-channel datagrams.
+- [x] Add macOS manual UDP send probe for generated Video-channel datagrams.
+- [x] Add macOS continuous UDP video stream start/stop path for manual receiver loopback.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.
-- [ ] Complete macOS host control runtime and UDP video send loop for approved clients.
+- [ ] Replace the macOS manual UDP target with approved-client control runtime, reconnect, and backpressure-aware stream ownership.
 - [ ] Add Windows/macOS audio capture and Android playback.
 - [ ] Implement relay server/client.
 - [ ] Prepare signed beta release.

@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 @main
@@ -23,6 +24,8 @@ final class HostStatusModel: ObservableObject {
     @Published var liveCaptureStatus: String = "Live capture idle"
     @Published var encoderStatus: String = "Encoder idle"
     @Published var keychainStatus: String = "Keychain idle"
+    @Published var udpTargetHost: String = MacUdpSendTarget.localPreview.host
+    @Published var udpTargetPort: String = "\(MacUdpSendTarget.localPreview.port)"
     @Published var permissions = MacPermissionSnapshot(
         screenRecording: "unknown",
         accessibility: "unknown",
@@ -108,6 +111,60 @@ final class HostStatusModel: ObservableObject {
         }
     }
 
+    func startUdpSendProbe() {
+        guard let port = UInt16(udpTargetPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            liveCaptureStatus = "UDP send unavailable: invalid target port"
+            return
+        }
+
+        let target = MacUdpSendTarget(
+            host: udpTargetHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: port
+        )
+        liveCaptureStatus = "Starting capture -> encode -> UDP send probe..."
+        Task {
+            do {
+                let result = try await liveCaptureController.startFirstDisplayUdpSendProbe(to: target)
+                liveCaptureStatus = "Sent \(result.sentDatagrams)/\(result.packetizedDatagrams) datagram(s), \(result.sentBytes) bytes to \(result.target.host):\(result.target.port)"
+            } catch {
+                liveCaptureStatus = "UDP send unavailable: \(error)"
+            }
+        }
+    }
+
+    func startUdpStream() {
+        guard let port = UInt16(udpTargetPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            liveCaptureStatus = "UDP stream unavailable: invalid target port"
+            return
+        }
+
+        let target = MacUdpSendTarget(
+            host: udpTargetHost.trimmingCharacters(in: .whitespacesAndNewlines),
+            port: port
+        )
+        liveCaptureStatus = "Starting continuous UDP video stream..."
+        Task {
+            do {
+                let result = try await liveCaptureController.startFirstDisplayUdpStream(to: target)
+                liveCaptureStatus = "Streaming display \(result.displayID) at \(result.width)x\(result.height) to \(result.target.host):\(result.target.port)"
+            } catch {
+                liveCaptureStatus = "UDP stream unavailable: \(error)"
+            }
+        }
+    }
+
+    func stopUdpStream() {
+        liveCaptureStatus = "Stopping UDP video stream..."
+        Task {
+            do {
+                let result = try await liveCaptureController.stopUdpStream()
+                liveCaptureStatus = "Stopped stream: \(result.encodedFrames) frame(s), \(result.scheduledDatagrams) datagram(s), \(result.scheduledBytes) bytes"
+            } catch {
+                liveCaptureStatus = "UDP stream stop unavailable: \(error)"
+            }
+        }
+    }
+
     func runKeychainSmokeTest() {
         keychainStatus = "Testing Keychain..."
         let account = "diagnostics-smoke-test"
@@ -144,6 +201,14 @@ struct ContentView: View {
             Label("Audio: \(model.permissions.audio)", systemImage: "waveform")
             Label("Mouse and keyboard input first; Windows Ink-style pen injection is Windows-specific.", systemImage: "hand.draw")
             HStack {
+                TextField("UDP target host", text: $model.udpTargetHost)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+                TextField("Port", text: $model.udpTargetPort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 82)
+            }
+            HStack {
                 Button("Refresh") {
                     model.refreshReadiness()
                     Task { await model.refreshDisplays() }
@@ -165,6 +230,15 @@ struct ContentView: View {
                 }
                 Button("Live Transport Probe") {
                     model.startLiveTransportProbe()
+                }
+                Button("UDP Send Probe") {
+                    model.startUdpSendProbe()
+                }
+                Button("Start UDP Stream") {
+                    model.startUdpStream()
+                }
+                Button("Stop Stream") {
+                    model.stopUdpStream()
                 }
                 Button("Keychain Smoke Test") {
                     model.runKeychainSmokeTest()
