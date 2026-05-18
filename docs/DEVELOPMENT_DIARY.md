@@ -1,5 +1,17 @@
 # GlyphRay Development Diary
 
+## 2026-05-18 JST - macOS Lightweight Control Pairing Runtime
+
+今日は macOS host を「手入力でUDP送信するだけ」から一歩進め、Android client からの manual host 接続を受けられる軽量 control runtime を追加した。`MacControlRuntime` は `44999/UDP` で `GLYT` Control datagram と `GLYR` protocol frame を読み、`PairingRequest` を受けると `PairingResult` を返す。さらに `LatencyPing` への `LatencyPong` と、Android から送られる `EncoderConfig` の記録にも対応した。
+
+SwiftUI には `Start Control` / `Stop Control` と approved client 表示を追加した。Android が macOS host に pairing request を送ると、macOS 側はその送信元 endpoint を approved client として覚え、UDP video target 欄へ自動反映する。これで `Start UDP Stream` は、手でIP/portを入れなくても、直前にpairingしてきたAndroidへ映像datagramを送る流れに近づいた。
+
+まだ trusted-device identity、暗号化済みsession、LAN discovery advertisement、reconnect/backpressure は未完成。けれど、macOS側の「Androidから接続される、承認する、そこへ映像を返す」という骨格が見えた。
+
+続けて `MacLanDiscoveryAdvertiser` も入れた。`Start Control` を押すと `GLYD` discovery advertisement も送るので、broadcast が通るLANなら Android の host list に macOS host が出る道筋ができた。Windows Ink support は false、H.264 と pairing required は true として広告する。これで手動IP入力だけに頼る段階から少し抜けた。
+
+この時点の進捗見積もり: 97%。
+
 ## 2026-05-18 JST - macOS Continuous UDP Video Stream
 
 今日は macOS host の映像経路を、単発の `UDP Send Probe` から連続送信に近づけた。`MacUdpVideoPublisher` を追加し、`Start UDP Stream` / `Stop Stream` で `ScreenCaptureKit -> VideoToolbox -> GLYF/GLYT packetizer -> UDP publisher` を起動・停止できるようにした。まだ approved-client session runtime ではなく手入力の host / port 宛てだが、H.264 frame を継続的に Video channel datagram として出し続ける入口ができた。

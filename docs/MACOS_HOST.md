@@ -24,6 +24,8 @@ swift build
 Current code includes:
 
 - SwiftUI shell with local readiness diagnostics.
+- Lightweight UDP control runtime on the GlyphRay control port. It accepts Android manual-host `PairingRequest` messages, returns `PairingResult`, records the approved client endpoint, replies to latency pings, and records client video preferences.
+- LAN discovery advertiser that sends `GLYD` host advertisements for Android host-list visibility on local networks.
 - ScreenCaptureKit display listing with display geometry labels.
 - ScreenCaptureKit live capture probe that opens an `SCStream`, counts screen frames for a short run, then stops.
 - ScreenCaptureKit-to-VideoToolbox live encode probe that feeds captured `CMSampleBuffer` images into the low-latency H.264 encoder and counts encoded frames/bytes.
@@ -38,4 +40,12 @@ Current code includes:
 - CGEvent mouse, click, and keyboard posting foundation.
 - Keychain-backed secret store boundary with UI smoke test.
 
-Approved-client live streaming is still pending. The UDP send probe and continuous stream path now verify that an `SCStream` can produce frames, those sample buffers can be passed into `VideoToolboxEncoder`, encoded access units can be packetized into GlyphRay Video-channel datagrams, and those datagrams can be sent over UDP to a manual target. The next macOS-specific step is to add pairing/control runtime state so the sender targets approved clients automatically and owns reconnect/backpressure behavior.
+Approved-client live streaming is partially wired. The control runtime can learn the Android client endpoint from a pairing request and the UI automatically copies that endpoint into the video target fields. Starting Control also starts a `GLYD` discovery advertiser so Android can discover the macOS host on networks that allow broadcast. The UDP send probe and continuous stream path verify that an `SCStream` can produce frames, those sample buffers can be passed into `VideoToolboxEncoder`, encoded access units can be packetized into GlyphRay Video-channel datagrams, and those datagrams can be sent over UDP. The next macOS-specific step is to harden this with trusted-device identity, reconnect, and explicit backpressure behavior.
+
+Manual loopback flow:
+
+1. Start the macOS host and press `Start Control`.
+2. On Android, use the discovered macOS host, or add the macOS host IP manually with UDP port `44999` if broadcast is blocked.
+3. Connect and send pairing from Android.
+4. Confirm macOS lists the approved client and copies its endpoint into the UDP target fields.
+5. Press `Start UDP Stream` after Screen Recording permission is granted.

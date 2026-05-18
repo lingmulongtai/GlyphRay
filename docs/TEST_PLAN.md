@@ -95,6 +95,9 @@ cargo test --workspace
 - Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
 - Use the Screen Recording and Accessibility request buttons and confirm macOS opens the expected permission prompts.
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
+- Start the macOS Control runtime and confirm the discovery status reports sent announcements. On a LAN that allows broadcast, confirm Android host discovery shows the macOS host.
+- Start the macOS Control runtime, add the macOS host manually in Android using UDP port `44999`, send a pairing request, and confirm macOS lists the approved client while Android receives `PairingResult`.
+- After pairing, confirm the macOS UDP target fields are populated with the Android client endpoint learned from the control packet source.
 - Run the Live Capture Probe and confirm a short `SCStream` session reports at least one captured frame.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Live Encode Probe and confirm captured frame count, encoded frame count, and encoded byte count are non-zero after Screen Recording permission is granted.
@@ -118,7 +121,7 @@ cargo test --workspace
 - Host coordinate mapping under multi-monitor DPI layouts.
 - Encrypted pairing handshake.
 - Video encode/decode loopback.
-- macOS approved-client control runtime plus SCStream-to-VideoToolbox-to-UDP Android client loopback.
+- Hardened macOS trusted-device identity plus SCStream-to-VideoToolbox-to-UDP Android client loopback.
 - macOS Keychain device identity persistence.
 - Transport reconnect under packet loss.
 - Outbound QoS queue backpressure behavior with a saturated UDP send buffer.

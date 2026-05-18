@@ -16,16 +16,22 @@ struct GlyphRayMacHostApp: App {
 final class HostStatusModel: ObservableObject {
     private let captureController = ScreenCaptureController()
     private let liveCaptureController = MacLiveCaptureController()
+    private let controlRuntime = MacControlRuntime()
+    private let discoveryAdvertiser = MacLanDiscoveryAdvertiser()
     private let permissionController = MacPermissionController()
     private let keychainStore = KeychainSecretStore()
 
     @Published var status: String = "Idle"
     @Published var captureStatus: String = "Capture idle"
     @Published var liveCaptureStatus: String = "Live capture idle"
+    @Published var controlStatus: String = "Control runtime idle"
+    @Published var discoveryStatus: String = "Discovery advertiser idle"
     @Published var encoderStatus: String = "Encoder idle"
     @Published var keychainStatus: String = "Keychain idle"
     @Published var udpTargetHost: String = MacUdpSendTarget.localPreview.host
     @Published var udpTargetPort: String = "\(MacUdpSendTarget.localPreview.port)"
+    @Published var controlPort: String = "44999"
+    @Published var approvedClients: [MacPairingClient] = []
     @Published var permissions = MacPermissionSnapshot(
         screenRecording: "unknown",
         accessibility: "unknown",
@@ -35,6 +41,16 @@ final class HostStatusModel: ObservableObject {
     @Published var displays: [MacDisplayDescriptor] = []
 
     init() {
+        controlRuntime.onSnapshot = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.applyControlSnapshot(snapshot)
+            }
+        }
+        discoveryAdvertiser.onSnapshot = { [weak self] snapshot in
+            Task { @MainActor in
+                self?.applyDiscoverySnapshot(snapshot)
+            }
+        }
         refreshReadiness()
     }
 
@@ -153,6 +169,26 @@ final class HostStatusModel: ObservableObject {
         }
     }
 
+    func startControlRuntime() {
+        guard let port = UInt16(controlPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            controlStatus = "Control runtime unavailable: invalid port"
+            return
+        }
+
+        do {
+            try controlRuntime.start(port: port)
+            try discoveryAdvertiser.start(controlPort: port)
+            controlStatus = "Starting control runtime on UDP \(port)..."
+        } catch {
+            controlStatus = "Control runtime unavailable: \(error)"
+        }
+    }
+
+    func stopControlRuntime() {
+        controlRuntime.stop()
+        discoveryAdvertiser.stop()
+    }
+
     func stopUdpStream() {
         liveCaptureStatus = "Stopping UDP video stream..."
         Task {
@@ -178,6 +214,19 @@ final class HostStatusModel: ObservableObject {
             keychainStatus = "Keychain unavailable: \(error)"
         }
     }
+
+    private func applyControlSnapshot(_ snapshot: MacControlRuntimeSnapshot) {
+        approvedClients = snapshot.acceptedClients
+        controlStatus = "\(snapshot.lastEvent) · requests \(snapshot.pairingRequestsReceived) · clients \(snapshot.acceptedClients.count)"
+        if let target = snapshot.lastApprovedTarget {
+            udpTargetHost = target.host
+            udpTargetPort = "\(target.port)"
+        }
+    }
+
+    private func applyDiscoverySnapshot(_ snapshot: MacDiscoverySnapshot) {
+        discoveryStatus = "\(snapshot.lastEvent) · announcements \(snapshot.announcementsSent)"
+    }
 }
 
 struct ContentView: View {
@@ -193,6 +242,8 @@ struct ContentView: View {
             Divider()
             Label(model.captureStatus, systemImage: "display")
             Label(model.liveCaptureStatus, systemImage: "dot.radiowaves.left.and.right")
+            Label(model.controlStatus, systemImage: "network")
+            Label(model.discoveryStatus, systemImage: "antenna.radiowaves.left.and.right")
             Label(model.encoderStatus, systemImage: "video")
             Label(model.keychainStatus, systemImage: "key")
             Label("Screen Recording: \(model.permissions.screenRecording)", systemImage: "rectangle.on.rectangle")
@@ -201,6 +252,9 @@ struct ContentView: View {
             Label("Audio: \(model.permissions.audio)", systemImage: "waveform")
             Label("Mouse and keyboard input first; Windows Ink-style pen injection is Windows-specific.", systemImage: "hand.draw")
             HStack {
+                TextField("Control port", text: $model.controlPort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
                 TextField("UDP target host", text: $model.udpTargetHost)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 180)
@@ -208,40 +262,50 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 82)
             }
-            HStack {
-                Button("Refresh") {
-                    model.refreshReadiness()
-                    Task { await model.refreshDisplays() }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Button("Refresh") {
+                        model.refreshReadiness()
+                        Task { await model.refreshDisplays() }
+                    }
+                    Button("Request Screen Recording") {
+                        model.requestScreenRecording()
+                    }
+                    Button("Request Accessibility") {
+                        model.requestAccessibility()
+                    }
+                    Button("Encoder Smoke Test") {
+                        model.startEncoderSmokeTest()
+                    }
+                    Button("Keychain Smoke Test") {
+                        model.runKeychainSmokeTest()
+                    }
                 }
-                Button("Request Screen Recording") {
-                    model.requestScreenRecording()
-                }
-                Button("Request Accessibility") {
-                    model.requestAccessibility()
-                }
-                Button("Encoder Smoke Test") {
-                    model.startEncoderSmokeTest()
-                }
-                Button("Live Capture Probe") {
-                    model.startLiveCaptureProbe()
-                }
-                Button("Live Encode Probe") {
-                    model.startLiveEncodeProbe()
-                }
-                Button("Live Transport Probe") {
-                    model.startLiveTransportProbe()
-                }
-                Button("UDP Send Probe") {
-                    model.startUdpSendProbe()
-                }
-                Button("Start UDP Stream") {
-                    model.startUdpStream()
-                }
-                Button("Stop Stream") {
-                    model.stopUdpStream()
-                }
-                Button("Keychain Smoke Test") {
-                    model.runKeychainSmokeTest()
+                HStack {
+                    Button("Live Capture Probe") {
+                        model.startLiveCaptureProbe()
+                    }
+                    Button("Live Encode Probe") {
+                        model.startLiveEncodeProbe()
+                    }
+                    Button("Live Transport Probe") {
+                        model.startLiveTransportProbe()
+                    }
+                    Button("Start Control") {
+                        model.startControlRuntime()
+                    }
+                    Button("Stop Control") {
+                        model.stopControlRuntime()
+                    }
+                    Button("UDP Send Probe") {
+                        model.startUdpSendProbe()
+                    }
+                    Button("Start UDP Stream") {
+                        model.startUdpStream()
+                    }
+                    Button("Stop Stream") {
+                        model.stopUdpStream()
+                    }
                 }
             }
             .buttonStyle(.bordered)
@@ -250,6 +314,15 @@ struct ContentView: View {
                 Divider()
                 ForEach(model.displays) { display in
                     Text(display.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !model.approvedClients.isEmpty {
+                Divider()
+                ForEach(model.approvedClients) { client in
+                    Text("\(client.deviceName) · \(client.target.host):\(client.target.port) · \(client.id)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

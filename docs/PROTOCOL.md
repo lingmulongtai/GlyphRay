@@ -65,6 +65,10 @@ Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 
 The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams. The VideoToolbox H.264 path converts length-prefixed NAL units into Annex B and prepends SPS/PPS on keyframes so Android decoder integration has the expected stream shape. `MacUdpDatagramSender.swift` can send generated datagrams to a manual UDP target for smoke testing, and `MacUdpVideoPublisher.swift` keeps a continuous Video-channel stream running for manual receiver loopback before the approved-client runtime lands.
 
+`MacControlRuntime.swift` also understands the shared `GLYT` Control channel and `GLYR` protocol frame headers for the initial macOS host path. It accepts Android `PairingRequest`, sends `PairingResult`, responds to `LatencyPing`, and records `EncoderConfig`. This implementation intentionally supports only the messages needed for manual Android-to-macOS loopback; trusted-device proof and encrypted session transport still need to be added before production use.
+
+`MacLanDiscoveryAdvertiser.swift` emits `GLYD` discovery advertisements using the same host advertisement shape as the Rust transport crate. It marks H.264 support and pairing-required mode, but not Windows Ink support because native Windows Ink-style pen injection remains Windows-specific.
+
 ## Message Families
 
 - Handshake: `ClientHello`, `HostHello`

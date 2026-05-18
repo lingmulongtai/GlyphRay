@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 96%.
+Current overall progress estimate: 97%.
 
 ## Milestone 1
 
@@ -128,10 +128,12 @@ Current overall progress estimate: 96%.
 - [x] Add macOS encoded-frame packetizer for GlyphRay Video-channel datagrams.
 - [x] Add macOS manual UDP send probe for generated Video-channel datagrams.
 - [x] Add macOS continuous UDP video stream start/stop path for manual receiver loopback.
+- [x] Add macOS lightweight UDP control runtime for Android manual-host `PairingRequest`, `PairingResult`, latency pong, and client video preference intake.
+- [x] Add macOS LAN discovery advertiser for Android host-list visibility on local networks.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.
-- [ ] Replace the macOS manual UDP target with approved-client control runtime, reconnect, and backpressure-aware stream ownership.
+- [ ] Harden the macOS lightweight control/discovery runtime with trusted-device identity, reconnect, and backpressure-aware stream ownership.
 - [ ] Add Windows/macOS audio capture and Android playback.
 - [ ] Implement relay server/client.
 - [ ] Prepare signed beta release.
