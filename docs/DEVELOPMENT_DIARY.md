@@ -1,5 +1,15 @@
 # GlyphRay Development Diary
 
+## 2026-05-24 JST - macOS Stream Backpressure And Audio Permission
+
+今日は macOS host の連続UDP映像送信を低遅延寄りに固めた。`MacUdpVideoPublisher` に in-flight datagram cap を入れ、送信待ちが一定数を超えたら古い遅延を抱え込まずに video datagram を drop として数えるようにした。snapshot には scheduled / sent / dropped datagram、bytes、in-flight、high watermark、last error が出るので、`Stop Stream` 後に「送れているのか、詰まって落としているのか」がUIから見える。
+
+あわせて、pairing/control runtime が覚えた最新 approved Android endpoint へ直接配信する `Start Approved Stream` も足した。まだ encrypted session ではないが、手入力IPだけのprobeから「承認済みclientへ送る」操作に寄った。
+
+macOS の audio permission request も UI に足した。まだ audio capture / Android playback までは行っていないが、first-run onboarding に必要な Screen Recording、Accessibility、Audio の request path が並び、permission readiness の穴が少し塞がった。macOS host は signed trusted reconnect、capture、encode、packetize、bounded send、permission request まで来たので、次は encrypted session transport と real Android receiver loopback をつなぐ段階。
+
+この時点の進捗見積もり: 98%。
+
 ## 2026-05-18 JST - macOS Signed Trusted Reconnect
 
 今日は macOS host の trusted client persistence を、単にKeychainへ保存するだけの状態から一段進めた。Android の Keystore public key DER から SHA-256 fingerprint と `trusted-key-...` id を作り、初回pairing時にKeychainへ保存する。次に同じAndroidがpairingしてきた場合、macOS host は即承認せず `AuthChallenge` を返し、Android の `SHA256withECDSA` 署名付き `AuthResponse` を CryptoKit で検証してから `PairingResult accepted=true` を返す流れにした。

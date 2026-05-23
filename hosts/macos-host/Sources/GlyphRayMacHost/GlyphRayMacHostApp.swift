@@ -71,6 +71,14 @@ final class HostStatusModel: ObservableObject {
         refreshReadiness()
     }
 
+    func requestAudioAccess() {
+        permissionController.requestAudioAccess { [weak self] _ in
+            Task { @MainActor in
+                self?.refreshReadiness()
+            }
+        }
+    }
+
     func refreshDisplays() async {
         captureStatus = "Scanning displays..."
         do {
@@ -160,11 +168,23 @@ final class HostStatusModel: ObservableObject {
             host: udpTargetHost.trimmingCharacters(in: .whitespacesAndNewlines),
             port: port
         )
+        startUdpStream(to: target, source: "manual target")
+    }
+
+    func startApprovedUdpStream() {
+        guard let target = approvedClients.first?.target else {
+            liveCaptureStatus = "Approved stream unavailable: no trusted client endpoint"
+            return
+        }
+        startUdpStream(to: target, source: "approved client")
+    }
+
+    private func startUdpStream(to target: MacUdpSendTarget, source: String) {
         liveCaptureStatus = "Starting continuous UDP video stream..."
         Task {
             do {
                 let result = try await liveCaptureController.startFirstDisplayUdpStream(to: target)
-                liveCaptureStatus = "Streaming display \(result.displayID) at \(result.width)x\(result.height) to \(result.target.host):\(result.target.port)"
+                liveCaptureStatus = "Streaming \(source) display \(result.displayID) at \(result.width)x\(result.height) to \(result.target.host):\(result.target.port) · backlog cap high \(result.highWatermarkDatagrams)"
             } catch {
                 liveCaptureStatus = "UDP stream unavailable: \(error)"
             }
@@ -200,7 +220,7 @@ final class HostStatusModel: ObservableObject {
         Task {
             do {
                 let result = try await liveCaptureController.stopUdpStream()
-                liveCaptureStatus = "Stopped stream: \(result.encodedFrames) frame(s), \(result.scheduledDatagrams) datagram(s), \(result.scheduledBytes) bytes"
+                liveCaptureStatus = "Stopped stream: encoded \(result.encodedFrames) frame(s), sent \(result.sentDatagrams)/\(result.scheduledDatagrams) datagram(s), dropped \(result.droppedDatagrams), high \(result.highWatermarkDatagrams), in-flight \(result.inFlightDatagrams)"
             } catch {
                 liveCaptureStatus = "UDP stream stop unavailable: \(error)"
             }
@@ -280,6 +300,9 @@ struct ContentView: View {
                     Button("Request Accessibility") {
                         model.requestAccessibility()
                     }
+                    Button("Request Audio") {
+                        model.requestAudioAccess()
+                    }
                     Button("Encoder Smoke Test") {
                         model.startEncoderSmokeTest()
                     }
@@ -308,6 +331,9 @@ struct ContentView: View {
                     }
                     Button("UDP Send Probe") {
                         model.startUdpSendProbe()
+                    }
+                    Button("Start Approved Stream") {
+                        model.startApprovedUdpStream()
                     }
                     Button("Start UDP Stream") {
                         model.startUdpStream()

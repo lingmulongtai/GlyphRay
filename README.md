@@ -24,14 +24,14 @@ pie title Overall Completion
 | Milestone 2 video and transport foundation | In progress | 92% |
 | Milestone 3 Android stylus to Windows Ink stream | In progress | 90% |
 | Milestone 4 hardening and packaging | In progress | 84% |
-| Milestone 5 macOS, audio, relay readiness | In progress | 82% |
+| Milestone 5 macOS, audio, relay readiness | In progress | 84% |
 
 ```text
 M1 Foundation                 [####################] 100%
 M2 Video + Transport          [##################--]  92%
 M3 Stylus -> Windows Ink      [##################--]  90%
 M4 Security + Packaging       [#################---]  84%
-M5 macOS + Audio + Relay      [################----]  82%
+M5 macOS + Audio + Relay      [#################---]  84%
 ```
 
 Development diary: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -62,7 +62,7 @@ flowchart TB
 | --- | --- | --- |
 | `apps/android-client` | Android tablet/phone client | Compose UI, LAN discovery, control handshake send/receive, Android Keystore public-key pairing identity, stylus diagnostics, live stylus UDP sender, MediaCodec decode surface |
 | `hosts/windows-host` | Primary desktop host | LAN backend runtime, UDP routing, QoS outbound queues, approved-peer video fragment queueing, health/status metrics, pending-peer hardening, native permission dialog, signed trusted-device challenge/response, GDI capture fallback, encoder abstraction, Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, UDP control pairing runtime, Keychain trusted-client persistence, signed Android trusted-device challenge/response path, LAN discovery advertiser, ScreenCaptureKit display enumeration, live capture probe, live capture-to-VideoToolbox encode probe, H.264 Annex B conversion, GlyphRay video packetizer, manual UDP send probe, continuous UDP video stream start/stop path, permission readiness UI |
+| `hosts/macos-host` | Secondary desktop host | SwiftUI shell, UDP control pairing runtime, Keychain trusted-client persistence, signed Android trusted-device challenge/response path, LAN discovery advertiser, ScreenCaptureKit display enumeration, live capture probe, live capture-to-VideoToolbox encode probe, H.264 Annex B conversion, GlyphRay video packetizer, manual UDP send probe, continuous UDP video stream start/stop path with bounded backpressure, permission readiness UI |
 | `crates/core` | Shared math and state | Coordinate mapping, calibration, pressure curves, session state |
 | `crates/protocol` | Binary protocol | `GLYR` frames and compact `GLYS` stylus batches |
 | `crates/transport` | Real-time packet layer | UDP `GLYT`, LAN discovery `GLYD`, video fragmentation, reusable UDP buffers, secure datagram wrapper, reconnect, bitrate/keyframe adaptation logic |
@@ -163,7 +163,7 @@ sequenceDiagram
 - Windows monitor enumeration, GDI capture fallback, encoder abstraction, and streaming pipeline shape.
 - ChaCha20-Poly1305 session cipher, replay guard, secure datagram codec, reconnect, adaptive bitrate decisions, and packet-loss keyframe recovery signaling foundations.
 - Windows `PlatformSecretStore` uses DPAPI-protected per-user secret files on Windows, with an in-memory fallback on non-Windows builds.
-- macOS SwiftUI shell with UDP control pairing runtime, Keychain-backed trusted-client persistence, SHA-256 Android public-key trusted ids, signed `AuthChallenge` / `AuthResponse` verification for returning Android clients, LAN discovery advertiser, ScreenCaptureKit display diagnostics, a live capture frame probe, a live ScreenCaptureKit-to-VideoToolbox encode probe, H.264 Annex B conversion, GlyphRay Video-channel packetizer, manual UDP send probe, continuous UDP video stream start/stop path, permission readiness checks, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
+- macOS SwiftUI shell with UDP control pairing runtime, Keychain-backed trusted-client persistence, SHA-256 Android public-key trusted ids, signed `AuthChallenge` / `AuthResponse` verification for returning Android clients, LAN discovery advertiser, ScreenCaptureKit display diagnostics, a live capture frame probe, a live ScreenCaptureKit-to-VideoToolbox encode probe, H.264 Annex B conversion, GlyphRay Video-channel packetizer, manual UDP send probe, approved-client UDP stream start, continuous UDP video stream start/stop path with bounded send backpressure/drop counters, permission readiness checks and audio permission request, CGEvent mouse/keyboard foundation, Keychain secret-store smoke test, and audio permission plumbing.
 - GitHub Actions CI for Rust tests, Android unit tests, Android debug build, and macOS SwiftPM host build on `macos-14`.
 - GitHub Pages static download site with setup command generator and original hero artwork.
 
@@ -295,7 +295,7 @@ Deployment is handled by [pages.yml](.github/workflows/pages.yml). Enable Pages 
 - Video fragments can now be queued to approved clients on the Video channel, but a concrete H.264 hardware/software encoder backend still needs to replace the placeholder abstraction before real desktop video is useful.
 - Android stylus packets can be captured from the remote display surface and sent over UDP, but the complete production pairing and session handshake still needs hardening.
 - The permission dialog and trusted-device commands are minimal host-console features, not a full tray/settings UI yet. `GLYPHRAY_DEV_AUTO_APPROVE` remains only for local smoke tests.
-- macOS live capture has a UDP control pairing listener, Keychain trusted-client persistence, signed returning-client challenge/response, LAN discovery advertisement, ScreenCaptureKit frame capture, VideoToolbox encode, GlyphRay Video-channel packetizer, manual UDP send probe, and a continuous UDP video stream start/stop path. The signed macOS path still needs macOS CI/real-device validation, encrypted session transport, reconnect, and backpressure ownership before this becomes the normal session path.
+- macOS live capture has a UDP control pairing listener, Keychain trusted-client persistence, signed returning-client challenge/response, LAN discovery advertisement, ScreenCaptureKit frame capture, VideoToolbox encode, GlyphRay Video-channel packetizer, manual UDP send probe, a continuous UDP video stream start/stop path, and bounded video send backpressure counters. The signed macOS path still needs macOS CI/real-device validation, encrypted session transport, reconnect, and full session ownership before this becomes the normal session path.
 - `GLYPHRAY_ENABLE_PEN_INJECTION` uses temporary 1920x1080 stretch mapping until display negotiation and calibration are fully wired.
 - `GLYPHRAY_ENABLE_TOUCH_INJECTION`, `GLYPHRAY_ENABLE_MOUSE_INJECTION`, and `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` are explicit smoke-test flags until per-device input permissions are exposed in the host UI.
 - Gamepad packets are decoded on Windows, but virtual controller injection still needs a ViGEm/virtual HID backend.

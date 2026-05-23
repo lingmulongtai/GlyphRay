@@ -93,18 +93,19 @@ cargo test --workspace
 - Build the SwiftPM host on macOS 13+ with `swift build`.
 - Confirm GitHub Actions `CI / macOS host SwiftPM build` passes on `macos-14`.
 - Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
-- Use the Screen Recording and Accessibility request buttons and confirm macOS opens the expected permission prompts.
+- Use the Screen Recording, Accessibility, and Audio request buttons and confirm macOS opens the expected permission prompts.
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
 - Start the macOS Control runtime and confirm the discovery status reports sent announcements. On a LAN that allows broadcast, confirm Android host discovery shows the macOS host.
 - Start the macOS Control runtime, add the macOS host manually in Android using UDP port `44999`, send a pairing request, and confirm macOS lists the approved client while Android receives `PairingResult`.
 - After pairing, confirm the macOS UDP target fields are populated with the Android client endpoint learned from the control packet source.
+- After pairing, press `Start Approved Stream` and confirm the stream targets the approved Android endpoint without manually typing host/port.
 - Restart the macOS host after a successful pairing and confirm the trusted client list is restored from Keychain. Pair the same Android device again and confirm macOS sends `AuthChallenge`, Android returns `AuthResponse`, and macOS accepts only after signature verification. Use `Clear Trust` and confirm the list is removed.
 - Run the Live Capture Probe and confirm a short `SCStream` session reports at least one captured frame.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Live Encode Probe and confirm captured frame count, encoded frame count, and encoded byte count are non-zero after Screen Recording permission is granted.
 - Run the Live Transport Probe and confirm captured frame count, encoded frame count, Video-channel datagram count, and transport byte count are non-zero.
 - Run a local UDP listener on the typed target port, then run UDP Send Probe and confirm the listener receives `GLYT` Video-channel datagrams.
-- Run the continuous UDP stream path against a local UDP listener, leave it active for at least ten seconds, then stop it and confirm the UI reports non-zero encoded frames, scheduled datagrams, and scheduled bytes.
+- Run the continuous UDP stream path against a local UDP listener, leave it active for at least ten seconds, then stop it and confirm the UI reports non-zero encoded frames, scheduled/sent datagrams, scheduled/sent bytes, in-flight count, high watermark, and dropped datagrams. Under artificial receiver/network delay, confirm drops increase instead of latency growing without bound.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.

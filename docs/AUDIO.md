@@ -6,6 +6,7 @@ Audio is a Milestone 5 feature. The repository now includes `crates/audio` with:
 - PCM/Opus codec intent
 - `AudioPacketizer`
 - protocol `AudioFrame` integration
+- macOS host audio permission status and request UI
 
 Next implementation work:
 
@@ -14,4 +15,3 @@ Next implementation work:
 - Android AudioTrack playback.
 - Opus encode/decode integration.
 - Drift correction between video and audio clocks.
-

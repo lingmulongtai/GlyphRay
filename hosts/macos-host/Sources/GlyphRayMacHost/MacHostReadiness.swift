@@ -51,6 +51,10 @@ final class MacPermissionController {
         #endif
     }
 
+    func requestAudioAccess(completion: @escaping (Bool) -> Void) {
+        audioController.requestAuthorization(completion: completion)
+    }
+
     private func screenRecordingStatus() -> String {
         #if canImport(ApplicationServices)
         if #available(macOS 10.15, *) {

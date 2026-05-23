@@ -58,6 +58,13 @@ struct MacLiveUdpStreamResult: Equatable {
     let encodedBytes: Int
     let scheduledDatagrams: Int
     let scheduledBytes: Int
+    let sentDatagrams: Int
+    let sentBytes: Int
+    let droppedDatagrams: Int
+    let droppedBytes: Int
+    let inFlightDatagrams: Int
+    let highWatermarkDatagrams: Int
+    let publisherError: String?
     let running: Bool
     let target: MacUdpSendTarget
 }
@@ -492,6 +499,13 @@ final class MacLiveCaptureController: NSObject {
             encodedBytes: encodedBytes,
             scheduledDatagrams: snapshot.scheduledDatagrams,
             scheduledBytes: snapshot.scheduledBytes,
+            sentDatagrams: snapshot.sentDatagrams,
+            sentBytes: snapshot.sentBytes,
+            droppedDatagrams: snapshot.droppedDatagrams,
+            droppedBytes: snapshot.droppedBytes,
+            inFlightDatagrams: snapshot.inFlightDatagrams,
+            highWatermarkDatagrams: snapshot.highWatermarkDatagrams,
+            publisherError: snapshot.lastError,
             running: running,
             target: snapshot.target
         )

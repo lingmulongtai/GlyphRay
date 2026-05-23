@@ -132,6 +132,9 @@ Current overall progress estimate: 98%.
 - [x] Add macOS LAN discovery advertiser for Android host-list visibility on local networks.
 - [x] Persist macOS approved client records in Keychain and restore them on host startup.
 - [x] Add macOS signed returning-client `AuthChallenge` / `AuthResponse` verification using Android Keystore public-key DER and SHA-256 trusted ids.
+- [x] Add macOS bounded UDP video publisher backpressure counters for continuous stream probes.
+- [x] Add macOS approved-client stream action that targets the newest paired Android endpoint.
+- [x] Add macOS audio permission request path in the host UI.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.

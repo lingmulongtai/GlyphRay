@@ -23,5 +23,14 @@ final class AudioCaptureController {
         return "AVFoundation unavailable"
         #endif
     }
-}
 
+    func requestAuthorization(completion: @escaping (Bool) -> Void) {
+        #if canImport(AVFoundation)
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            completion(granted)
+        }
+        #else
+        completion(false)
+        #endif
+    }
+}

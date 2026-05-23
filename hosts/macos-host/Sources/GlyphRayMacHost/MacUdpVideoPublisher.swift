@@ -8,20 +8,36 @@ struct MacUdpPublisherSnapshot: Equatable {
     let target: MacUdpSendTarget
     let scheduledDatagrams: Int
     let scheduledBytes: Int
+    let sentDatagrams: Int
+    let sentBytes: Int
+    let droppedDatagrams: Int
+    let droppedBytes: Int
+    let inFlightDatagrams: Int
+    let highWatermarkDatagrams: Int
+    let lastError: String?
 }
 
 final class MacUdpVideoPublisher {
     private let target: MacUdpSendTarget
+    private let maxInFlightDatagrams: Int
     private let queue = DispatchQueue(label: "com.glyphray.mac.udp-video-publisher")
     private var scheduledDatagrams = 0
     private var scheduledBytes = 0
+    private var sentDatagrams = 0
+    private var sentBytes = 0
+    private var droppedDatagrams = 0
+    private var droppedBytes = 0
+    private var inFlightDatagrams = 0
+    private var highWatermarkDatagrams = 0
+    private var lastError: String?
 
     #if canImport(Network)
     private var connection: NWConnection?
     #endif
 
-    init(target: MacUdpSendTarget) throws {
+    init(target: MacUdpSendTarget, maxInFlightDatagrams: Int = 96) throws {
         self.target = target
+        self.maxInFlightDatagrams = max(1, maxInFlightDatagrams)
 
         #if canImport(Network)
         guard let port = NWEndpoint.Port(rawValue: target.port) else {
@@ -46,20 +62,46 @@ final class MacUdpVideoPublisher {
             guard let self else {
                 return
             }
+            guard let connection = self.connection else {
+                self.droppedDatagrams += 1
+                self.droppedBytes += bytes.count
+                self.lastError = "video publisher is stopped"
+                return
+            }
+            guard self.inFlightDatagrams < self.maxInFlightDatagrams else {
+                self.droppedDatagrams += 1
+                self.droppedBytes += bytes.count
+                self.lastError = "video send backlog capped at \(self.maxInFlightDatagrams) datagrams"
+                return
+            }
             self.scheduledDatagrams += 1
             self.scheduledBytes += bytes.count
-            self.connection?.send(content: bytes, completion: .contentProcessed { _ in })
+            self.inFlightDatagrams += 1
+            self.highWatermarkDatagrams = max(self.highWatermarkDatagrams, self.inFlightDatagrams)
+            connection.send(content: bytes, completion: .contentProcessed { [weak self] error in
+                self?.queue.async {
+                    guard let self else {
+                        return
+                    }
+                    self.inFlightDatagrams = max(0, self.inFlightDatagrams - 1)
+                    if let error {
+                        self.droppedDatagrams += 1
+                        self.droppedBytes += bytes.count
+                        self.lastError = "\(error)"
+                    } else {
+                        self.sentDatagrams += 1
+                        self.sentBytes += bytes.count
+                        self.lastError = nil
+                    }
+                }
+            })
         }
         #endif
     }
 
     func snapshot() -> MacUdpPublisherSnapshot {
         queue.sync {
-            MacUdpPublisherSnapshot(
-                target: target,
-                scheduledDatagrams: scheduledDatagrams,
-                scheduledBytes: scheduledBytes
-            )
+            snapshotLocked()
         }
     }
 
@@ -69,11 +111,22 @@ final class MacUdpVideoPublisher {
             connection?.cancel()
             connection = nil
             #endif
-            return MacUdpPublisherSnapshot(
-                target: target,
-                scheduledDatagrams: scheduledDatagrams,
-                scheduledBytes: scheduledBytes
-            )
+            return snapshotLocked()
         }
+    }
+
+    private func snapshotLocked() -> MacUdpPublisherSnapshot {
+        MacUdpPublisherSnapshot(
+            target: target,
+            scheduledDatagrams: scheduledDatagrams,
+            scheduledBytes: scheduledBytes,
+            sentDatagrams: sentDatagrams,
+            sentBytes: sentBytes,
+            droppedDatagrams: droppedDatagrams,
+            droppedBytes: droppedBytes,
+            inFlightDatagrams: inFlightDatagrams,
+            highWatermarkDatagrams: highWatermarkDatagrams,
+            lastError: lastError
+        )
     }
 }
