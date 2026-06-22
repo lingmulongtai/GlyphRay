@@ -5,11 +5,31 @@
       <Directory Id="INSTALLFOLDER" Name="GlyphRay Host" />
     </StandardDirectory>
 
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="GlyphRayProgramMenuFolder" Name="GlyphRay" />
+    </StandardDirectory>
+
     <ComponentGroup Id="GlyphRayHostComponents" Directory="INSTALLFOLDER">
       <Component Id="GlyphRayHostExe">
         <File
           Id="GlyphRayHostExeFile"
           Source="$(var.PayloadDir)\glyphray-windows-host.exe"
+          KeyPath="yes" />
+      </Component>
+      <Component Id="GlyphRayStartMenuShortcut" Directory="GlyphRayProgramMenuFolder">
+        <Shortcut
+          Id="GlyphRayHostShortcut"
+          Name="GlyphRay Host"
+          Description="Start the GlyphRay desktop host"
+          Target="[#GlyphRayHostExeFile]"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveGlyphRayProgramMenuFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\GlyphRay\Host"
+          Name="Installed"
+          Type="integer"
+          Value="1"
           KeyPath="yes" />
       </Component>
     </ComponentGroup>

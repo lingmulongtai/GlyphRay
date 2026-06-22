@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+pub mod session_wire;
 pub mod stylus_wire;
 
 pub const MAGIC: [u8; 4] = *b"GLYR";
@@ -54,6 +55,8 @@ pub enum MessageKind {
     Disconnect = 18,
     TouchInputBatch = 19,
     GamepadInput = 20,
+    SessionKeyExchange = 21,
+    SessionKeyConfirm = 22,
 }
 
 impl TryFrom<u16> for MessageKind {
@@ -81,6 +84,8 @@ impl TryFrom<u16> for MessageKind {
             18 => Ok(Self::Disconnect),
             19 => Ok(Self::TouchInputBatch),
             20 => Ok(Self::GamepadInput),
+            21 => Ok(Self::SessionKeyExchange),
+            22 => Ok(Self::SessionKeyConfirm),
             _ => Err(ProtocolError::Serialization(format!(
                 "unknown message kind {value}"
             ))),

@@ -1,9 +1,10 @@
 package com.glyphray.android.ui.video
 
+import android.content.Context
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.MotionEvent
-import android.view.KeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +27,13 @@ import com.glyphray.android.ui.components.SessionTelemetrySnapshot
 import com.glyphray.android.video.RemoteVideoDecoder
 import com.glyphray.android.video.RemoteVideoStreamController
 import com.glyphray.android.video.VideoDecoderConfig
+
+private class RemoteSurfaceView(context: Context) : SurfaceView(context) {
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+}
 
 @Composable
 fun RemoteDisplayView(
@@ -56,7 +64,7 @@ fun RemoteDisplayView(
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
-                SurfaceView(context).apply {
+                RemoteSurfaceView(context).apply {
                     isFocusable = true
                     isFocusableInTouchMode = true
                     setBackgroundColor(android.graphics.Color.BLACK)
@@ -95,7 +103,11 @@ fun RemoteDisplayView(
             update = { view ->
                 view.requestFocus()
                 view.setOnTouchListener { _, event ->
-                    onInputEvent?.invoke(event) ?: false
+                    val handled = onInputEvent?.invoke(event) ?: false
+                    if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        view.performClick()
+                    }
+                    handled
                 }
                 view.setOnKeyListener { _, _, event ->
                     onKeyEvent?.invoke(event) ?: false

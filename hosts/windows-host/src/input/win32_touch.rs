@@ -36,11 +36,13 @@ impl TouchInjector for PlatformTouchInjector {
             let radius_x = (sample.major.max(8.0) * 0.5).round() as i32;
             let radius_y = (sample.minor.max(8.0) * 0.5).round() as i32;
 
-            let mut pointer_info = POINTER_INFO::default();
-            pointer_info.pointerType = PT_TOUCH;
-            pointer_info.pointerId = sample.pointer_id;
-            pointer_info.ptPixelLocation = POINT { x, y };
-            pointer_info.pointerFlags = POINTER_FLAG_PRIMARY | POINTER_FLAG_INRANGE;
+            let mut pointer_info = POINTER_INFO {
+                pointerType: PT_TOUCH,
+                pointerId: sample.pointer_id,
+                ptPixelLocation: POINT { x, y },
+                pointerFlags: POINTER_FLAG_PRIMARY | POINTER_FLAG_INRANGE,
+                ..Default::default()
+            };
             pointer_info.pointerFlags |= match sample.action {
                 TouchAction::Down => POINTER_FLAG_DOWN | POINTER_FLAG_INCONTACT,
                 TouchAction::Move => POINTER_FLAG_UPDATE | POINTER_FLAG_INCONTACT,

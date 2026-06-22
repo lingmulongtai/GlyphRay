@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="GlyphRay Host" Manufacturer="GlyphRay" Version="0.1.0" UpgradeCode="11111111-2222-3333-4444-555555555555">
+  <Package
+    Name="GlyphRay Host"
+    Manufacturer="GlyphRay"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="B49EE87F-44B6-4BCD-866C-D96A43EB20CC"
+    Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer GlyphRay Host is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPCOMMENTS" Value="Low-latency creative remote desktop host" />
     <Feature Id="MainFeature" Title="GlyphRay Host" Level="1">
       <ComponentGroupRef Id="GlyphRayHostComponents" />
     </Feature>
   </Package>
 </Wix>
-

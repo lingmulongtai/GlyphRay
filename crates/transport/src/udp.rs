@@ -1,5 +1,7 @@
+use crate::secure::{decode_sealed_datagram, encode_sealed_datagram};
 use crate::{ChannelKind, ConnectionStats, RealtimeTransport, TransportError, TransportPacket};
 use glyphray_protocol::MessageKind;
+use glyphray_security::SealedPacket;
 use std::io::ErrorKind;
 use std::net::{SocketAddr, UdpSocket};
 
@@ -7,6 +9,13 @@ const DATAGRAM_MAGIC: [u8; 4] = *b"GLYT";
 const DATAGRAM_VERSION: u16 = 1;
 const HEADER_LEN: usize = 33;
 const MAX_DATAGRAM_PAYLOAD: usize = 60_000;
+const MAX_WIRE_DATAGRAM: usize = 65_507;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReceivedDatagram {
+    Plain(TransportPacket),
+    Secure(SealedPacket),
+}
 
 pub struct UdpTransport {
     socket: UdpSocket,
@@ -34,7 +43,7 @@ impl UdpServer {
                 packet_loss_percent: 0.0,
                 estimated_bandwidth_kbps: 0,
             },
-            rx_buffer: vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD],
+            rx_buffer: vec![0_u8; MAX_WIRE_DATAGRAM],
             tx_buffer: Vec::with_capacity(HEADER_LEN + 1_500),
         })
     }
@@ -68,15 +77,46 @@ impl UdpServer {
         }
     }
 
-    pub fn poll_recv_from(
+    pub fn try_send_secure_to(
         &mut self,
-    ) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
+        packet: &SealedPacket,
+        peer: SocketAddr,
+    ) -> Result<bool, TransportError> {
+        self.tx_buffer = encode_sealed_datagram(packet)?;
+        match self.socket.send_to(&self.tx_buffer, peer) {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(false),
+            Err(err) => Err(io_error(err)),
+        }
+    }
+
+    pub fn poll_recv_datagram(
+        &mut self,
+    ) -> Result<Option<(ReceivedDatagram, SocketAddr)>, TransportError> {
         match self.socket.recv_from(&mut self.rx_buffer) {
             Ok((len, peer)) => {
-                decode_packet(&self.rx_buffer[..len]).map(|packet| Some((packet, peer)))
+                let bytes = &self.rx_buffer[..len];
+                let datagram = if bytes.starts_with(b"GLYE") {
+                    ReceivedDatagram::Secure(decode_sealed_datagram(bytes)?)
+                } else {
+                    ReceivedDatagram::Plain(decode_packet(bytes)?)
+                };
+                Ok(Some((datagram, peer)))
             }
             Err(err) if err.kind() == ErrorKind::WouldBlock => Ok(None),
             Err(err) => Err(io_error(err)),
+        }
+    }
+
+    pub fn poll_recv_from(
+        &mut self,
+    ) -> Result<Option<(TransportPacket, SocketAddr)>, TransportError> {
+        match self.poll_recv_datagram()? {
+            Some((ReceivedDatagram::Plain(packet), peer)) => Ok(Some((packet, peer))),
+            Some((ReceivedDatagram::Secure(_), _)) => Err(TransportError::Decode(
+                "secure datagram requires a session-aware receiver".to_string(),
+            )),
+            None => Ok(None),
         }
     }
 
@@ -99,7 +139,7 @@ impl UdpTransport {
                 packet_loss_percent: 0.0,
                 estimated_bandwidth_kbps: 0,
             },
-            rx_buffer: vec![0_u8; HEADER_LEN + MAX_DATAGRAM_PAYLOAD],
+            rx_buffer: vec![0_u8; MAX_WIRE_DATAGRAM],
             tx_buffer: Vec::with_capacity(HEADER_LEN + 1_500),
         })
     }

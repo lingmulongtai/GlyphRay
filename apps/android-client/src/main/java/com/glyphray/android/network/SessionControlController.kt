@@ -14,7 +14,17 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import com.glyphray.android.security.AndroidDeviceKeys
+import com.glyphray.android.security.TrustedHostIdentityStore
+import com.glyphray.android.input.StylusStreamPacket
 import com.glyphray.android.video.RemoteVideoStreamController
+
+interface SessionRealtimeInputSender {
+    val isInputTransportReady: Boolean
+
+    fun sendStylus(packet: StylusStreamPacket): Int
+
+    fun sendEncodedInput(messageKind: Int, frame: ByteArray): Int
+}
 
 data class SessionControlState(
     val isConnected: Boolean = false,
@@ -29,6 +39,8 @@ data class SessionControlState(
     val videoFramesCompleted: Long = 0,
     val videoFramesQueuedToDecoder: Long = 0,
     val lastVideoSequence: Long? = null,
+    val secureSession: Boolean = false,
+    val hostIdentityFingerprint: String? = null,
     val videoSettings: ClientVideoSettings = ClientVideoSettings(),
     val inputSettings: ClientInputSettings = ClientInputSettings(),
     val lastAction: String = "Idle",
@@ -44,7 +56,8 @@ data class SessionControlState(
 class SessionControlController(
     initialVideoSettings: ClientVideoSettings = ClientVideoSettings(),
     initialInputSettings: ClientInputSettings = ClientInputSettings(),
-) : Closeable {
+    private val trustedHostIdentityStore: TrustedHostIdentityStore? = null,
+) : Closeable, SessionRealtimeInputSender {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val receiverExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: ControlUdpClient? = null
@@ -64,11 +77,13 @@ class SessionControlController(
         executor.execute {
             runCatching {
                 client?.close()
-                val nextClient = ControlUdpClient().also { it.connect(host) }
+                val nextClient = ControlUdpClient(trustedHostIdentityStore).also { it.connect(host) }
                 client = nextClient
                 state = state.copy(
                     isConnected = true,
                     connectedHostName = host.hostName,
+                    secureSession = false,
+                    hostIdentityFingerprint = null,
                     lastAction = "Connected to ${host.hostName}",
                     lastError = null,
                 )
@@ -173,6 +188,19 @@ class SessionControlController(
         videoStreamController = controller
     }
 
+    override val isInputTransportReady: Boolean
+        get() = client?.isSecure == true
+
+    override fun sendStylus(packet: StylusStreamPacket): Int {
+        return client?.sendStylus(packet)
+            ?: error("Realtime session transport is not connected")
+    }
+
+    override fun sendEncodedInput(messageKind: Int, frame: ByteArray): Int {
+        return client?.sendEncodedInput(messageKind, frame)
+            ?: error("Realtime session transport is not connected")
+    }
+
     private fun onGamepadKeyEvent(event: KeyEvent): Boolean {
         if (!state.inputSettings.gameControllerEnabled) {
             return false
@@ -207,7 +235,15 @@ class SessionControlController(
             client?.close()
             client = null
             receiving = false
-            state = state.copy(isConnected = false, connectedHostName = null, lastAction = "Disconnected")
+            state = state.copy(
+                isConnected = false,
+                connectedHostName = null,
+                secureSession = false,
+                hostIdentityFingerprint = null,
+                displays = emptyList(),
+                lastAction = "Disconnected",
+                lastError = null,
+            )
         }
     }
 
@@ -256,7 +292,11 @@ class SessionControlController(
     private fun handleTransportPacket(packet: DecodedTransportPacket) {
         when (packet.channel) {
             TransportChannel.Control -> {
-                handleControlMessage(ProtocolFrameCodec.decodeFrame(packet.payload).message)
+                if (packet.messageKind == TransportMessageKind.sessionKeyExchange) {
+                    handleSessionKeyExchange(packet.payload)
+                } else {
+                    handleControlMessage(ProtocolFrameCodec.decodeFrame(packet.payload).message)
+                }
             }
             TransportChannel.Video -> {
                 if (packet.messageKind != TransportMessageKind.videoFrame) {
@@ -282,6 +322,22 @@ class SessionControlController(
         }
     }
 
+    private fun handleSessionKeyExchange(payload: ByteArray) {
+        executor.execute {
+            sendControl("Secure session") { client ->
+                val fingerprint = client.establishSecureSession(payload)
+                state = state.copy(
+                    secureSession = true,
+                    hostIdentityFingerprint = fingerprint,
+                    responsesReceived = state.responsesReceived + 1,
+                    lastAction = "Encrypted session established",
+                    lastError = null,
+                )
+                client.sendEncoderConfig(state.videoSettings)
+            }
+        }
+    }
+
     private fun handleControlMessage(message: ControlProtocolMessage) {
         when (message) {
             is ControlProtocolMessage.AuthChallenge -> {
@@ -304,9 +360,6 @@ class SessionControlController(
                     lastAction = if (message.accepted) "Pairing accepted" else "Pairing rejected",
                     lastError = message.reason,
                 )
-                if (message.accepted) {
-                    sendEncoderConfig()
-                }
             }
             is ControlProtocolMessage.LatencyPong -> {
                 val nowUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L
@@ -338,20 +391,50 @@ class SessionControlController(
     }
 }
 
-private class ControlUdpClient : Closeable {
+private class ControlUdpClient(
+    private val trustedHostIdentityStore: TrustedHostIdentityStore?,
+) : Closeable {
     private val socket = DatagramSocket()
     private val deviceKeys = AndroidDeviceKeys()
     private var remote: InetSocketAddress? = null
     private var nextTransportSequence = 1L
     private var nextFrameSequence = 1L
+    private var connectedHostId: String? = null
+    @Volatile private var secureCodec: SecureDatagramCodec? = null
     @Volatile var isOpen: Boolean = true
         private set
+    val isSecure: Boolean
+        get() = secureCodec != null
 
     fun connect(host: DiscoveredHost) {
         remote = host.endpoint
+        connectedHostId = host.hostId
+        secureCodec = null
         socket.connect(host.endpoint)
     }
 
+    @Synchronized
+    fun establishSecureSession(encodedExchange: ByteArray): String {
+        val target = remote ?: error("ControlUdpClient is not connected to a host")
+        val proposal = AndroidSessionKeyHandshake.begin(
+            encodedServerExchange = encodedExchange,
+            deviceId = deviceKeys.trustedDeviceId(),
+            signClientPayload = deviceKeys::signSessionPayload,
+        )
+        connectedHostId?.let { hostId ->
+            trustedHostIdentityStore?.verifyOrTrust(hostId, proposal.hostIdentityFingerprint)
+        }
+        val confirmDatagram = TransportPacketCodec.encodeControl(
+            sequence = nextTransportSequence++,
+            messageKind = TransportMessageKind.sessionKeyConfirm,
+            payload = proposal.encodedClientConfirm,
+        )
+        socket.send(DatagramPacket(confirmDatagram, confirmDatagram.size, target))
+        secureCodec = proposal.codec
+        return proposal.hostIdentityFingerprint
+    }
+
+    @Synchronized
     fun sendPairingRequest(deviceName: String): Int {
         val frame = ProtocolFrameCodec.encodePairingRequest(
             sequence = nextFrameSequence++,
@@ -361,6 +444,7 @@ private class ControlUdpClient : Closeable {
         return sendControl(TransportMessageKind.pairingRequest, frame)
     }
 
+    @Synchronized
     fun sendAuthResponse(challenge: ControlProtocolMessage.AuthChallenge): Int {
         val trustedDeviceId = deviceKeys.trustedDeviceId()
         val signature = deviceKeys.signTrustedChallenge(
@@ -377,11 +461,13 @@ private class ControlUdpClient : Closeable {
         return sendControl(TransportMessageKind.authResponse, frame)
     }
 
+    @Synchronized
     fun sendLatencyPing(): Int {
         val frame = ProtocolFrameCodec.encodeLatencyPing(sequence = nextFrameSequence++)
         return sendControl(TransportMessageKind.latencyPing, frame)
     }
 
+    @Synchronized
     fun sendEncoderConfig(settings: ClientVideoSettings): Int {
         val frame = ProtocolFrameCodec.encodeEncoderConfig(
             sequence = nextFrameSequence++,
@@ -390,6 +476,7 @@ private class ControlUdpClient : Closeable {
         return sendControl(TransportMessageKind.encoderConfig, frame)
     }
 
+    @Synchronized
     fun sendKeyboardInput(event: KeyEvent): Int {
         val frame = ProtocolFrameCodec.encodeKeyboardInput(
             sequence = nextFrameSequence++,
@@ -398,6 +485,7 @@ private class ControlUdpClient : Closeable {
         return sendInput(TransportMessageKind.keyboardInput, frame)
     }
 
+    @Synchronized
     fun sendSpecialKey(key: SpecialRemoteKey): Int {
         val down = ProtocolFrameCodec.encodeKeyboardInput(
             sequence = nextFrameSequence++,
@@ -417,6 +505,7 @@ private class ControlUdpClient : Closeable {
             sendInput(TransportMessageKind.keyboardInput, up)
     }
 
+    @Synchronized
     fun sendGamepadInput(
         controllerId: Int,
         buttons: Int,
@@ -441,6 +530,21 @@ private class ControlUdpClient : Closeable {
         return sendInput(TransportMessageKind.gamepadInput, frame)
     }
 
+    @Synchronized
+    fun sendStylus(packet: StylusStreamPacket): Int {
+        val target = remote ?: error("ControlUdpClient is not connected to a host")
+        val datagram = TransportPacketCodec.encodeStylusInput(
+            sequence = nextTransportSequence++,
+            packet = packet,
+        )
+        return sendEncryptedSessionDatagram(target, datagram)
+    }
+
+    @Synchronized
+    fun sendEncodedInput(messageKind: Int, frame: ByteArray): Int {
+        return sendInput(messageKind, frame)
+    }
+
     private fun sendControl(messageKind: Int, frame: ByteArray): Int {
         val target = remote ?: error("ControlUdpClient is not connected to a host")
         val datagram = TransportPacketCodec.encodeControl(
@@ -448,8 +552,7 @@ private class ControlUdpClient : Closeable {
             messageKind = messageKind,
             payload = frame,
         )
-        socket.send(DatagramPacket(datagram, datagram.size, target))
-        return datagram.size
+        return sendSessionDatagram(target, datagram)
     }
 
     private fun sendInput(messageKind: Int, frame: ByteArray): Int {
@@ -461,6 +564,18 @@ private class ControlUdpClient : Closeable {
             timestampUs = android.os.SystemClock.elapsedRealtimeNanos() / 1_000L,
             payload = frame,
         )
+        return sendEncryptedSessionDatagram(target, datagram)
+    }
+
+    private fun sendSessionDatagram(target: InetSocketAddress, plaintext: ByteArray): Int {
+        val datagram = secureCodec?.seal(plaintext) ?: plaintext
+        socket.send(DatagramPacket(datagram, datagram.size, target))
+        return datagram.size
+    }
+
+    private fun sendEncryptedSessionDatagram(target: InetSocketAddress, plaintext: ByteArray): Int {
+        val codec = secureCodec ?: error("Realtime input requires an encrypted session")
+        val datagram = codec.seal(plaintext)
         socket.send(DatagramPacket(datagram, datagram.size, target))
         return datagram.size
     }
@@ -471,7 +586,17 @@ private class ControlUdpClient : Closeable {
         val packet = DatagramPacket(buffer, buffer.size)
         return try {
             socket.receive(packet)
-            TransportPacketCodec.decode(buffer, packet.length)
+            val datagram = buffer.copyOf(packet.length)
+            val plaintext = if (datagram.startsWithSecureMagic()) {
+                val codec = secureCodec ?: error("Encrypted datagram arrived before key exchange")
+                codec.open(datagram)
+            } else {
+                check(secureCodec == null) {
+                    "Plaintext datagram rejected after secure-session establishment"
+                }
+                datagram
+            }
+            TransportPacketCodec.decode(plaintext)
         } catch (_: SocketTimeoutException) {
             null
         }
@@ -481,6 +606,14 @@ private class ControlUdpClient : Closeable {
         isOpen = false
         socket.close()
     }
+}
+
+private fun ByteArray.startsWithSecureMagic(): Boolean {
+    return size >= 4 &&
+        this[0] == 'G'.code.toByte() &&
+        this[1] == 'L'.code.toByte() &&
+        this[2] == 'Y'.code.toByte() &&
+        this[3] == 'E'.code.toByte()
 }
 
 private fun defaultDeviceName(): String = listOfNotNull(

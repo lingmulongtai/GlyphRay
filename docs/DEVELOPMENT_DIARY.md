@@ -1,5 +1,45 @@
 # GlyphRay Development Diary
 
+## 2026-06-22 JST - Encrypted Windows/Android Live Session And Enforced Device Permissions
+
+今日はsecurity foundationを実際のWindows/Android sessionへ接続した。Windows hostはDPAPIで永続化したP-256 identityを持ち、承認後に署名付きephemeral ECDH offerを送る。Androidはhost署名を検証し、host idごとにidentity fingerprintをpinし、Android Keystore identityでclient ephemeral keyを署名する。両側はhandshake transcriptからhost-to-client / client-to-hostの別々のAES-256-GCM鍵を導出し、control、video、stylus、touch、keyboard、mouse、gamepadの`GLYT` datagram全体を`GLYE`へ封入するようになった。
+
+UDPの並べ替えを許容しながらduplicateと古いcounterを拒否する4096 packetのreplay windowも両実装に入れた。鍵確立後のplaintextはWindows/Android双方で拒否し、Windowsはsecure sessionが完成するまでvideoをqueueせず、Androidはsecure codecが無ければrealtime inputを送らない。RustとKotlinには同じ固定ECDH後secret/transcriptから同一の方向別鍵を得るcross-platform vector testを置いた。
+
+もう一つ、host settingsに保存されていた端末別pen/touch/keyboard/mouse/gamepad permissionをrouterの実効gateへ接続した。`trust permission <id> <kind> <on|off>`で保存値とactive sessionを同時に変更でき、denyされたinputはdecodeやWin32 injectionより前で落ちる。ここまで安全境界が揃ったのでvideoとnative inputは標準起動へ変更し、必要な診断時だけ`GLYPHRAY_DISABLE_*`で止める方式にした。
+
+検証は`cargo fmt --check`相当、strict Clippy、Rust workspace全test、Windows host 44 library tests + 8 CLI tests、Windows release build、Android unit tests、debug APK、release APK/AAB、release lintまで成功した。残るsecurity課題はmacOSの同じ`GLYH`/`GLYE`統合、初回pairingのQR/数値によるout-of-band確認、real Android/interactive Windowsでの長時間replay・reconnect・lock/unlock試験である。
+
+現在の実装進捗は90%、製品release準備は72%。
+
+## 2026-06-22 JST - DXGI Desktop Duplication And Full Video Datagram Probe
+
+今日はWindows映像経路からGDI `BitBlt`を外し、DXGI Desktop Duplicationへ置き換えた。capture sessionはdisplayごとにD3D11 device、output duplication、CPU-readable staging textureを保持する。GPU textureのrow pitchを尊重してBGRAを読み戻し、90/180/270度のdisplay rotationを補正し、画面に変化がないtimeoutでは直前frameを再利用する。display変更やlock/unlockで`DXGI_ERROR_ACCESS_LOST`になった場合はsessionを作り直す。
+
+monitor metadataも固定60Hzから実値へ変えた。この端末ではDXGI/GDI metadataから2560x1440 165Hzのprimary displayと、2560x1440 120Hzのsecondary displayを検出した。現在のCodex automation desktopは`DuplicateOutput`を`0x80070005`で拒否したため実pixel captureは通常のinteractive sessionで再検証が必要だが、列挙、adapter/device作成、capture APIのcompile pathは通っている。
+
+`glyphray-encoder-diagnostics`は合成frame fallbackを使い、1280x720 BGRAをMedia Foundationで5,563-byteのAnnex B H.264 keyframeへ4.114msでencodeした。そのaccess unitを1200-byte payloadで5個のGLYT UDP datagramへ分割し、wire encode/decode後に再構築してCRC32 `5eb11eb4`の完全一致まで確認した。Rust workspaceはstrict Clippyと全testが成功し、Windows host testはDesktop Duplicationの回転testを含む41件になった。
+
+現在の実装進捗は87%、製品release準備は67%。次の大きなrelease blockerはlive session encryption、hardware encoder選択、interactive Windows/実Androidの連続stream検証である。
+
+## 2026-06-22 JST - Real Windows Media Foundation H.264 Encoder
+
+release pipelineを整えた後、最大の映像blockerだった`PendingHardwareEncoder`を実装へ置き換えた。WindowsではMicrosoft標準のMedia Foundation H.264 encoder MFTを使い、GDIのBGRA frameをNV12へ変換し、low-latency mode、LowDelayVBRからCBRへの互換fallback、B-frame無効化、GOP/keyframe制御を設定する。出力がAVCC length-prefixならAnnex Bへ正規化し、既存のVideo packetizerへそのまま渡せる。
+
+`glyphray-encoder-diagnostics`も追加し、このWindows端末で実行した。automated desktop sessionではGDI `BitBlt`がinvalid handleになったためsynthetic 1280x720 BGRAへ切り替えたが、最新runでMedia Foundationは5,563-byteのAnnex B keyframeを2.576msで生成した。これで「空payloadをpacketizeするplaceholder」ではなく、実H.264 access unitをapproved peer queueへ流せる。
+
+現在の実装進捗は86%、製品release準備は66%。次の映像課題はWindows Graphics Capture/Desktop Duplication、hardware MFT選択、Android実機とのcontinuous 1080p60検証。
+
+## 2026-06-22 JST - Release Candidate Pipeline And Honest Release Gates
+
+今日は「リリースできる状態」を感覚ではなく成果物で判定できるようにした。rootの `VERSION` を単一のversion sourceにし、Androidはrelease APK/AAB、WindowsはWiX v4 MSI、macOSは通常の `.app` bundleと `.pkg`、zipを同じversionで作る構成へ変更した。GitHub Actionsには `Release Candidate` workflowを追加し、3 platformのartifactと `SHA256SUMS.txt` を一括生成する。
+
+署名も「あとで入れる」だけではなく、CI secretがあればAndroid signing、Windows Authenticode、macOS Developer ID signingとnotarizationへ進む経路を実装した。手動workflowはunsigned engineering candidateを許すが、`vX.Y.Z` tagからの公開はAndroid/Windows/macOSの署名とmacOS notarizationが全部確認できない限り止まる。誤ってunsigned buildを正式releaseにする道を閉じた。
+
+WindowsではWiX 4.0.6を導入し、`GlyphRayHost-0.1.0.msi` を実生成した。Androidもunit test、release APK、release AAB、release lintが成功した。Rustはworkspace全testに加えて `cargo fmt --check` と `cargo clippy --workspace --all-targets -- -D warnings` をCI gateにし、そこで見つかったWin32固有コード19件のlint問題を修正した。
+
+進捗率も見直した。以前の98%は「基盤が存在する割合」で、実映像encoder、暗号化live session、署名、実機pen検証を軽く見積もっていた。現在は実装進捗84%、製品release準備64%とする。数字は下がったが、完成条件は以前より明確で、release候補を毎回同じ方法で作れるようになった。
+
 ## 2026-05-24 JST - macOS Stream Backpressure And Audio Permission
 
 今日は macOS host の連続UDP映像送信を低遅延寄りに固めた。`MacUdpVideoPublisher` に in-flight datagram cap を入れ、送信待ちが一定数を超えたら古い遅延を抱え込まずに video datagram を drop として数えるようにした。snapshot には scheduled / sent / dropped datagram、bytes、in-flight、high watermark、last error が出るので、`Stop Stream` 後に「送れているのか、詰まって落としているのか」がUIから見える。

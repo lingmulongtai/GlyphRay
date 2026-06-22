@@ -9,7 +9,7 @@ use glyphray_windows_host::backend::{
     PermissionPolicy, PermissionState,
 };
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
-use glyphray_windows_host::encoder::{EncoderSettings, PendingHardwareEncoder};
+use glyphray_windows_host::encoder::{EncoderSettings, PlatformVideoEncoder};
 use glyphray_windows_host::input::{
     create_keyboard_injector, create_mouse_injector, create_pen_injector, create_touch_injector,
     KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
@@ -18,7 +18,10 @@ use glyphray_windows_host::input::{
 use glyphray_windows_host::permission_ui::{
     permission_dialog_enabled, prompt_pairing_decision, PairingDecision, PairingPrompt,
 };
-use glyphray_windows_host::settings::{EncoderPreset, HostSettingsStore, TrustedDevice};
+use glyphray_windows_host::secrets::{load_or_create_host_identity, PlatformSecretStore};
+use glyphray_windows_host::settings::{
+    EncoderPreset, HostSettingsStore, TrustedDevice, TrustedDevicePermissions,
+};
 use glyphray_windows_host::startup::{StartupManager, StartupRegistration};
 use glyphray_windows_host::streaming::VideoPacketPipeline;
 use glyphray_windows_host::HostConfig;
@@ -107,6 +110,13 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         mouse_bridge,
         permission_policy,
     );
+    let mut secret_store = PlatformSecretStore::open()?;
+    let host_identity = load_or_create_host_identity(&mut secret_store)?;
+    println!(
+        "Host identity fingerprint: {}",
+        host_identity.fingerprint()?
+    );
+    runtime.set_host_identity(host_identity);
     let settings_store = HostSettingsStore::open()?;
     let mut host_encoder_override = settings_store.load()?.encoder_override;
     if let Some(config) = host_encoder_override.as_ref() {
@@ -212,7 +222,7 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
 }
 
 struct RuntimeVideoPump {
-    pipeline: VideoPacketPipeline<WindowsGraphicsCaptureBackend, PendingHardwareEncoder>,
+    pipeline: VideoPacketPipeline<WindowsGraphicsCaptureBackend, PlatformVideoEncoder>,
     settings: EncoderSettings,
     display_id: u32,
     frame_interval: Duration,
@@ -231,14 +241,12 @@ fn create_runtime_video_pump(
     runtime: &HostBackendRuntime<Box<dyn PenInjector>>,
     host_override: Option<&EncoderConfig>,
 ) -> Option<RuntimeVideoPump> {
-    if std::env::var_os("GLYPHRAY_ENABLE_VIDEO_STREAM").is_none() {
-        println!(
-            "Video stream pump is disabled. Set GLYPHRAY_ENABLE_VIDEO_STREAM=1 to queue H.264 video fragments for approved clients."
-        );
+    if std::env::var_os("GLYPHRAY_DISABLE_VIDEO_STREAM").is_some() {
+        println!("Video stream pump is disabled by GLYPHRAY_DISABLE_VIDEO_STREAM.");
         return None;
     }
 
-    let capture = WindowsGraphicsCaptureBackend;
+    let capture = WindowsGraphicsCaptureBackend::new();
     let client_config = runtime.latest_approved_encoder_config();
     let requested_config = host_override.or(client_config.as_ref());
     let requested_display_id = requested_config
@@ -258,9 +266,9 @@ fn create_runtime_video_pump(
 
     let pump_settings = encoder_settings_for_display(&display, requested_config);
     let frame_interval = frame_interval_for_fps(pump_settings.fps);
-    let encoder = PendingHardwareEncoder::new(pump_settings.clone());
+    let encoder = PlatformVideoEncoder::new(pump_settings.clone());
     let mut pump = VideoPacketPipeline::new(
-        WindowsGraphicsCaptureBackend,
+        WindowsGraphicsCaptureBackend::new(),
         encoder,
         VideoPacketizer::default(),
         display.id,
@@ -268,7 +276,7 @@ fn create_runtime_video_pump(
     match pump.start() {
         Ok(()) => {
             println!(
-                "Video stream pump is enabled for display {} ({}x{}) at {}fps, {}kbps, {:?}, {:?}. Source={}. Encoder backend is still the placeholder abstraction until a concrete H.264 backend lands.",
+                "Video stream pump is enabled for display {} ({}x{}) at {}fps, {}kbps, {:?}, {:?}. Source={}. Encoder={:?}.",
                 display.id,
                 display.width_px,
                 display.height_px,
@@ -282,7 +290,8 @@ fn create_runtime_video_pump(
                     "client config"
                 } else {
                     "default"
-                }
+                },
+                pump_settings.backend
             );
             Some(RuntimeVideoPump {
                 pipeline: pump,
@@ -365,10 +374,8 @@ fn frame_interval_for_fps(fps: u16) -> Duration {
 }
 
 fn create_runtime_keyboard_bridge() -> Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>> {
-    if std::env::var_os("GLYPHRAY_ENABLE_KEYBOARD_INJECTION").is_none() {
-        println!(
-            "Native keyboard injection is disabled. Set GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1 for LAN keyboard smoke tests."
-        );
+    if std::env::var_os("GLYPHRAY_DISABLE_KEYBOARD_INJECTION").is_some() {
+        println!("Native keyboard injection is disabled by GLYPHRAY_DISABLE_KEYBOARD_INJECTION.");
         return None;
     }
 
@@ -387,10 +394,8 @@ fn create_runtime_keyboard_bridge() -> Option<KeyboardInputBridge<Box<dyn Keyboa
 fn create_runtime_touch_bridge(
     config: &HostConfig,
 ) -> Option<TouchInputBridge<Box<dyn TouchInjector>>> {
-    if std::env::var_os("GLYPHRAY_ENABLE_TOUCH_INJECTION").is_none() {
-        println!(
-            "Native touch injection is disabled. Set GLYPHRAY_ENABLE_TOUCH_INJECTION=1 for LAN touch smoke tests."
-        );
+    if std::env::var_os("GLYPHRAY_DISABLE_TOUCH_INJECTION").is_some() {
+        println!("Native touch injection is disabled by GLYPHRAY_DISABLE_TOUCH_INJECTION.");
         return None;
     }
 
@@ -410,10 +415,8 @@ fn create_runtime_touch_bridge(
 fn create_runtime_mouse_bridge(
     config: &HostConfig,
 ) -> Option<MouseInputBridge<Box<dyn MouseInjector>>> {
-    if std::env::var_os("GLYPHRAY_ENABLE_MOUSE_INJECTION").is_none() {
-        println!(
-            "Native mouse injection is disabled. Set GLYPHRAY_ENABLE_MOUSE_INJECTION=1 for LAN mouse smoke tests."
-        );
+    if std::env::var_os("GLYPHRAY_DISABLE_MOUSE_INJECTION").is_some() {
+        println!("Native mouse injection is disabled by GLYPHRAY_DISABLE_MOUSE_INJECTION.");
         return None;
     }
 
@@ -437,7 +440,7 @@ fn temporary_mapper() -> CoordinateMapper {
 }
 
 fn mapper_for_default_display(config: &HostConfig) -> CoordinateMapper {
-    let capture = WindowsGraphicsCaptureBackend;
+    let capture = WindowsGraphicsCaptureBackend::new();
     let display = capture.list_displays().ok().and_then(|displays| {
         select_video_display(
             displays,
@@ -476,10 +479,8 @@ fn mapper_for_default_display(config: &HostConfig) -> CoordinateMapper {
 fn create_runtime_input_bridge(
     config: &HostConfig,
 ) -> Option<StylusInputBridge<Box<dyn PenInjector>>> {
-    if std::env::var_os("GLYPHRAY_ENABLE_PEN_INJECTION").is_none() {
-        println!(
-            "Native pen injection is disabled. Set GLYPHRAY_ENABLE_PEN_INJECTION=1 for LAN input smoke tests."
-        );
+    if std::env::var_os("GLYPHRAY_DISABLE_PEN_INJECTION").is_some() {
+        println!("Native pen injection is disabled by GLYPHRAY_DISABLE_PEN_INJECTION.");
         return None;
     }
 
@@ -522,8 +523,22 @@ enum HostCommand {
     StartupDisable,
     TrustList,
     TrustForget(String),
+    TrustPermission {
+        id: String,
+        input: TrustedInputKind,
+        allow: bool,
+    },
     TrustClear,
     Help,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TrustedInputKind {
+    Pen,
+    Touch,
+    Keyboard,
+    Mouse,
+    Gamepad,
 }
 
 struct PermissionDialogCoordinator {
@@ -619,7 +634,31 @@ fn parse_trust_command(parts: Vec<&str>) -> Option<HostCommand> {
     match parts.as_slice() {
         [] | ["list"] => Some(HostCommand::TrustList),
         ["forget", id] | ["remove", id] => Some(HostCommand::TrustForget((*id).to_string())),
+        ["permission", id, input, value] => Some(HostCommand::TrustPermission {
+            id: (*id).to_string(),
+            input: parse_trusted_input_kind(input)?,
+            allow: parse_permission_value(value)?,
+        }),
         ["clear"] => Some(HostCommand::TrustClear),
+        _ => None,
+    }
+}
+
+fn parse_trusted_input_kind(value: &str) -> Option<TrustedInputKind> {
+    match value {
+        "pen" => Some(TrustedInputKind::Pen),
+        "touch" => Some(TrustedInputKind::Touch),
+        "keyboard" => Some(TrustedInputKind::Keyboard),
+        "mouse" => Some(TrustedInputKind::Mouse),
+        "gamepad" | "controller" => Some(TrustedInputKind::Gamepad),
+        _ => None,
+    }
+}
+
+fn parse_permission_value(value: &str) -> Option<bool> {
+    match value {
+        "on" | "allow" | "true" | "1" => Some(true),
+        "off" | "deny" | "false" | "0" => Some(false),
         _ => None,
     }
 }
@@ -904,6 +943,18 @@ fn drain_console_commands(
                 Ok((_, false)) => println!("Trusted device `{id}` was not found."),
                 Err(error) => println!("Forgetting trusted device `{id}` failed: {error}"),
             },
+            HostCommand::TrustPermission { id, input, allow } => {
+                match update_trusted_device_permission(settings_store, &id, input, allow) {
+                    Ok(Some(permissions)) => {
+                        let active = runtime.update_device_permissions(&id, permissions);
+                        println!(
+                            "Updated trusted device `{id}` permission {input:?}={allow}; active sessions updated={active}."
+                        );
+                    }
+                    Ok(None) => println!("Trusted device `{id}` was not found."),
+                    Err(error) => println!("Updating trusted device `{id}` failed: {error}"),
+                }
+            }
             HostCommand::TrustClear => match settings_store.clear_trusted_devices() {
                 Ok(_) => println!("All trusted devices were removed."),
                 Err(error) => println!("Clearing trusted devices failed: {error}"),
@@ -914,6 +965,7 @@ fn drain_console_commands(
                 println!("  sessions");
                 println!("  trust list");
                 println!("  trust forget <trusted-device-id>");
+                println!("  trust permission <trusted-device-id> <pen|touch|keyboard|mouse|gamepad> <on|off>");
                 println!("  trust clear");
                 println!("  encoder status");
                 println!("  encoder override <width>x<height> <fps> <kbps>");
@@ -961,8 +1013,39 @@ fn maybe_challenge_trusted_pairing(
         "Trusted device matched by public key fingerprint: id={} label=`{}` peer={peer}",
         device.id, device.label
     );
-    let events = runtime.challenge_peer_as_and_notify(server, *peer, device.id.clone())?;
+    let events = runtime.challenge_peer_as_and_notify_with_permissions(
+        server,
+        *peer,
+        device.id.clone(),
+        device.permissions.clone(),
+    )?;
     Ok(Some(events))
+}
+
+fn update_trusted_device_permission(
+    settings_store: &HostSettingsStore,
+    id: &str,
+    input: TrustedInputKind,
+    allow: bool,
+) -> Result<Option<TrustedDevicePermissions>, Box<dyn Error>> {
+    let settings = settings_store.load()?;
+    let Some(mut device) = settings
+        .trusted_devices
+        .into_iter()
+        .find(|device| device.id.eq_ignore_ascii_case(id))
+    else {
+        return Ok(None);
+    };
+    match input {
+        TrustedInputKind::Pen => device.permissions.allow_pen = allow,
+        TrustedInputKind::Touch => device.permissions.allow_touch = allow,
+        TrustedInputKind::Keyboard => device.permissions.allow_keyboard = allow,
+        TrustedInputKind::Mouse => device.permissions.allow_mouse = allow,
+        TrustedInputKind::Gamepad => device.permissions.allow_gamepad = allow,
+    }
+    let permissions = device.permissions.clone();
+    settings_store.upsert_trusted_device(device)?;
+    Ok(Some(permissions))
 }
 
 fn approve_peer_and_record_trust(
@@ -1276,6 +1359,18 @@ mod tests {
         assert_eq!(config.target_bitrate_kbps, 35_000);
         assert_eq!(config.codec, VideoCodec::H264);
         assert_eq!(config.color_space, ColorSpace::Rec709);
+    }
+
+    #[test]
+    fn parses_trusted_device_permission_command() {
+        assert!(matches!(
+            parse_host_command("trust permission trusted-key-abc keyboard off"),
+            Some(HostCommand::TrustPermission {
+                id,
+                input: TrustedInputKind::Keyboard,
+                allow: false,
+            }) if id == "trusted-key-abc"
+        ));
     }
 
     #[test]

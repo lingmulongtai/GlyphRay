@@ -403,7 +403,7 @@ fn upsert_encoder_preset(presets: &mut Vec<EncoderPreset>, preset: EncoderPreset
     } else {
         presets.push(preset);
     }
-    presets.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    presets.sort_by_key(|preset| preset.name.to_lowercase());
 }
 
 fn parse_trusted_devices(
@@ -486,7 +486,7 @@ fn upsert_trusted_device(devices: &mut Vec<TrustedDevice>, device: TrustedDevice
     } else {
         devices.push(device);
     }
-    devices.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
+    devices.sort_by_key(|device| device.label.to_lowercase());
 }
 
 fn normalize_preset_name(name: &str) -> Result<String, HostSettingsError> {

@@ -11,6 +11,19 @@ on:
       - trunk
 
 jobs:
+  rust-quality:
+    name: Rust format and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
   rust:
     name: Rust tests
     runs-on: ubuntu-latest
@@ -19,6 +32,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Test workspace
         run: cargo test --workspace
+
+  windows-host:
+    name: Windows host tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test workspace with Win32 bindings
+        run: cargo test --workspace
+      - name: Build release host
+        run: cargo build -p glyphray-windows-host --bin glyphray-windows-host --release
 
   android:
     name: Android build
@@ -36,8 +60,14 @@ jobs:
         run: chmod +x ./gradlew
       - name: Android unit tests
         run: ./gradlew :apps:android-client:testDebugUnitTest
+      - name: Android lint
+        run: ./gradlew :apps:android-client:lintRelease
       - name: Assemble debug
         run: ./gradlew :apps:android-client:assembleDebug
+      - name: Assemble unsigned release bundle
+        env:
+          GLYPHRAY_VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew :apps:android-client:bundleRelease
 
   macos-host:
     name: macOS host SwiftPM build
@@ -48,4 +78,4 @@ jobs:
         run: swift --version
       - name: Build macOS host
         working-directory: hosts/macos-host
-        run: swift build
+        run: swift build -c release

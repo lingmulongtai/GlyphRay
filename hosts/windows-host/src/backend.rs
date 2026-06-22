@@ -4,18 +4,29 @@ use crate::input::{
     InjectionReport, InputError, KeyboardInjector, KeyboardInputBridge, MouseInjector,
     MouseInputBridge, PenInjector, StylusInputBridge, TouchInjector, TouchInputBridge,
 };
+use crate::secrets::HostIdentity;
+use crate::settings::TrustedDevicePermissions;
+use glyphray_protocol::session_wire::{
+    client_signing_payload, decode_client_key_confirm, encode_server_key_exchange,
+    server_signing_payload, session_transcript_hash, ClientKeyConfirm, ServerKeyExchange,
+    SessionWireError,
+};
 use glyphray_protocol::stylus_wire::{decode_stylus_batch, StylusWireError};
 use glyphray_protocol::{
     decode_frame, encode_frame, trusted_auth_challenge_payload, AuthChallenge, AuthResponse,
     DisplayDescriptor, DisplayInfo, EncoderConfig, GamepadInput, KeyboardInput, LatencyPing,
     LatencyPong, Message, MessageKind, MouseInput, PairingResult, TouchInputBatch,
 };
+use glyphray_security::{SecretBytes, SessionCipherPair};
 use glyphray_transport::discovery::HostAdvertisement;
-use glyphray_transport::udp::UdpServer;
+use glyphray_transport::secure::SecureDatagramCodec;
+use glyphray_transport::udp::{decode_packet, encode_packet, ReceivedDatagram, UdpServer};
 use glyphray_transport::{ChannelKind, TransportError, TransportPacket};
+use p256::ecdh::EphemeralSecret;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::{Signature, VerifyingKey};
-use p256::pkcs8::DecodePublicKey;
+use p256::pkcs8::{DecodePublicKey, EncodePublicKey};
+use p256::PublicKey;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -40,6 +51,7 @@ const OUTBOUND_QOS_SCHEDULE: [ChannelKind; 8] = [
 ];
 const LATE_INPUT_PACKET_REASON: &str = "late input packet";
 const TRUSTED_AUTH_CHALLENGE_TTL_MS: u64 = 30_000;
+const SESSION_KEY_EXCHANGE_TTL_MS: u64 = 30_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
@@ -47,6 +59,8 @@ pub enum BackendError {
     Transport(#[from] TransportError),
     #[error(transparent)]
     StylusWire(#[from] StylusWireError),
+    #[error(transparent)]
+    SessionWire(#[from] SessionWireError),
     #[error(transparent)]
     Input(#[from] InputError),
     #[error("protocol payload was not understood: {0}")]
@@ -66,19 +80,32 @@ pub enum PermissionPolicy {
     DevAutoApprove,
 }
 
-#[derive(Debug, Clone)]
 pub struct ClientSession {
     pub peer: SocketAddr,
     pub device_id: Option<String>,
     pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
     pub pending_auth_challenge: Option<PendingAuthChallenge>,
+    pending_key_exchange: Option<PendingKeyExchange>,
+    secure_session: Option<ActiveSecureSession>,
     pub permission: PermissionState,
+    pub input_permissions: TrustedDevicePermissions,
     pub packets_received: u64,
     pub last_seen: Instant,
     pub encoder_config: Option<EncoderConfig>,
     pub last_input_sequence: Option<u64>,
     pub last_input_timestamp_us: Option<u64>,
+}
+
+struct PendingKeyExchange {
+    exchange: ServerKeyExchange,
+    ephemeral_secret: EphemeralSecret,
+}
+
+struct ActiveSecureSession {
+    session_id: [u8; 16],
+    ciphers: SessionCipherPair,
+    codec: SecureDatagramCodec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +124,10 @@ pub struct SessionSnapshot {
     pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
     pub has_pending_auth_challenge: bool,
+    pub has_pending_key_exchange: bool,
+    pub secure: bool,
     pub permission: PermissionState,
+    pub input_permissions: TrustedDevicePermissions,
     pub packets_received: u64,
     pub encoder_config: Option<EncoderConfig>,
     pub last_input_sequence: Option<u64>,
@@ -135,7 +165,7 @@ pub struct BackendHealthSnapshot {
     pub metrics: BackendMetrics,
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SessionRegistry {
     sessions: HashMap<SocketAddr, ClientSession>,
     pending_attempts_by_ip: HashMap<IpAddr, VecDeque<Instant>>,
@@ -172,7 +202,10 @@ impl SessionRegistry {
             device_public_key_der: None,
             device_public_key_fingerprint: None,
             pending_auth_challenge: None,
+            pending_key_exchange: None,
+            secure_session: None,
             permission: PermissionState::Pending,
+            input_permissions: TrustedDevicePermissions::default(),
             packets_received: 0,
             last_seen: Instant::now(),
             encoder_config: None,
@@ -182,9 +215,19 @@ impl SessionRegistry {
     }
 
     pub fn approve(&mut self, peer: SocketAddr, device_id: impl Into<String>) {
+        self.approve_with_permissions(peer, device_id, TrustedDevicePermissions::default());
+    }
+
+    pub fn approve_with_permissions(
+        &mut self,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+        permissions: TrustedDevicePermissions,
+    ) {
         let session = self.ensure_pending(peer);
         session.permission = PermissionState::Approved;
         session.device_id = Some(device_id.into());
+        session.input_permissions = permissions;
     }
 
     pub fn reject(&mut self, peer: SocketAddr) {
@@ -200,6 +243,10 @@ impl SessionRegistry {
 
     pub fn len(&self) -> usize {
         self.sessions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sessions.is_empty()
     }
 
     pub fn pending_count(&self) -> usize {
@@ -244,7 +291,10 @@ impl SessionRegistry {
                 device_public_key_der: session.device_public_key_der.clone(),
                 device_public_key_fingerprint: session.device_public_key_fingerprint.clone(),
                 has_pending_auth_challenge: session.pending_auth_challenge.is_some(),
+                has_pending_key_exchange: session.pending_key_exchange.is_some(),
+                secure: session.secure_session.is_some(),
                 permission: session.permission,
+                input_permissions: session.input_permissions.clone(),
                 packets_received: session.packets_received,
                 encoder_config: session.encoder_config.clone(),
                 last_input_sequence: session.last_input_sequence,
@@ -264,6 +314,56 @@ impl SessionRegistry {
             .collect::<Vec<_>>();
         peers.sort();
         peers
+    }
+
+    pub fn secure_peers(&self) -> Vec<SocketAddr> {
+        let mut peers = self
+            .sessions
+            .values()
+            .filter(|session| {
+                session.permission == PermissionState::Approved && session.secure_session.is_some()
+            })
+            .map(|session| session.peer)
+            .collect::<Vec<_>>();
+        peers.sort();
+        peers
+    }
+
+    pub fn requires_secure_transport(&self, peer: SocketAddr) -> bool {
+        self.sessions.get(&peer).is_some_and(|session| {
+            session.permission == PermissionState::Approved
+                && session.pending_key_exchange.is_some()
+                && session.secure_session.is_none()
+        })
+    }
+
+    pub fn allows_input(&self, peer: SocketAddr, message_kind: MessageKind) -> bool {
+        let Some(session) = self.sessions.get(&peer) else {
+            return false;
+        };
+        match message_kind {
+            MessageKind::StylusInputBatch => session.input_permissions.allow_pen,
+            MessageKind::TouchInputBatch => session.input_permissions.allow_touch,
+            MessageKind::KeyboardInput => session.input_permissions.allow_keyboard,
+            MessageKind::MouseInput => session.input_permissions.allow_mouse,
+            MessageKind::GamepadInput => session.input_permissions.allow_gamepad,
+            _ => true,
+        }
+    }
+
+    pub fn update_permissions_for_device(
+        &mut self,
+        device_id: &str,
+        permissions: TrustedDevicePermissions,
+    ) -> usize {
+        let mut updated = 0;
+        for session in self.sessions.values_mut() {
+            if session.device_id.as_deref() == Some(device_id) {
+                session.input_permissions = permissions.clone();
+                updated += 1;
+            }
+        }
+        updated
     }
 
     fn evict_oldest_pending_if_needed(&mut self) {
@@ -287,6 +387,14 @@ impl SessionRegistry {
 pub enum BackendEvent {
     SessionDiscovered {
         peer: SocketAddr,
+    },
+    SessionKeyExchangeQueued {
+        peer: SocketAddr,
+        session_id: [u8; 16],
+    },
+    SessionSecured {
+        peer: SocketAddr,
+        session_id: [u8; 16],
     },
     PeerAutoApproved {
         peer: SocketAddr,
@@ -409,6 +517,7 @@ pub struct HostPacketRouter<I> {
     mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
     permission_policy: PermissionPolicy,
     next_outbound_sequence: u64,
+    host_identity: HostIdentity,
 }
 
 #[derive(Debug, Default)]
@@ -458,21 +567,95 @@ where
             mouse_bridge,
             permission_policy,
             next_outbound_sequence: 1,
+            host_identity: HostIdentity::generate(),
         }
+    }
+
+    pub fn set_host_identity(&mut self, identity: HostIdentity) {
+        self.host_identity = identity;
+    }
+
+    pub fn is_secure(&self, peer: SocketAddr) -> bool {
+        self.sessions
+            .sessions
+            .get(&peer)
+            .is_some_and(|session| session.secure_session.is_some())
+    }
+
+    fn open_secure_packet(
+        &mut self,
+        peer: SocketAddr,
+        sealed: &glyphray_security::SealedPacket,
+    ) -> Result<TransportPacket, BackendError> {
+        let secure = self
+            .sessions
+            .sessions
+            .get_mut(&peer)
+            .and_then(|session| session.secure_session.as_mut())
+            .ok_or_else(|| {
+                BackendError::Protocol("secure session is not established".to_string())
+            })?;
+        let plaintext = secure.codec.open(&secure.ciphers.inbound, sealed)?;
+        Ok(decode_packet(&plaintext)?)
+    }
+
+    fn seal_secure_packet(
+        &mut self,
+        peer: SocketAddr,
+        packet: &TransportPacket,
+    ) -> Result<glyphray_security::SealedPacket, BackendError> {
+        let secure = self
+            .sessions
+            .sessions
+            .get_mut(&peer)
+            .and_then(|session| session.secure_session.as_mut())
+            .ok_or_else(|| {
+                BackendError::Protocol("secure session is not established".to_string())
+            })?;
+        debug_assert_ne!(secure.session_id, [0_u8; 16]);
+        let plaintext = encode_packet(packet)?;
+        Ok(secure.codec.seal(&secure.ciphers.outbound, &plaintext)?)
     }
 
     pub fn approve_peer(&mut self, peer: SocketAddr, device_id: impl Into<String>) {
         self.sessions.approve(peer, device_id);
     }
 
+    pub fn approve_peer_with_permissions(
+        &mut self,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+        permissions: TrustedDevicePermissions,
+    ) {
+        self.sessions
+            .approve_with_permissions(peer, device_id, permissions);
+    }
+
     pub fn approve_peer_with_response(
         &mut self,
         peer: SocketAddr,
         device_id: impl Into<String>,
-    ) -> Result<TransportPacket, BackendError> {
+    ) -> Result<Vec<TransportPacket>, BackendError> {
+        self.approve_peer_with_response_and_permissions(
+            peer,
+            device_id,
+            TrustedDevicePermissions::default(),
+        )
+    }
+
+    pub fn approve_peer_with_response_and_permissions(
+        &mut self,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+        permissions: TrustedDevicePermissions,
+    ) -> Result<Vec<TransportPacket>, BackendError> {
         let device_id = device_id.into();
-        self.sessions.approve(peer, device_id.clone());
-        self.build_pairing_result(true, Some(device_id), None)
+        self.sessions
+            .approve_with_permissions(peer, device_id.clone(), permissions);
+        Ok(vec![
+            self.build_pairing_result(true, Some(device_id), None)?,
+            self.begin_session_key_exchange(peer)?,
+        ])
     }
 
     pub fn challenge_peer_with_response(
@@ -522,6 +705,95 @@ where
         let reason = reason.into();
         self.sessions.reject(peer);
         self.build_pairing_result(false, None, Some(reason))
+    }
+
+    fn begin_session_key_exchange(
+        &mut self,
+        peer: SocketAddr,
+    ) -> Result<TransportPacket, BackendError> {
+        let ephemeral_secret = EphemeralSecret::random(&mut OsRng);
+        let ephemeral_public = PublicKey::from(&ephemeral_secret);
+        let ephemeral_public_key_der = ephemeral_public
+            .to_public_key_der()
+            .map_err(|error| BackendError::Protocol(error.to_string()))?
+            .as_bytes()
+            .to_vec();
+        let mut session_id = [0_u8; 16];
+        let mut salt = [0_u8; 32];
+        OsRng.fill_bytes(&mut session_id);
+        OsRng.fill_bytes(&mut salt);
+        let mut exchange = ServerKeyExchange {
+            session_id,
+            expires_at_unix_ms: now_ms().saturating_add(SESSION_KEY_EXCHANGE_TTL_MS),
+            salt,
+            ephemeral_public_key_der,
+            host_identity_public_key_der: self
+                .host_identity
+                .public_key_der()
+                .map_err(|error| BackendError::Protocol(error.to_string()))?,
+            signature: Vec::new(),
+        };
+        exchange.signature = self
+            .host_identity
+            .sign_der(&server_signing_payload(&exchange));
+        self.sessions.ensure_pending(peer).pending_key_exchange = Some(PendingKeyExchange {
+            exchange: exchange.clone(),
+            ephemeral_secret,
+        });
+        let payload = encode_server_key_exchange(&exchange)?;
+        let sequence = self.next_outbound_sequence;
+        self.next_outbound_sequence += 1;
+        Ok(TransportPacket {
+            sequence,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::SessionKeyExchange,
+            enqueue_timestamp_us: now_us(),
+            payload,
+        })
+    }
+
+    fn finish_session_key_exchange(
+        &mut self,
+        peer: SocketAddr,
+        payload: &[u8],
+    ) -> Result<[u8; 16], BackendError> {
+        let confirm = decode_client_key_confirm(payload)?;
+        let session = self.sessions.ensure_pending(peer);
+        let pending = session.pending_key_exchange.take().ok_or_else(|| {
+            BackendError::Protocol("no session key exchange is pending".to_string())
+        })?;
+        if confirm.session_id != pending.exchange.session_id {
+            return Err(BackendError::Protocol(
+                "session key confirmation id did not match".to_string(),
+            ));
+        }
+        if now_ms() > pending.exchange.expires_at_unix_ms {
+            return Err(BackendError::Protocol(
+                "session key exchange expired".to_string(),
+            ));
+        }
+        if session.device_id.as_deref() != Some(confirm.device_id.as_str()) {
+            return Err(BackendError::Protocol(
+                "session key confirmation device id did not match".to_string(),
+            ));
+        }
+        let identity_der = session.device_public_key_der.as_deref().ok_or_else(|| {
+            BackendError::Protocol("session key confirmation requires a device key".to_string())
+        })?;
+        verify_client_key_confirm(identity_der, &pending.exchange, &confirm)?;
+
+        let client_ephemeral = PublicKey::from_public_key_der(&confirm.ephemeral_public_key_der)
+            .map_err(|error| BackendError::Protocol(error.to_string()))?;
+        let shared = pending.ephemeral_secret.diffie_hellman(&client_ephemeral);
+        let transcript = session_transcript_hash(&pending.exchange, &confirm);
+        let secret = SecretBytes::from_bytes(shared.raw_secret_bytes().to_vec());
+        let session_id = pending.exchange.session_id;
+        session.secure_session = Some(ActiveSecureSession {
+            session_id,
+            ciphers: SessionCipherPair::for_host(&secret, &transcript),
+            codec: SecureDatagramCodec::new(session_aad(&session_id)),
+        });
+        Ok(session_id)
     }
 
     pub fn build_display_info(
@@ -602,15 +874,31 @@ where
             outcome.events.push(BackendEvent::PairingRequested {
                 peer,
                 device_name: request.device_name,
-                public_key_fingerprint,
+                public_key_fingerprint: public_key_fingerprint.clone(),
             });
             if self.permission_policy == PermissionPolicy::DevAutoApprove {
-                let device_id = trusted_device_id(peer);
+                let device_id = public_key_fingerprint
+                    .as_deref()
+                    .map(trusted_device_id_from_public_key_fingerprint)
+                    .unwrap_or_else(|| trusted_device_id(peer));
                 session.permission = PermissionState::Approved;
                 session.device_id = Some(device_id.clone());
                 let response = self.build_pairing_result(true, Some(device_id), None)?;
                 outcome.outbound.push((peer, response));
+                let key_exchange = self.begin_session_key_exchange(peer)?;
+                let session_id = self
+                    .sessions
+                    .ensure_pending(peer)
+                    .pending_key_exchange
+                    .as_ref()
+                    .expect("exchange inserted")
+                    .exchange
+                    .session_id;
+                outcome.outbound.push((peer, key_exchange));
                 outcome.events.push(BackendEvent::PeerAutoApproved { peer });
+                outcome
+                    .events
+                    .push(BackendEvent::SessionKeyExchangeQueued { peer, session_id });
                 outcome.events.push(BackendEvent::PairingResultQueued {
                     peer,
                     accepted: true,
@@ -636,6 +924,19 @@ where
                     let response =
                         self.build_pairing_result(true, Some(trusted_device_id.clone()), None)?;
                     outcome.outbound.push((peer, response));
+                    let key_exchange = self.begin_session_key_exchange(peer)?;
+                    let session_id = self
+                        .sessions
+                        .ensure_pending(peer)
+                        .pending_key_exchange
+                        .as_ref()
+                        .expect("exchange inserted")
+                        .exchange
+                        .session_id;
+                    outcome.outbound.push((peer, key_exchange));
+                    outcome
+                        .events
+                        .push(BackendEvent::SessionKeyExchangeQueued { peer, session_id });
                     outcome
                         .events
                         .push(BackendEvent::TrustedDeviceAuthenticated {
@@ -679,10 +980,29 @@ where
             }
         }
 
+        if packet.message_kind == MessageKind::SessionKeyConfirm {
+            let session_id = self.finish_session_key_exchange(peer, &packet.payload)?;
+            outcome
+                .events
+                .push(BackendEvent::SessionSecured { peer, session_id });
+            return Ok(outcome);
+        }
+
         if session.permission != PermissionState::Approved {
             outcome
                 .events
                 .push(BackendEvent::PermissionRequired { peer });
+            return Ok(outcome);
+        }
+
+        if !self.sessions.allows_input(peer, packet.message_kind) {
+            outcome.events.push(BackendEvent::PacketIgnored {
+                peer,
+                reason: format!(
+                    "{:?} denied by trusted-device permissions",
+                    packet.message_kind
+                ),
+            });
             return Ok(outcome);
         }
 
@@ -942,6 +1262,10 @@ where
         &self.advertisement
     }
 
+    pub fn set_host_identity(&mut self, identity: HostIdentity) {
+        self.router.set_host_identity(identity);
+    }
+
     pub fn approve_peer(&mut self, peer: SocketAddr, device_id: impl Into<String>) {
         self.router.approve_peer(peer, device_id);
     }
@@ -961,23 +1285,42 @@ where
         peer: SocketAddr,
         device_id: impl Into<String>,
     ) -> Result<Vec<BackendEvent>, BackendError> {
+        self.approve_peer_as_and_notify_with_permissions(
+            server,
+            peer,
+            device_id,
+            TrustedDevicePermissions::default(),
+        )
+    }
+
+    pub fn approve_peer_as_and_notify_with_permissions(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+        device_id: impl Into<String>,
+        permissions: TrustedDevicePermissions,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
         let device_id = device_id.into();
-        let response = self.router.approve_peer_with_response(peer, device_id)?;
-        server.send_to(&response, peer)?;
-        let displays = current_displays();
-        let display_count = displays.len();
-        let display_packet = self.router.build_display_info(displays)?;
-        server.send_to(&display_packet, peer)?;
+        let responses =
+            self.router
+                .approve_peer_with_response_and_permissions(peer, device_id, permissions)?;
+        let key_exchange = responses
+            .iter()
+            .find(|packet| packet.message_kind == MessageKind::SessionKeyExchange)
+            .ok_or_else(|| BackendError::Protocol("missing session key exchange".to_string()))?;
+        let session_id =
+            glyphray_protocol::session_wire::decode_server_key_exchange(&key_exchange.payload)?
+                .session_id;
+        for response in responses {
+            server.send_to(&response, peer)?;
+        }
         Ok(vec![
             BackendEvent::PeerApproved { peer },
             BackendEvent::PairingResultQueued {
                 peer,
                 accepted: true,
             },
-            BackendEvent::DisplayInfoQueued {
-                peer,
-                displays: display_count,
-            },
+            BackendEvent::SessionKeyExchangeQueued { peer, session_id },
         ])
     }
 
@@ -987,6 +1330,22 @@ where
         peer: SocketAddr,
         expected_device_id: impl Into<String>,
     ) -> Result<Vec<BackendEvent>, BackendError> {
+        self.challenge_peer_as_and_notify_with_permissions(
+            server,
+            peer,
+            expected_device_id,
+            TrustedDevicePermissions::default(),
+        )
+    }
+
+    pub fn challenge_peer_as_and_notify_with_permissions(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+        expected_device_id: impl Into<String>,
+        permissions: TrustedDevicePermissions,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        self.router.sessions.ensure_pending(peer).input_permissions = permissions;
         let (challenge_id, response) = self
             .router
             .challenge_peer_with_response(peer, expected_device_id)?;
@@ -1019,10 +1378,52 @@ where
         server: &mut UdpServer,
     ) -> Result<Vec<BackendEvent>, BackendError> {
         let mut events = self.flush_outbound_control(server)?;
-        let Some((packet, peer)) = server.poll_recv_from()? else {
+        let Some((datagram, peer)) = server.poll_recv_datagram()? else {
             return Ok(events);
         };
         self.metrics.received_packets += 1;
+
+        let packet = match datagram {
+            ReceivedDatagram::Plain(packet) => {
+                if self.router.is_secure(peer) {
+                    events.push(BackendEvent::PacketIgnored {
+                        peer,
+                        reason: "plaintext packet rejected after secure session establishment"
+                            .to_string(),
+                    });
+                    return Ok(events);
+                }
+                if self.router.sessions.requires_secure_transport(peer)
+                    && !matches!(
+                        packet.message_kind,
+                        MessageKind::PairingRequest
+                            | MessageKind::AuthResponse
+                            | MessageKind::SessionKeyConfirm
+                    )
+                {
+                    events.push(BackendEvent::PacketIgnored {
+                        peer,
+                        reason: "plaintext packet rejected while secure session is pending"
+                            .to_string(),
+                    });
+                    return Ok(events);
+                }
+                packet
+            }
+            ReceivedDatagram::Secure(sealed) => {
+                match self.router.open_secure_packet(peer, &sealed) {
+                    Ok(packet) => packet,
+                    Err(_) => {
+                        events.push(BackendEvent::PacketIgnored {
+                            peer,
+                            reason: "secure datagram authentication or replay check failed"
+                                .to_string(),
+                        });
+                        return Ok(events);
+                    }
+                }
+            }
+        };
 
         let mut outcome = self.router.route_packet(peer, packet)?;
         if should_send_display_info(&outcome.events) {
@@ -1058,6 +1459,16 @@ where
         self.router.session_snapshots()
     }
 
+    pub fn update_device_permissions(
+        &mut self,
+        device_id: &str,
+        permissions: TrustedDevicePermissions,
+    ) -> usize {
+        self.router
+            .sessions
+            .update_permissions_for_device(device_id, permissions)
+    }
+
     pub fn approved_peers(&self) -> Vec<SocketAddr> {
         self.router.sessions.approved_peers()
     }
@@ -1068,7 +1479,7 @@ where
             .into_iter()
             .filter(|session| session.permission == PermissionState::Approved)
             .filter_map(|session| session.encoder_config)
-            .last()
+            .next_back()
     }
 
     pub fn config(&self) -> &HostConfig {
@@ -1083,7 +1494,7 @@ where
             return Vec::new();
         }
 
-        let peers = self.approved_peers();
+        let peers = self.router.sessions.secure_peers();
         if peers.is_empty() {
             return Vec::new();
         }
@@ -1150,7 +1561,13 @@ where
             let Some((peer, packet)) = self.outbound.pop_next() else {
                 break;
             };
-            if server.try_send_to(&packet, peer)? {
+            let sent = if self.router.is_secure(peer) {
+                let sealed = self.router.seal_secure_packet(peer, &packet)?;
+                server.try_send_secure_to(&sealed, peer)?
+            } else {
+                server.try_send_to(&packet, peer)?
+            };
+            if sent {
                 self.metrics.sent_outbound_packets += 1;
                 continue;
             }
@@ -1353,16 +1770,34 @@ fn late_packet_event(peer: SocketAddr) -> BackendEvent {
 }
 
 fn should_send_display_info(events: &[BackendEvent]) -> bool {
-    events.iter().any(|event| {
-        matches!(
-            event,
-            BackendEvent::PairingResultQueued { accepted: true, .. }
-        )
-    })
+    events
+        .iter()
+        .any(|event| matches!(event, BackendEvent::SessionSecured { .. }))
+}
+
+fn verify_client_key_confirm(
+    identity_public_key_der: &[u8],
+    exchange: &ServerKeyExchange,
+    confirm: &ClientKeyConfirm,
+) -> Result<(), BackendError> {
+    let verifying_key = VerifyingKey::from_public_key_der(identity_public_key_der)
+        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+    let signature = Signature::from_der(&confirm.signature)
+        .map_err(|error| BackendError::Protocol(error.to_string()))?;
+    let server_hash = glyphray_protocol::session_wire::server_transcript_hash(exchange);
+    verifying_key
+        .verify(&client_signing_payload(&server_hash, confirm), &signature)
+        .map_err(|_| BackendError::Protocol("client session signature did not verify".to_string()))
+}
+
+fn session_aad(session_id: &[u8; 16]) -> Vec<u8> {
+    let mut aad = b"GlyphRay secure datagram v1".to_vec();
+    aad.extend_from_slice(session_id);
+    aad
 }
 
 fn current_displays() -> Vec<DisplayDescriptor> {
-    WindowsGraphicsCaptureBackend
+    WindowsGraphicsCaptureBackend::new()
         .list_displays()
         .unwrap_or_else(|_| Vec::new())
 }
@@ -1425,12 +1860,17 @@ mod tests {
         PenInjector, TouchInjectionReport, TouchInjector,
     };
     use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, SourceRect};
+    use glyphray_protocol::session_wire::{
+        decode_server_key_exchange, encode_client_key_confirm, server_transcript_hash,
+    };
     use glyphray_protocol::stylus_wire::encode_stylus_batch;
     use glyphray_protocol::{
         AuthResponse, ColorSpace, EncoderConfig, GamepadInput, KeyboardInput, MouseInput,
         PairingRequest, StylusAction, StylusInputBatch, StylusSample, StylusToolType, TouchAction,
         TouchInputBatch, TouchSample, VideoCodec,
     };
+    use p256::ecdsa::signature::Signer;
+    use p256::ecdsa::SigningKey;
 
     #[derive(Default)]
     struct RecordingInjector;
@@ -1730,11 +2170,41 @@ mod tests {
             peer,
             accepted: true,
         }));
-        assert_eq!(outcome.outbound.len(), 1);
+        assert_eq!(outcome.outbound.len(), 2);
         assert_eq!(
             outcome.outbound[0].1.message_kind,
             MessageKind::PairingResult
         );
+        assert_eq!(
+            outcome.outbound[1].1.message_kind,
+            MessageKind::SessionKeyExchange
+        );
+    }
+
+    #[test]
+    fn session_key_handshake_authenticates_and_opens_client_datagram() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50014".parse().expect("peer");
+        let (mut client_codec, client_ciphers) = complete_secure_handshake(&mut router, peer);
+        let packet = TransportPacket {
+            sequence: 91,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::LatencyPing,
+            enqueue_timestamp_us: 100,
+            payload: vec![1, 2, 3],
+        };
+        let encoded = encode_packet(&packet).expect("encode transport packet");
+        let sealed = client_codec
+            .seal(&client_ciphers.outbound, &encoded)
+            .expect("seal client datagram");
+
+        assert_eq!(
+            router
+                .open_secure_packet(peer, &sealed)
+                .expect("open client datagram"),
+            packet
+        );
+        assert!(router.is_secure(peer));
     }
 
     #[test]
@@ -1844,6 +2314,41 @@ mod tests {
             virtual_key: 0x5B,
             pressed: true,
         }));
+    }
+
+    #[test]
+    fn trusted_device_permissions_block_denied_input_before_decode() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50016".parse().expect("peer");
+        let permissions = TrustedDevicePermissions {
+            allow_keyboard: false,
+            ..TrustedDevicePermissions::default()
+        };
+        router.approve_peer_with_permissions(peer, "tablet", permissions);
+        let keyboard = Message::KeyboardInput(KeyboardInput {
+            sequence: 1,
+            timestamp_us: 200,
+            scan_code: 30,
+            virtual_key: 65,
+            pressed: true,
+            modifiers: 0,
+        });
+
+        let outcome = router
+            .route_packet(
+                peer,
+                framed_input_packet(MessageKind::KeyboardInput, keyboard),
+            )
+            .expect("route denied keyboard");
+
+        assert!(outcome.events.contains(&BackendEvent::PacketIgnored {
+            peer,
+            reason: "KeyboardInput denied by trusted-device permissions".to_string(),
+        }));
+        assert!(!outcome
+            .events
+            .iter()
+            .any(|event| matches!(event, BackendEvent::KeyboardDecoded { .. })));
     }
 
     #[test]
@@ -2053,11 +2558,11 @@ mod tests {
     }
 
     #[test]
-    fn runtime_queues_video_packets_for_approved_peers_only() {
+    fn runtime_queues_video_packets_for_secure_peers_only() {
         let mut runtime = HostBackendRuntime::<RecordingInjector>::new(HostConfig::default(), None);
         let approved: SocketAddr = "127.0.0.1:53004".parse().expect("peer");
         let pending: SocketAddr = "127.0.0.1:53005".parse().expect("peer");
-        runtime.approve_peer(approved, "tablet");
+        complete_secure_handshake(&mut runtime.router, approved);
         runtime
             .router
             .route_packet(pending, input_packet(vec![1, 2, 3]))
@@ -2078,6 +2583,93 @@ mod tests {
         );
         assert_eq!(snapshot.outbound.video, 2);
         assert_eq!(snapshot.metrics.queued_video_packets, 2);
+    }
+
+    fn complete_secure_handshake(
+        router: &mut HostPacketRouter<RecordingInjector>,
+        peer: SocketAddr,
+    ) -> (SecureDatagramCodec, SessionCipherPair) {
+        let device_identity = SigningKey::random(&mut OsRng);
+        let device_public_key_der = device_identity
+            .verifying_key()
+            .to_public_key_der()
+            .expect("device public key DER")
+            .as_bytes()
+            .to_vec();
+        let fingerprint = public_key_fingerprint(&device_public_key_der).expect("fingerprint");
+        let device_id = trusted_device_id_from_public_key_fingerprint(&fingerprint);
+        let pairing = Message::PairingRequest(PairingRequest {
+            device_name: "Galaxy Tab".to_string(),
+            pairing_code_hash: vec![],
+            one_time_public_key: device_public_key_der,
+        });
+        router
+            .route_packet(
+                peer,
+                TransportPacket {
+                    sequence: 1,
+                    channel: ChannelKind::Control,
+                    message_kind: MessageKind::PairingRequest,
+                    enqueue_timestamp_us: 0,
+                    payload: encode_frame(1, &pairing).expect("pairing frame"),
+                },
+            )
+            .expect("pairing request");
+        let responses = router
+            .approve_peer_with_response(peer, device_id.clone())
+            .expect("approve peer");
+        let exchange = responses
+            .iter()
+            .find(|packet| packet.message_kind == MessageKind::SessionKeyExchange)
+            .map(|packet| decode_server_key_exchange(&packet.payload).expect("server exchange"))
+            .expect("key exchange response");
+
+        let client_secret = EphemeralSecret::random(&mut OsRng);
+        let client_public = PublicKey::from(&client_secret)
+            .to_public_key_der()
+            .expect("client ephemeral DER")
+            .as_bytes()
+            .to_vec();
+        let mut confirm = ClientKeyConfirm {
+            session_id: exchange.session_id,
+            device_id,
+            ephemeral_public_key_der: client_public,
+            signature: Vec::new(),
+        };
+        let server_hash = server_transcript_hash(&exchange);
+        let signature: p256::ecdsa::Signature =
+            device_identity.sign(&client_signing_payload(&server_hash, &confirm));
+        confirm.signature = signature.to_der().as_bytes().to_vec();
+
+        let host_ephemeral = PublicKey::from_public_key_der(&exchange.ephemeral_public_key_der)
+            .expect("host ephemeral public key");
+        let shared = client_secret.diffie_hellman(&host_ephemeral);
+        let transcript = session_transcript_hash(&exchange, &confirm);
+        let client_ciphers = SessionCipherPair::for_client(
+            &SecretBytes::from_bytes(shared.raw_secret_bytes().to_vec()),
+            &transcript,
+        );
+        let outcome = router
+            .route_packet(
+                peer,
+                TransportPacket {
+                    sequence: 2,
+                    channel: ChannelKind::Control,
+                    message_kind: MessageKind::SessionKeyConfirm,
+                    enqueue_timestamp_us: 0,
+                    payload: encode_client_key_confirm(&confirm).expect("client confirm"),
+                },
+            )
+            .expect("complete secure handshake");
+        assert!(outcome
+            .events
+            .iter()
+            .any(|event| matches!(event, BackendEvent::SessionSecured { .. })));
+
+        (
+            SecureDatagramCodec::new(session_aad(&exchange.session_id)),
+            client_ciphers,
+        )
     }
 
     #[test]

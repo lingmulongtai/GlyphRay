@@ -1,4 +1,9 @@
 use glyphray_security::{DeviceId, SecretBytes, SecretStore, SecurityError};
+use p256::ecdsa::signature::Signer;
+use p256::ecdsa::{Signature, SigningKey};
+use p256::pkcs8::EncodePublicKey;
+use rand::rngs::OsRng;
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 #[cfg(not(windows))]
@@ -7,6 +12,63 @@ use glyphray_security::InMemorySecretStore;
 #[cfg(windows)]
 pub struct PlatformSecretStore {
     root: PathBuf,
+}
+
+#[derive(Clone)]
+pub struct HostIdentity {
+    signing_key: SigningKey,
+}
+
+impl HostIdentity {
+    pub fn generate() -> Self {
+        Self {
+            signing_key: SigningKey::random(&mut OsRng),
+        }
+    }
+
+    pub fn public_key_der(&self) -> Result<Vec<u8>, SecurityError> {
+        self.signing_key
+            .verifying_key()
+            .to_public_key_der()
+            .map(|document| document.as_bytes().to_vec())
+            .map_err(secret_error)
+    }
+
+    pub fn fingerprint(&self) -> Result<String, SecurityError> {
+        Ok(hex_lower(&Sha256::digest(self.public_key_der()?)))
+    }
+
+    pub fn sign_der(&self, payload: &[u8]) -> Vec<u8> {
+        let signature: Signature = self.signing_key.sign(payload);
+        signature.to_der().as_bytes().to_vec()
+    }
+}
+
+impl std::fmt::Debug for HostIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostIdentity")
+            .field("fingerprint", &self.fingerprint().ok())
+            .finish_non_exhaustive()
+    }
+}
+
+pub fn load_or_create_host_identity(
+    store: &mut PlatformSecretStore,
+) -> Result<HostIdentity, SecurityError> {
+    let device_id = DeviceId::new("glyphray-host-identity-v1");
+    if let Some(secret) = store.get_device_secret(&device_id)? {
+        let signing_key = SigningKey::from_slice(secret.expose())
+            .map_err(|error| SecurityError::SecretStore(error.to_string()))?;
+        return Ok(HostIdentity { signing_key });
+    }
+
+    let identity = HostIdentity::generate();
+    store.put_device_secret(
+        &device_id,
+        SecretBytes::from_bytes(identity.signing_key.to_bytes().to_vec()),
+    )?;
+    Ok(identity)
 }
 
 #[cfg(not(windows))]
@@ -103,6 +165,15 @@ fn secret_error(error: impl std::fmt::Display) -> SecurityError {
     SecurityError::SecretStore(error.to_string())
 }
 
+fn hex_lower(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
 #[cfg(windows)]
 fn default_secret_dir() -> Result<PathBuf, SecurityError> {
     let base = std::env::var_os("LOCALAPPDATA")
@@ -116,7 +187,7 @@ fn default_secret_dir() -> Result<PathBuf, SecurityError> {
 #[cfg(windows)]
 mod dpapi {
     use super::{secret_error, SecurityError};
-    use std::{ptr::null_mut, slice};
+    use std::slice;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::Security::Cryptography::{
@@ -171,7 +242,7 @@ mod dpapi {
     }
 
     unsafe fn copy_blob_and_free(blob: CRYPT_INTEGER_BLOB) -> Result<Vec<u8>, SecurityError> {
-        if blob.pbData == null_mut() {
+        if blob.pbData.is_null() {
             return Err(SecurityError::SecretStore(
                 "DPAPI returned a null output buffer".to_string(),
             ));
@@ -216,6 +287,30 @@ mod tests {
             assert!(secret_file_count(&root) > 0);
         }
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn host_identity_is_persisted_by_the_platform_store() {
+        let root = unique_temp_dir().join("host-identity");
+        let _ = std::fs::remove_dir_all(&root);
+        let first_fingerprint = {
+            let mut store = PlatformSecretStore::open_at(&root).expect("open");
+            load_or_create_host_identity(&mut store)
+                .expect("identity")
+                .fingerprint()
+                .expect("fingerprint")
+        };
+
+        #[cfg(windows)]
+        {
+            let mut store = PlatformSecretStore::open_at(&root).expect("reopen");
+            let second = load_or_create_host_identity(&mut store)
+                .expect("identity")
+                .fingerprint()
+                .expect("fingerprint");
+            assert_eq!(first_fingerprint, second);
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

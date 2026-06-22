@@ -1,20 +1,56 @@
 name: Package Smoke Checks
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
   pull_request:
     paths:
+      - "VERSION"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "hosts/macos-host/**"
+      - "hosts/windows-host/**"
       - "tools/packaging/**"
       - ".github/workflows/package.yml"
 
 jobs:
-  packaging-files:
-    name: Packaging files
-    runs-on: ubuntu-latest
+  windows-msi:
+    name: Windows MSI smoke build
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check packaging manifests exist
-        run: |
-          test -f tools/packaging/README.md
-          test -f tools/packaging/windows/GlyphRayHost.wxs
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: dotnet tool install --global wix --version "4.*"
+      - name: Build MSI
+        shell: pwsh
+        run: ./tools/packaging/windows/build-msi.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glyphray-windows-msi-smoke
+          path: dist/windows/*.msi
+          if-no-files-found: error
 
+  macos-pkg:
+    name: macOS app and pkg smoke build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ad-hoc signed app and pkg
+        run: bash tools/packaging/macos/build-pkg.sh
+      - name: Verify package
+        run: pkgutil --check-signature dist/macos/*.pkg || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glyphray-macos-package-smoke
+          path: |
+            dist/macos/*.app
+            dist/macos/*.pkg
+            dist/macos/*.zip
+          if-no-files-found: error

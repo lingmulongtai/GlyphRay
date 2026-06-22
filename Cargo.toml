@@ -9,6 +9,7 @@ members = [
   "crates/transport",
   "hosts/windows-host",
   "hosts/windows-host/tools/capture-diagnostics",
+  "hosts/windows-host/tools/encoder-diagnostics",
   "hosts/windows-host/tools/host-diagnostics",
   "hosts/windows-host/tools/pen-diagnostics",
 ]
@@ -23,11 +24,12 @@ rust-version = "1.79"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
+aes-gcm = "0.10"
 base64 = "0.22"
 bincode = "1.3"
 crc32fast = "1.4"
 hmac = "0.12"
-p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa", "pkcs8"] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"

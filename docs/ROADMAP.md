@@ -1,6 +1,6 @@
 # Roadmap
 
-Current overall progress estimate: 98%.
+Current implementation progress estimate: 90%. Production release readiness: 72%.
 
 ## Milestone 1
 
@@ -27,9 +27,10 @@ Current overall progress estimate: 98%.
 ## Milestone 2
 
 - [x] Implement Windows monitor enumeration.
-- [ ] Implement Windows Graphics Capture or Desktop Duplication capture path.
+- [x] Implement a stateful DXGI Desktop Duplication capture path with D3D11 staging readback, rotation, timeout reuse, and access-loss recreation.
 - [x] Add encoder trait with H.264 low-latency configuration.
-- [ ] Add at least one hardware encoder path or a clean software fallback.
+- [x] Add a Windows Media Foundation H.264 software fallback with low-latency/keyframe controls.
+- [ ] Add explicit hardware MFT/NVENC/AMF selection and GPU-path validation.
 - [x] Add Android MediaCodec H.264 decode pipeline.
 - [x] Add Android LAN host discovery receiver for host advertisements.
 - [x] Add Android control-channel sender for pairing and latency smoke tests.
@@ -44,14 +45,18 @@ Current overall progress estimate: 98%.
 - [x] Add UDP datagram packet format for transport packets.
 - [x] Add video frame chunking and reassembly utilities.
 - [x] Add Windows capture to encode to packetize streaming pipeline.
-- [x] Add Windows GDI capture fallback for early local validation.
+- [x] Remove the GDI capture fallback after replacing it with Desktop Duplication.
+- [x] Report active Windows display refresh rate, DPI scale, rotation, and geometry through display enumeration.
 - [x] Add Windows capture diagnostic CLI.
 - [x] Add server-side UDP socket for host backend.
 - [x] Add LAN host discovery advertisement.
 - [x] Queue H.264 access-unit fragments on the Video channel for approved clients.
 - [x] Route Android Video channel packets into the video reassembler and MediaCodec feed path.
-- [ ] Stream real encoded desktop video over LAN using a concrete H.264 backend.
+- [x] Connect concrete Media Foundation H.264 access units to the approved-peer video packet queue.
+- [x] Add a runtime diagnostic that encodes Annex B H.264, fragments it into UDP-sized Video packets, round-trips the GLYT datagrams, and reassembles the original access unit.
+- [ ] Validate continuous 1080p60 streaming and decoder compatibility on a real Android device.
 - [x] Add secure datagram codec foundation for encrypted transport.
+- [x] Run control, video, and all realtime Android input over one authenticated encrypted UDP session.
 - [x] Add latency overlay prepared for `glyphray-telemetry`.
 
 ## Milestone 3
@@ -92,6 +97,10 @@ Current overall progress estimate: 98%.
 ## Milestone 4
 
 - [x] Add session cipher and secure datagram codec foundation.
+- [x] Add signed P-256 ECDH session negotiation and directional AES-256-GCM transport for Windows/Android.
+- [x] Persist the Windows host identity with DPAPI and pin trusted host fingerprints on Android.
+- [x] Reject plaintext traffic after key establishment and require secure sessions before video queueing or realtime input.
+- [x] Enforce persisted per-device pen/touch/keyboard/mouse/gamepad permissions in the host router.
 - [x] Add Android Keystore device identity foundation.
 - [x] Add Windows platform secret-store boundary.
 - [x] Add reconnect and adaptive bitrate controllers.
@@ -106,6 +115,10 @@ Current overall progress estimate: 98%.
 - [x] Fix Rust CI HMAC initialization ambiguity.
 - [x] Add installer packaging foundation.
 - [x] Add Windows WiX MSI build script and macOS pkgbuild script.
+- [x] Add canonical product versioning with Cargo mirror validation and a cross-platform release-candidate workflow.
+- [x] Build Android release APK/AAB, Windows MSI, macOS app/pkg, and SHA-256 manifests in CI.
+- [x] Block tagged releases unless Android, Windows, and macOS signing plus macOS notarization credentials are present.
+- [x] Add a real macOS `.app` bundle layout with privacy usage descriptions and ad-hoc smoke-test signing.
 - [x] Add Windows user-logon startup CLI and service/agent architecture plan.
 - [ ] Move control/video packet transmission onto a dedicated send worker or mio/tokio event loop with explicit backpressure metrics.
 - [ ] Replace O(N) pending-session eviction with heap/indexed eviction if reused for relay-scale workloads.
@@ -114,7 +127,8 @@ Current overall progress estimate: 98%.
 - [x] Replace Windows development secret store with DPAPI-protected per-user storage.
 - [x] Add macOS Keychain implementation.
 - [ ] Add signed production installers.
-- [ ] Add Android Play Store internal testing release track checklist and signing workflow.
+- [x] Add Android Play Store signing workflow driven only by CI secrets.
+- [ ] Upload a signed AAB to the Play Store internal testing track and complete store compliance.
 
 ## Milestone 5
 

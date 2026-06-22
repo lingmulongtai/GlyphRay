@@ -1,7 +1,7 @@
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 
 fn main() {
-    let mut capture = WindowsGraphicsCaptureBackend;
+    let mut capture = WindowsGraphicsCaptureBackend::new();
     let displays = match capture.list_displays() {
         Ok(displays) => displays,
         Err(err) => {
@@ -17,13 +17,16 @@ fn main() {
 
     for display in &displays {
         println!(
-            "Display {}: {} {}x{} at {},{} primary={}",
+            "Display {}: {} {}x{} at {},{} {:.1}Hz scale={:.2} rotation={} primary={}",
             display.id,
             display.name,
             display.width_px,
             display.height_px,
             display.origin_x,
             display.origin_y,
+            display.refresh_hz,
+            display.scale_factor,
+            display.rotation_degrees,
             display.primary
         );
     }

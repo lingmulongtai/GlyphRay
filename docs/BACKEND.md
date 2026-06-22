@@ -15,13 +15,14 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Native touch packet decode and opt-in `PT_TOUCH` injection for Android finger input smoke tests.
 - Bluetooth mouse packet decode and opt-in native cursor/button/wheel injection.
 - Gamepad packet decode for Android-connected controllers.
-- Permission gating before input packets are accepted.
+- Signed P-256 ECDH session negotiation, directional AES-256-GCM transport, replay rejection, and plaintext rejection after key establishment.
+- Permission gating before input packets are accepted, including persisted per-device pen/touch/keyboard/mouse/gamepad enforcement.
 - Pending-session cap of 50 unapproved peers, with oldest pending peer eviction to limit UDP spam memory growth.
 - Per-IP new pending attempt rate limiting to prevent one host from starving other pending peers by rotating source ports.
 - Late input packet dropping based on per-session transport sequence and input timestamp watermarks.
 - Bounded nonblocking outbound queues split by channel, with a small QoS schedule that favors input/control over audio/video.
 - Backend health snapshots and a console `status` command for session counts, queue depth, drops, late input drops, pending rate limits, and backpressure events.
-- Approved-peer video fragment queueing. `GLYPHRAY_ENABLE_VIDEO_STREAM=1` drives the capture/encode/packetize loop and queues `VideoFrame` packets on the Video channel for approved clients.
+- Secure-peer video fragment queueing. The default capture/encode/packetize loop queues `VideoFrame` packets only after the peer completes the encrypted handshake.
 - Development-only auto-approval mode for local LAN input-path smoke tests.
 - Compact stylus packet decode (`GLYS`) and routing into `StylusInputBridge`.
 - Latency ping/pong routing.
@@ -47,6 +48,7 @@ Approved peers are recorded into the local host settings file as trusted-device 
 ```powershell
 trust list
 trust forget trusted-192-168-1-20-44999
+trust permission trusted-key-abc keyboard off
 trust clear
 ```
 
@@ -54,12 +56,10 @@ For early LAN input testing when you intentionally want to bypass approval:
 
 ```powershell
 $env:GLYPHRAY_DEV_AUTO_APPROVE='1'
-$env:GLYPHRAY_ENABLE_PEN_INJECTION='1'
-$env:GLYPHRAY_ENABLE_VIDEO_STREAM='1'
 cargo run -p glyphray-windows-host -- serve
 ```
 
-`GLYPHRAY_DEV_AUTO_APPROVE` bypasses approval for local smoke tests. `GLYPHRAY_ENABLE_PEN_INJECTION` connects the backend router to the native Win32 synthetic pen injector when that API is available. Both switches are intentionally explicit and must not become the production permission model.
+`GLYPHRAY_DEV_AUTO_APPROVE` bypasses manual approval for local smoke tests, but it still performs the signed secure-session handshake when the Android client provides an identity key. Normal video and native input paths are enabled by default and remain gated by approval, encrypted-session state, and device permissions. Use `GLYPHRAY_DISABLE_VIDEO_STREAM` or the corresponding `GLYPHRAY_DISABLE_*_INJECTION` variables to isolate diagnostics.
 
 Without development auto-approval, the console loop prints incoming pairing requests. Use:
 
@@ -95,7 +95,7 @@ Preset names are ASCII tokens containing letters, numbers, `-`, `_`, or `.`. App
 
 `startup status`, `startup enable`, and `startup disable` manage the current user's Windows startup registration. The implementation uses the HKCU Run key and launches the host with `serve` after user logon.
 
-The video pump currently uses the existing capture/encoder abstraction and queues fragmented encoded access units to approved peers. The queueing path is real, but the default `PendingHardwareEncoder` is still a placeholder; production video still needs a concrete H.264 hardware/software encoder backend.
+The video pump uses the capture/encoder abstraction and queues fragmented H.264 access units to approved peers. Windows capture now uses DXGI Desktop Duplication with a D3D11 staging texture, row-pitch-safe BGRA readback, portrait rotation, unchanged-frame reuse after acquisition timeout, and session recreation after `DXGI_ERROR_ACCESS_LOST`. Display enumeration reports the active refresh rate and DPI scale. `PlatformVideoEncoder` selects the Microsoft Media Foundation H.264 software MFT and performs BGRA-to-NV12 conversion, low-latency/CBR configuration, B-frame disabling, periodic and requested keyframes, and Annex B normalization. Production video still needs hardware MFT selection and continuous Android-device validation.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
@@ -117,15 +117,12 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 - Per-IP rate limits are in-memory only and are visible through console `status`; they still need richer diagnostics UI before beta.
 - Peer approval has console and opt-in native dialog paths, plus persisted trusted-device records and public-key challenge/response identity proof. It still needs tray/settings UI and per-device permission editing before beta.
 - DisplayInfo uses current monitor enumeration and should later feed selected-monitor mapping and calibration.
-- Client encoder config is stored on the session but is not yet wired into the live capture/encode loop.
-- Keyboard packets can be injected with native Windows `SendInput` when `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1` is explicitly set.
+- Client encoder config is wired into the live capture/encode loop; non-native resolution requests still need a scaler.
+- Keyboard packets are injected with native Windows `SendInput` when the authenticated device has keyboard permission.
 - Keyboard injection currently uses Windows virtual keys and needs layout-aware text/IME handling before beta.
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should stay out of normal user flows now that challenge/response trusted-device validation exists.
-- `GLYPHRAY_ENABLE_PEN_INJECTION` is for explicit native input smoke tests only until display mapping is negotiated.
-- `GLYPHRAY_ENABLE_KEYBOARD_INJECTION` is for explicit keyboard smoke tests only until per-device input permissions exist.
-- `GLYPHRAY_ENABLE_TOUCH_INJECTION` is for explicit native touch smoke tests only until monitor mapping/calibration is negotiated.
-- `GLYPHRAY_ENABLE_MOUSE_INJECTION` is for explicit mouse smoke tests only until per-device input permissions exist.
+- Native pen/touch/keyboard/mouse paths are enabled by default, but only authenticated encrypted peers with the matching persisted permission can reach them.
 - Gamepad reports are decoded, but Windows virtual-controller injection needs a ViGEm or virtual HID backend.
-- Video streaming pipeline exists, but the live control loop is not yet driving capture/encode/send continuously.
+- The live control loop drives capture/encode/packetize/send by default; interactive-session, lock/unlock, and physical-device soak validation remain.
 - Windows platform secret storage uses DPAPI-protected per-user files. Beta still needs migration and corrupted-store recovery tests.
 - Real app validation for Windows Ink input is still required.

@@ -55,6 +55,7 @@ import com.glyphray.android.network.AndroidSessionPreferencesStore
 import com.glyphray.android.network.DiscoveredHost
 import com.glyphray.android.network.HostDiscoveryController
 import com.glyphray.android.network.SessionControlController
+import com.glyphray.android.security.TrustedHostIdentityStore
 import com.glyphray.android.ui.screens.ConnectionScreen
 import com.glyphray.android.ui.screens.DiagnosticsScreen
 import com.glyphray.android.ui.screens.HostListScreen
@@ -93,6 +94,7 @@ fun GlyphRayApp() {
         SessionControlController(
             initialVideoSettings = initialSessionPreferences.videoSettings,
             initialInputSettings = initialSessionPreferences.inputSettings,
+            trustedHostIdentityStore = TrustedHostIdentityStore(context),
         )
     }
     DisposableEffect(hostDiscoveryController) {
@@ -177,6 +179,7 @@ fun GlyphRayApp() {
                     onKeyEvent = sessionControlController::onKeyEvent,
                     onGenericMotionEvent = sessionControlController::onGenericMotionEvent,
                     onVideoStreamController = sessionControlController::attachVideoStreamController,
+                    realtimeInputSender = sessionControlController,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
                 )

@@ -1,10 +1,10 @@
+use aes_gcm::aead::{Aead, Payload};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{KeyInit, XChaCha20Poly1305, XNonce};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
@@ -223,18 +223,18 @@ pub struct SealedPacket {
 }
 
 pub struct SessionCipher {
-    cipher: XChaCha20Poly1305,
+    cipher: Aes256Gcm,
 }
 
 impl SessionCipher {
     pub fn new(secret: &SecretBytes, transcript_hash: &[u8]) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.update(b"GlyphRay session key v1");
-        hasher.update(secret.expose());
-        hasher.update(transcript_hash);
-        let key = hasher.finalize();
+        Self::derive(secret, transcript_hash, b"single-direction")
+    }
+
+    pub fn derive(secret: &SecretBytes, transcript_hash: &[u8], direction: &[u8]) -> Self {
+        let key = derive_session_key(secret.expose(), transcript_hash, direction);
         Self {
-            cipher: XChaCha20Poly1305::new_from_slice(key.as_slice()).expect("32-byte key"),
+            cipher: Aes256Gcm::new_from_slice(&key).expect("32-byte key"),
         }
     }
 
@@ -248,7 +248,7 @@ impl SessionCipher {
         let ciphertext = self
             .cipher
             .encrypt(
-                XNonce::from_slice(&nonce),
+                Nonce::from_slice(&nonce),
                 Payload {
                     msg: plaintext,
                     aad,
@@ -265,7 +265,7 @@ impl SessionCipher {
         let nonce = nonce_from_counter(packet.counter);
         self.cipher
             .decrypt(
-                XNonce::from_slice(&nonce),
+                Nonce::from_slice(&nonce),
                 Payload {
                     msg: &packet.ciphertext,
                     aad,
@@ -275,10 +275,32 @@ impl SessionCipher {
     }
 }
 
+pub struct SessionCipherPair {
+    pub outbound: SessionCipher,
+    pub inbound: SessionCipher,
+}
+
+impl SessionCipherPair {
+    pub fn for_host(secret: &SecretBytes, transcript_hash: &[u8]) -> Self {
+        Self {
+            outbound: SessionCipher::derive(secret, transcript_hash, b"host-to-client"),
+            inbound: SessionCipher::derive(secret, transcript_hash, b"client-to-host"),
+        }
+    }
+
+    pub fn for_client(secret: &SecretBytes, transcript_hash: &[u8]) -> Self {
+        Self {
+            outbound: SessionCipher::derive(secret, transcript_hash, b"client-to-host"),
+            inbound: SessionCipher::derive(secret, transcript_hash, b"host-to-client"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayGuard {
     highest_counter: Option<u64>,
     window: u64,
+    seen: BTreeSet<u64>,
 }
 
 impl ReplayGuard {
@@ -286,31 +308,53 @@ impl ReplayGuard {
         Self {
             highest_counter: None,
             window: window.max(1),
+            seen: BTreeSet::new(),
         }
     }
 
     pub fn accept(&mut self, counter: u64) -> Result<(), SecurityError> {
-        match self.highest_counter {
-            None => {
-                self.highest_counter = Some(counter);
-                Ok(())
-            }
-            Some(highest) if counter > highest => {
-                self.highest_counter = Some(counter);
-                Ok(())
-            }
-            Some(highest) if highest.saturating_sub(counter) < self.window => {
-                Err(SecurityError::Replay)
-            }
-            Some(_) => Err(SecurityError::Replay),
+        if self.seen.contains(&counter) {
+            return Err(SecurityError::Replay);
         }
+        if self
+            .highest_counter
+            .is_some_and(|highest| counter.saturating_add(self.window) <= highest)
+        {
+            return Err(SecurityError::Replay);
+        }
+
+        self.highest_counter = Some(
+            self.highest_counter
+                .map_or(counter, |high| high.max(counter)),
+        );
+        self.seen.insert(counter);
+        let oldest_allowed = self
+            .highest_counter
+            .expect("set above")
+            .saturating_sub(self.window.saturating_sub(1));
+        self.seen = self.seen.split_off(&oldest_allowed);
+        Ok(())
     }
 }
 
-fn nonce_from_counter(counter: u64) -> [u8; 24] {
-    let mut nonce = [0_u8; 24];
-    nonce[0..8].copy_from_slice(b"GLYRSESS");
-    nonce[16..24].copy_from_slice(&counter.to_le_bytes());
+fn derive_session_key(shared_secret: &[u8], transcript_hash: &[u8], direction: &[u8]) -> [u8; 32] {
+    let mut extract =
+        <HmacSha256 as Mac>::new_from_slice(transcript_hash).expect("HMAC accepts any key length");
+    extract.update(shared_secret);
+    let prk = extract.finalize().into_bytes();
+
+    let mut expand =
+        <HmacSha256 as Mac>::new_from_slice(&prk).expect("HMAC accepts any key length");
+    expand.update(b"GlyphRay session key v1");
+    expand.update(direction);
+    expand.update(&[1]);
+    expand.finalize().into_bytes().into()
+}
+
+fn nonce_from_counter(counter: u64) -> [u8; 12] {
+    let mut nonce = [0_u8; 12];
+    nonce[0..4].copy_from_slice(b"GLYR");
+    nonce[4..12].copy_from_slice(&counter.to_be_bytes());
     nonce
 }
 
@@ -344,6 +388,10 @@ impl SecretStore for InMemorySecretStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hex_lower(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
 
     #[test]
     fn pairing_code_hash_depends_on_salt() {
@@ -403,10 +451,82 @@ mod tests {
     }
 
     #[test]
+    fn directional_session_keys_interoperate_without_nonce_reuse() {
+        let secret = SecretBytes::from_bytes(b"shared ECDH secret".to_vec());
+        let host = SessionCipherPair::for_host(&secret, b"transcript");
+        let client = SessionCipherPair::for_client(&secret, b"transcript");
+
+        let client_packet = client
+            .outbound
+            .seal(1, b"session", b"pen input")
+            .expect("client seal");
+        assert_eq!(
+            host.inbound
+                .open(&client_packet, b"session")
+                .expect("host open"),
+            b"pen input"
+        );
+        let host_packet = host
+            .outbound
+            .seal(1, b"session", b"video")
+            .expect("host seal");
+        assert_eq!(
+            client
+                .inbound
+                .open(&host_packet, b"session")
+                .expect("client open"),
+            b"video"
+        );
+    }
+
+    #[test]
+    fn directional_key_derivation_matches_cross_platform_vector() {
+        let shared_secret = (0_u8..32)
+            .map(|value| value.wrapping_mul(7))
+            .collect::<Vec<_>>();
+        let transcript = (0_u8..32)
+            .map(|value| value.wrapping_mul(11))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            hex_lower(&derive_session_key(
+                &shared_secret,
+                &transcript,
+                b"client-to-host"
+            )),
+            "13a86c080847160ebf3331bdddd11ad8377be092698e6809c3af81fbf7c6dd0e"
+        );
+        assert_eq!(
+            hex_lower(&derive_session_key(
+                &shared_secret,
+                &transcript,
+                b"host-to-client"
+            )),
+            "f6daad80d2a79845aa4b0f67abac4ea0412a78ff2ffcdb029874375639bc498d"
+        );
+    }
+
+    #[test]
     fn replay_guard_rejects_duplicate_counter() {
         let mut guard = ReplayGuard::new(64);
         guard.accept(10).expect("first");
         assert!(matches!(guard.accept(10), Err(SecurityError::Replay)));
         guard.accept(11).expect("next");
+    }
+
+    #[test]
+    fn replay_guard_allows_unseen_out_of_order_packet_inside_window() {
+        let mut guard = ReplayGuard::new(64);
+        guard.accept(10).expect("first");
+        guard.accept(12).expect("ahead");
+        guard.accept(11).expect("reordered");
+        assert!(matches!(guard.accept(11), Err(SecurityError::Replay)));
+    }
+
+    #[test]
+    fn replay_guard_rejects_packet_older_than_window() {
+        let mut guard = ReplayGuard::new(4);
+        guard.accept(10).expect("first");
+        assert!(matches!(guard.accept(6), Err(SecurityError::Replay)));
     }
 }

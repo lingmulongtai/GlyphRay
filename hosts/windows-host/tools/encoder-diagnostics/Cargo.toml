@@ -1,0 +1,12 @@
+[package]
+name = "glyphray-encoder-diagnostics"
+description = "Windows capture and Media Foundation H.264 encoder diagnostic CLI for GlyphRay."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast.workspace = true
+glyphray-transport = { path = "../../../../crates/transport" }
+glyphray-windows-host = { path = "../.." }

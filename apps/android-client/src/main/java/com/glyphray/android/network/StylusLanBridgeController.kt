@@ -29,6 +29,7 @@ data class StylusLanBridgeState(
 }
 
 class StylusLanBridgeController(
+    private val realtimeSender: SessionRealtimeInputSender,
     private val streamController: StylusStreamController = StylusStreamController(),
 ) : Closeable {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -38,46 +39,28 @@ class StylusLanBridgeController(
         }
     }
     private val closed = AtomicBoolean(false)
-    private var sender: StylusUdpSender? = null
     private val touchTranslator = TouchModeTranslator()
+    private var nextFrameSequence = 1L
 
     var state by mutableStateOf(StylusLanBridgeState())
         private set
 
     fun connect(host: DiscoveredHost) {
-        execute {
-            runCatching {
-                val nextSender = StylusUdpSender().apply { connect(host) }
-                val previous = sender
-                sender = nextSender
-                previous?.close()
-                postState {
-                    StylusLanBridgeState(
-                        connectedHostName = host.hostName,
-                        isConnected = true,
-                    )
-                }
-            }.onFailure { error ->
-                postState {
-                    it.copy(
-                        isConnected = false,
-                        lastError = error.message ?: error.javaClass.simpleName,
-                    )
-                }
-            }
+        postState {
+            StylusLanBridgeState(
+                connectedHostName = host.hostName,
+                isConnected = realtimeSender.isInputTransportReady,
+                lastError = null,
+            )
         }
     }
 
     fun disconnect() {
-        execute {
-            sender?.close()
-            sender = null
-            postState {
-                it.copy(
-                    connectedHostName = null,
-                    isConnected = false,
-                )
-            }
+        postState {
+            it.copy(
+                connectedHostName = null,
+                isConnected = false,
+            )
         }
     }
 
@@ -91,7 +74,8 @@ class StylusLanBridgeController(
             return false
         }
         if (directInputKind != DirectInputKind.Stylus) {
-            sendDirectInput(event, directInputKind, inputSettings, displayId)
+            val prepared = prepareDirectInput(event, directInputKind, inputSettings, displayId)
+            sendPreparedInput(prepared)
             return true
         }
 
@@ -108,14 +92,13 @@ class StylusLanBridgeController(
         }
 
         execute {
-            val activeSender = sender
-            if (activeSender == null) {
-                postState { it.copy(lastError = "No host selected for stylus stream") }
+            if (!realtimeSender.isInputTransportReady) {
+                postState { it.copy(lastError = "Session transport is not ready for stylus input") }
                 return@execute
             }
 
             runCatching {
-                activeSender.send(packet)
+                realtimeSender.sendStylus(packet)
             }.onSuccess { bytes ->
                 postState {
                     it.copy(
@@ -137,30 +120,42 @@ class StylusLanBridgeController(
         return true
     }
 
-    private fun sendDirectInput(
+    private fun prepareDirectInput(
         event: MotionEvent,
         kind: DirectInputKind,
         inputSettings: ClientInputSettings,
         displayId: Int,
-    ) {
+    ): List<PreparedInput> {
+        return when (kind) {
+            DirectInputKind.Touch -> prepareTouchByMode(event, inputSettings.touchMode, displayId)
+            DirectInputKind.Mouse -> {
+                val frame = ProtocolFrameCodec.encodeMouseInput(nextFrameSequence++, event, displayId)
+                frame?.let { listOf(PreparedInput(TransportMessageKind.mouseInput, it)) }.orEmpty()
+            }
+            DirectInputKind.Stylus -> emptyList()
+        }
+    }
+
+    private fun sendPreparedInput(prepared: List<PreparedInput>) {
+        if (prepared.isEmpty()) {
+            return
+        }
         execute {
-            val activeSender = sender
-            if (activeSender == null) {
-                postState { it.copy(lastError = "No host selected for input stream") }
+            if (!realtimeSender.isInputTransportReady) {
+                postState { it.copy(lastError = "Session transport is not ready for input") }
                 return@execute
             }
 
             runCatching {
-                when (kind) {
-                    DirectInputKind.Touch -> sendTouchByMode(activeSender, event, inputSettings.touchMode, displayId)
-                    DirectInputKind.Mouse -> activeSender.sendMouse(event, displayId)
-                    DirectInputKind.Stylus -> 0
+                prepared.sumOf { input ->
+                    realtimeSender.sendEncodedInput(input.messageKind, input.frame)
                 }
-            }.onSuccess { bytes ->
+            }.onSuccess { bytesSent ->
                 postState {
                     it.copy(
-                        packetsSent = it.packetsSent + 1,
-                        bytesSent = it.bytesSent + bytes,
+                        isConnected = true,
+                        packetsSent = it.packetsSent + prepared.size,
+                        bytesSent = it.bytesSent + bytesSent,
                         lastError = null,
                     )
                 }
@@ -175,45 +170,63 @@ class StylusLanBridgeController(
         }
     }
 
-    private fun sendTouchByMode(
-        activeSender: StylusUdpSender,
+    private fun prepareTouchByMode(
         event: MotionEvent,
         touchMode: ClientTouchMode,
         displayId: Int,
-    ): Int {
+    ): List<PreparedInput> {
         return when (touchMode) {
             ClientTouchMode.Direct -> {
                 touchTranslator.resetIfFinished(event)
-                activeSender.sendTouch(event, displayId)
+                val frame = ProtocolFrameCodec.encodeTouchInputBatch(
+                    nextFrameSequence++,
+                    event,
+                    displayId,
+                )
+                frame?.let { listOf(PreparedInput(TransportMessageKind.touchInputBatch, it)) }
+                    .orEmpty()
             }
             ClientTouchMode.Trackpad -> {
-                val mouseEvents = touchTranslator.trackpadMouse(event)
-                mouseEvents.sumOf { mouse ->
-                    activeSender.sendMouse(
-                        displayId = displayId,
-                        x = mouse.x,
-                        y = mouse.y,
-                        buttonFlags = mouse.buttonFlags,
-                        timestampUs = mouse.timestampUs,
+                touchTranslator.trackpadMouse(event).map { mouse ->
+                    PreparedInput(
+                        TransportMessageKind.mouseInput,
+                        encodeMouseGesture(mouse, displayId),
                     )
                 }
             }
             ClientTouchMode.Gesture -> {
                 val wheel = touchTranslator.gestureWheel(event)
                 if (wheel != null) {
-                    activeSender.sendMouse(
-                        displayId = displayId,
-                        x = wheel.x,
-                        y = wheel.y,
-                        wheelDeltaX = wheel.wheelDeltaX,
-                        wheelDeltaY = wheel.wheelDeltaY,
-                        timestampUs = wheel.timestampUs,
+                    listOf(
+                        PreparedInput(
+                            TransportMessageKind.mouseInput,
+                            encodeMouseGesture(wheel, displayId),
+                        ),
                     )
                 } else {
-                    activeSender.sendTouch(event, displayId)
+                    val frame = ProtocolFrameCodec.encodeTouchInputBatch(
+                        nextFrameSequence++,
+                        event,
+                        displayId,
+                    )
+                    frame?.let { listOf(PreparedInput(TransportMessageKind.touchInputBatch, it)) }
+                        .orEmpty()
                 }
             }
         }
+    }
+
+    private fun encodeMouseGesture(mouse: RemoteMouseGesture, displayId: Int): ByteArray {
+        return ProtocolFrameCodec.encodeMouseInput(
+            sequence = nextFrameSequence++,
+            timestampUs = mouse.timestampUs,
+            displayId = displayId,
+            x = mouse.x,
+            y = mouse.y,
+            wheelDeltaX = mouse.wheelDeltaX,
+            wheelDeltaY = mouse.wheelDeltaY,
+            buttonFlags = mouse.buttonFlags,
+        )
     }
 
     override fun close() {
@@ -221,13 +234,9 @@ class StylusLanBridgeController(
             return
         }
         try {
-            executor.execute {
-                sender?.close()
-                sender = null
-            }
+            executor.execute { }
         } catch (_: RejectedExecutionException) {
-            sender?.close()
-            sender = null
+            // The shared session transport is owned by SessionControlController.
         }
         executor.shutdown()
     }
@@ -260,6 +269,11 @@ private enum class DirectInputKind {
     Touch,
     Mouse,
 }
+
+private data class PreparedInput(
+    val messageKind: Int,
+    val frame: ByteArray,
+)
 
 private fun MotionEvent.directInputKind(): DirectInputKind {
     val hasMouse = (0 until pointerCount).any { getToolType(it) == MotionEvent.TOOL_TYPE_MOUSE }

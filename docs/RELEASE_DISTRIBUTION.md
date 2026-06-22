@@ -1,52 +1,68 @@
 # Release And Distribution
 
-GlyphRay is not production-release ready yet, but the repository now tracks the intended release path.
+GlyphRay can now produce repeatable engineering release candidates. A public production release still requires the signing credentials and hardware validation listed in the release runbook.
+
+## Shared Versioning
+
+- `VERSION` is the canonical `major.minor.patch` release version.
+- Cargo workspace packages inherit the Cargo workspace version mirror; release CI rejects a mismatch with `VERSION`.
+- Android reads `VERSION` by default and accepts `GLYPHRAY_VERSION_NAME` / `GLYPHRAY_VERSION_CODE` overrides in CI.
+- Windows and macOS packaging scripts read `VERSION` unless an explicit version is supplied.
+- A release tag must be exactly `v<VERSION>`.
 
 ## Windows
 
-Target format: signed installer, preferably MSI or a simple bootstrapper EXE wrapping MSI.
+Target: Windows 10/11 x64 MSI.
 
-Current foundation:
+Implemented:
 
-- WiX v4 package definition in `tools/packaging/windows`.
-- Build script: `tools/packaging/windows/build-msi.ps1`.
-- Host binary payload staging into `dist/windows/payload`.
+- Release host binary staging under `dist/windows/payload`.
+- WiX v4 MSI with a stable upgrade identity, Programs and Features metadata, and Start menu shortcut.
+- Optional Authenticode signing of both the host EXE and MSI.
+- Local MSI generation verified on Windows with WiX 4.0.6.
 
-Before beta:
+Build:
 
-- Replace placeholder upgrade GUID with production identity.
-- Add code signing.
-- Wire the existing `startup status|enable|disable` host commands into installer UI/tray UI, then add the service/agent split.
-- Add clear permission copy for pen, touch, mouse, keyboard, and gamepad injection.
-- Add uninstall cleanup for services, firewall rules, and trusted device state.
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/packaging/windows/build-msi.ps1
+```
+
+Production gaps: certificate provisioning, installer UI/permission copy, service/agent split, firewall lifecycle, and update delivery.
 
 ## macOS
 
-Target format: signed and notarized app bundle plus `.pkg`.
+Target: macOS 13+ Developer ID signed and notarized app bundle plus installer package.
 
-Current foundation:
+Implemented:
 
-- SwiftPM host executable.
-- Permission readiness UI for Screen Recording, Accessibility, Input Monitoring, and audio.
-- Keychain secret-store boundary.
-- VideoToolbox encoder smoke-test path.
-- `pkgbuild` script in `tools/packaging/macos/build-pkg.sh`.
+- Native `.app` layout with `Info.plist`, minimum OS, local-network, and microphone usage descriptions.
+- Release SwiftPM build copied into the app bundle.
+- Ad-hoc signing for package smoke tests.
+- Optional Developer ID Application and Installer signing.
+- Optional `notarytool` submission and stapling for the pkg.
+- `.pkg` and zipped app outputs under `dist/macos`.
 
-Before beta:
+Build on macOS:
 
-- Convert the host into a proper `.app` bundle.
-- Add Developer ID signing and notarization.
-- Expand permission readiness into first-run onboarding for Screen Recording, Accessibility, Input Monitoring, and audio permissions.
+```bash
+bash tools/packaging/macos/build-pkg.sh
+```
+
+Production gaps: real certificate/notary validation in the repository owner account, first-run onboarding polish, and Sparkle or another signed update strategy.
 
 ## Android / Play Store
 
-Target format: Play Store internal testing first, then closed beta.
+Target: Play Store internal testing, then closed beta.
 
-Before Play upload:
+Implemented:
 
-- Add release signing config through local/CI secrets only.
-- Add versionCode/versionName automation.
-- Add adaptive icon, store icon, screenshots, and privacy policy.
-- Complete Play Data Safety form.
-- Review Android foreground-service and nearby-network behavior.
-- Keep diagnostics opt-in and avoid raw keyboard/input logging.
+- Release APK and AAB Gradle tasks validated locally.
+- Version name/code overrides for CI.
+- Signing enabled only when all keystore variables are supplied.
+- Release workflow accepts the keystore only as an encoded GitHub secret.
+
+Production gaps: Play App Signing enrollment, internal-track upload, privacy policy, Data Safety form, screenshots/store listing, adaptive icon review, and foreground-service policy review.
+
+## Publication Safety
+
+Manual `Release Candidate` workflow runs may be unsigned and are artifact-only. Tag runs refuse to create a GitHub Release unless Android, Windows, and macOS signing are enabled and macOS notarization credentials are present. All candidates include a SHA-256 manifest.

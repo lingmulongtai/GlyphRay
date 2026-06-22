@@ -42,6 +42,13 @@ class AndroidDeviceKeys(
         return signer.sign()
     }
 
+    fun signSessionPayload(payload: ByteArray): ByteArray {
+        val signer = Signature.getInstance("SHA256withECDSA")
+        signer.initSign(ensureKeyPair().private)
+        signer.update(payload)
+        return signer.sign()
+    }
+
     private fun ensureKeyPair(): KeyPair {
         val existing = keyStore.getEntry(alias, null) as? KeyStore.PrivateKeyEntry
         if (existing != null) {

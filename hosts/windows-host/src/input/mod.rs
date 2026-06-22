@@ -4,13 +4,13 @@ use glyphray_protocol::{
 };
 use std::collections::HashMap;
 
-#[cfg(all(windows))]
+#[cfg(windows)]
 mod win32_keyboard;
-#[cfg(all(windows))]
+#[cfg(windows)]
 mod win32_mouse;
-#[cfg(all(windows))]
+#[cfg(windows)]
 mod win32_pen;
-#[cfg(all(windows))]
+#[cfg(windows)]
 mod win32_touch;
 
 #[cfg(not(windows))]
@@ -21,13 +21,13 @@ pub use stub::{
     PlatformKeyboardInjector, PlatformMouseInjector, PlatformPenInjector, PlatformTouchInjector,
 };
 
-#[cfg(all(windows))]
+#[cfg(windows)]
 pub use win32_keyboard::PlatformKeyboardInjector;
-#[cfg(all(windows))]
+#[cfg(windows)]
 pub use win32_mouse::PlatformMouseInjector;
-#[cfg(all(windows))]
+#[cfg(windows)]
 pub use win32_pen::PlatformPenInjector;
-#[cfg(all(windows))]
+#[cfg(windows)]
 pub use win32_touch::PlatformTouchInjector;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

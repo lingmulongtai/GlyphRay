@@ -4,6 +4,24 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val glyphRayVersionName = providers.environmentVariable("GLYPHRAY_VERSION_NAME")
+    .orElse(rootProject.file("VERSION").readText().trim())
+    .get()
+val glyphRayVersionCode = providers.environmentVariable("GLYPHRAY_VERSION_CODE")
+    .orElse("1")
+    .get()
+    .toInt()
+val releaseStorePath = providers.environmentVariable("GLYPHRAY_ANDROID_KEYSTORE").orNull
+val releaseStorePassword = providers.environmentVariable("GLYPHRAY_ANDROID_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("GLYPHRAY_ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("GLYPHRAY_ANDROID_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(
+    releaseStorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.glyphray.android"
     compileSdk = 35
@@ -12,8 +30,28 @@ android {
         applicationId = "com.glyphray.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = glyphRayVersionCode
+        versionName = glyphRayVersionName
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(requireNotNull(releaseStorePath))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 
     compileOptions {

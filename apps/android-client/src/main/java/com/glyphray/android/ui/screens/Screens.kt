@@ -51,6 +51,7 @@ import com.glyphray.android.network.HostDiscoveryState
 import com.glyphray.android.network.SessionControlState
 import com.glyphray.android.network.SpecialRemoteKey
 import com.glyphray.android.network.StylusLanBridgeController
+import com.glyphray.android.network.SessionRealtimeInputSender
 import com.glyphray.android.ui.components.CalibrationPanel
 import com.glyphray.android.ui.components.CalibrationStep
 import com.glyphray.android.ui.components.SessionTelemetrySnapshot
@@ -220,6 +221,7 @@ fun ConnectionScreen(
             MetricRow("Input", "${controlState.inputSettings.touchMode.label} / stylus priority")
             MetricRow("Fullscreen", if (controlState.inputSettings.fullscreenMode) "On" else "Windowed")
             MetricRow("Trusted device", controlState.trustedDeviceId ?: "-")
+            MetricRow("Session security", if (controlState.secureSession) "AES-256-GCM" else "Negotiating")
         }
         Spacer(Modifier.height(12.dp))
 
@@ -228,6 +230,7 @@ fun ConnectionScreen(
             ReadinessRow("Host selected", selectedHost != null)
             ReadinessRow("Control channel", controlState.isConnected)
             ReadinessRow("Pairing accepted", controlState.lastPairingAccepted == true)
+            ReadinessRow("Encrypted session", controlState.secureSession)
             ReadinessRow("Display geometry", controlState.displays.isNotEmpty())
             ReadinessRow("Encoder request", controlState.videoSettings.lowLatency)
         }
@@ -255,10 +258,13 @@ fun RemoteSessionScreen(
     onKeyEvent: (KeyEvent) -> Boolean,
     onGenericMotionEvent: (android.view.MotionEvent) -> Boolean,
     onVideoStreamController: (RemoteVideoStreamController?) -> Unit,
+    realtimeInputSender: SessionRealtimeInputSender,
     onPenSettings: () -> Unit,
     onDiagnostics: () -> Unit,
 ) {
-    val stylusBridge = remember { StylusLanBridgeController() }
+    val stylusBridge = remember(realtimeInputSender) {
+        StylusLanBridgeController(realtimeInputSender)
+    }
     val bridgeState = stylusBridge.state
 
     androidx.compose.runtime.DisposableEffect(selectedHost) {

@@ -14,7 +14,11 @@ let package = Package(
         .executableTarget(
             name: "GlyphRayMacHost",
             path: "Sources/GlyphRayMacHost"
+        ),
+        .testTarget(
+            name: "GlyphRayMacHostTests",
+            dependencies: ["GlyphRayMacHost"],
+            path: "Tests/GlyphRayMacHostTests"
         )
     ]
 )
-

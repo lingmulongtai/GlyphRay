@@ -48,14 +48,16 @@ impl PenInjector for PlatformPenInjector {
     ) -> Result<InjectionReport, InputError> {
         for sample in &batch.samples {
             let mapped = mapper.map(sample.x, sample.y);
-            let mut pointer_info = POINTER_INFO::default();
-            pointer_info.pointerType = PT_PEN;
-            pointer_info.pointerId = sample.pointer_id;
-            pointer_info.ptPixelLocation = POINT {
-                x: mapped.x.round() as i32,
-                y: mapped.y.round() as i32,
+            let mut pointer_info = POINTER_INFO {
+                pointerType: PT_PEN,
+                pointerId: sample.pointer_id,
+                ptPixelLocation: POINT {
+                    x: mapped.x.round() as i32,
+                    y: mapped.y.round() as i32,
+                },
+                pointerFlags: POINTER_FLAG_PRIMARY | POINTER_FLAG_INRANGE,
+                ..Default::default()
             };
-            pointer_info.pointerFlags = POINTER_FLAG_PRIMARY | POINTER_FLAG_INRANGE;
 
             if map_action_to_contact(sample.action, sample) {
                 pointer_info.pointerFlags |= POINTER_FLAG_INCONTACT;

@@ -83,7 +83,7 @@ Windows Ink-style pen injection remains Windows-specific.
 
 ## Security And Transport
 
-Session payloads can be sealed through `SessionCipher` and `SecureDatagramCodec`. This is the foundation for encrypted UDP/WebRTC-like packet transport. Relay selection is optional and prefers direct trusted LAN routes.
+Windows and Android use `SessionCipherPair` and `SecureDatagramCodec` in the live UDP path. A signed P-256 ECDH `GLYH` handshake derives separate directional AES-256-GCM keys, then complete `GLYT` packets are sealed as replay-protected `GLYE` datagrams. Relay selection remains optional and prefers direct trusted LAN routes. The macOS host still needs this same live-session layer.
 
 ## Backend Runtime
 
@@ -113,7 +113,7 @@ Runtime resilience rules:
 
 - Unknown UDP peers may create pending sessions only up to a bounded cap; oldest pending peers are evicted before memory can grow without limit.
 - New pending peers are rate limited per source IP so one address cannot starve other pending devices by rotating ports.
-- Approved input packets are accepted only if their transport sequence and input timestamp are newer than the session watermark.
+- Approved input packets are accepted only from an authenticated encrypted session, when the device-specific input permission allows that message family, and when transport sequence/timestamp watermarks are current.
 - Outbound packets use channel-specific bounded queues and a QoS schedule that prioritizes input/control over audio/video.
 - Sends are flushed nonblocking so packet receive/poll work is not coupled to temporary socket send pressure.
 - Backend health snapshots expose session counts, queue depths, drops, late input drops, rate limits, and backpressure counters to the local host console.

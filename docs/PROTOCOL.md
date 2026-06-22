@@ -36,6 +36,22 @@ The datagram layer is intentionally smaller than the session protocol frame. It 
 
 The input channel is ordered as real-time state. Receivers should treat older sequence numbers or backward-moving input timestamps as late packets and drop them before OS injection. This avoids visible cursor or pen jitter when UDP packets arrive out of order.
 
+## Secure Session Handshake And Datagram
+
+After an accepted pairing or trusted-device authentication, Windows sends a `SessionKeyExchange` transport packet with a binary `GLYH` payload. It contains a 16-byte session id, expiry, 32-byte salt, ephemeral P-256 public key DER, persistent host identity public key DER, and host ECDSA signature. Android verifies the offer, checks its pinned host fingerprint, creates an ephemeral P-256 key, and returns a signed `SessionKeyConfirm` `GLYH` payload.
+
+Both peers hash the same transcript and derive independent `host-to-client` and `client-to-host` AES-256-GCM keys. Directional keys prevent nonce reuse when both sides start counters at one. Once confirmation succeeds, each complete `GLYT` packet is sealed inside `GLYE`:
+
+| Field | Size | Description |
+| --- | ---: | --- |
+| magic | 4 | `GLYE` |
+| version | 2 | little-endian, currently `1` |
+| counter | 8 | little-endian authenticated replay counter |
+| ciphertext_len | 4 | encrypted bytes including the GCM tag |
+| ciphertext | variable | AES-256-GCM sealed `GLYT` datagram |
+
+The AES-GCM nonce is the ASCII prefix `GLYR` plus the counter encoded as big-endian `u64`. Associated data is `GlyphRay secure datagram v1` followed by the 16-byte session id. Windows and Android reject plaintext after the session becomes secure and use a 4096-counter replay window for reordered UDP delivery.
+
 ## Video Fragment Payload
 
 Large encoded frames can be split with the transport-level `GLYF` fragment payload:
@@ -165,7 +181,7 @@ The Android client maps common `KeyEvent` codes to Windows virtual keys before t
 - orientation
 - flags
 
-The Windows host has an opt-in smoke-test injector behind `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`. It still uses temporary 1920x1080 mapping until selected-monitor negotiation and calibration are fully wired.
+The Windows host injects approved touch packets through `PT_TOUCH` after encrypted-session and per-device touch-permission checks. Selected-display mapping is wired; multi-monitor rotation, calibration, and real-device gesture validation still require hardware testing.
 
 ## MouseInput
 
@@ -178,7 +194,7 @@ The Windows host has an opt-in smoke-test injector behind `GLYPHRAY_ENABLE_TOUCH
 - horizontal and vertical wheel deltas
 - button flags
 
-The Windows host can opt-in inject cursor movement, primary/secondary/middle buttons, and wheel events with `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`.
+The Windows host can inject cursor movement, primary/secondary/middle buttons, and wheel events after encrypted-session and per-device mouse-permission checks.
 
 ## GamepadInput
 

@@ -22,9 +22,7 @@ class RemoteVideoDecoder(private val surface: Surface) : AutoCloseable {
         close()
 
         val format = MediaFormat.createVideoFormat(config.mimeType, config.width, config.height)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            format.setInteger(MediaFormat.KEY_PRIORITY, 0)
-        }
+        format.setInteger(MediaFormat.KEY_PRIORITY, 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             format.setInteger("low-latency", 1)
         }
@@ -80,7 +78,6 @@ class RemoteVideoDecoder(private val surface: Surface) : AutoCloseable {
             when (val outputIndex = decoder.dequeueOutputBuffer(bufferInfo, 0)) {
                 MediaCodec.INFO_TRY_AGAIN_LATER -> return
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
-                MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
                 else -> if (outputIndex >= 0) {
                     decoder.releaseOutputBuffer(outputIndex, true)
                 }

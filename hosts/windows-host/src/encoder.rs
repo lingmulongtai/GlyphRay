@@ -1,6 +1,15 @@
 use crate::capture::CapturedFrame;
 use glyphray_protocol::{ColorSpace, VideoCodec};
 
+#[cfg(windows)]
+mod media_foundation;
+
+#[cfg(windows)]
+pub use media_foundation::MediaFoundationH264Encoder as PlatformVideoEncoder;
+
+#[cfg(not(windows))]
+pub type PlatformVideoEncoder = PendingHardwareEncoder;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderBackend {
     Auto,
@@ -62,6 +71,12 @@ pub enum EncoderError {
     DimensionMismatch,
     #[error("encoder has not been started")]
     NotStarted,
+    #[error("invalid encoder settings: {0}")]
+    InvalidSettings(String),
+    #[error("encoder backend failed: {0}")]
+    Backend(String),
+    #[error("encoder accepted the frame but did not produce an access unit")]
+    OutputUnavailable,
 }
 
 pub trait VideoEncoder {

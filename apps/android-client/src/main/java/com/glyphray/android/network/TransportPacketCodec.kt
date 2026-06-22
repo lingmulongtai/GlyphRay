@@ -2,10 +2,6 @@ package com.glyphray.android.network
 
 import android.os.SystemClock
 import com.glyphray.android.input.StylusStreamPacket
-import java.io.Closeable
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
@@ -36,6 +32,8 @@ object TransportMessageKind {
     const val latencyPong = 16
     const val touchInputBatch = 19
     const val gamepadInput = 20
+    const val sessionKeyExchange = 21
+    const val sessionKeyConfirm = 22
 }
 
 data class DecodedTransportPacket(
@@ -215,87 +213,6 @@ object TransportPacketCodec {
             timestampUs = timestampUs,
             payload = payload,
         )
-    }
-}
-
-class StylusUdpSender : Closeable {
-    private val socket = DatagramSocket()
-    private val sendQueue = RealtimeTransportSendQueue()
-    private var remote: InetSocketAddress? = null
-    private var nextSequence = 1L
-    private var nextFrameSequence = 1L
-
-    fun connect(host: DiscoveredHost) {
-        remote = host.endpoint
-        socket.connect(host.endpoint)
-    }
-
-    fun send(packet: StylusStreamPacket): Int {
-        val target = remote ?: error("StylusUdpSender is not connected to a host")
-        val datagram = TransportPacketCodec.encodeStylusInput(
-            sequence = nextSequence++,
-            packet = packet,
-        )
-        return sendQueued(target, TransportChannel.Input, datagram)
-    }
-
-    fun sendMouse(event: android.view.MotionEvent, displayId: Int = 0): Int {
-        val frame = ProtocolFrameCodec.encodeMouseInput(nextFrameSequence++, event, displayId)
-            ?: return 0
-        return sendFramedInput(TransportMessageKind.mouseInput, frame)
-    }
-
-    fun sendMouse(
-        displayId: Int = 0,
-        x: Float,
-        y: Float,
-        wheelDeltaX: Float = 0f,
-        wheelDeltaY: Float = 0f,
-        buttonFlags: Int = 0,
-        timestampUs: Long = SystemClock.elapsedRealtimeNanos() / 1_000L,
-    ): Int {
-        val frame = ProtocolFrameCodec.encodeMouseInput(
-            sequence = nextFrameSequence++,
-            timestampUs = timestampUs,
-            displayId = displayId,
-            x = x,
-            y = y,
-            wheelDeltaX = wheelDeltaX,
-            wheelDeltaY = wheelDeltaY,
-            buttonFlags = buttonFlags,
-        )
-        return sendFramedInput(TransportMessageKind.mouseInput, frame)
-    }
-
-    fun sendTouch(event: android.view.MotionEvent, displayId: Int = 0): Int {
-        val frame = ProtocolFrameCodec.encodeTouchInputBatch(nextFrameSequence++, event, displayId)
-            ?: return 0
-        return sendFramedInput(TransportMessageKind.touchInputBatch, frame)
-    }
-
-    private fun sendFramedInput(messageKind: Int, frame: ByteArray): Int {
-        val target = remote ?: error("StylusUdpSender is not connected to a host")
-        val datagram = TransportPacketCodec.encodeInput(
-            sequence = nextSequence++,
-            messageKind = messageKind,
-            payload = frame,
-        )
-        return sendQueued(target, TransportChannel.Input, datagram)
-    }
-
-    private fun sendQueued(target: InetSocketAddress, channel: TransportChannel, datagram: ByteArray): Int {
-        sendQueue.offer(channel, datagram)
-        var bytesSent = 0
-        repeat(8) {
-            val next = sendQueue.poll() ?: return@repeat
-            socket.send(DatagramPacket(next.bytes, next.bytes.size, target))
-            bytesSent += next.bytes.size
-        }
-        return bytesSent
-    }
-
-    override fun close() {
-        socket.close()
     }
 }
 

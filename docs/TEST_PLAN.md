@@ -79,10 +79,10 @@ cargo test --workspace
 - Confirm one source IP rotating ports is rate-limited before it can evict all other pending peers.
 - Run `status` in the host console and confirm pending sessions, outbound queue depth, drops, and backpressure counters are visible.
 - Confirm delayed lower-sequence stylus/touch/mouse/keyboard packets are dropped instead of injected.
-- With `GLYPHRAY_ENABLE_KEYBOARD_INJECTION=1`, confirm an approved Android Bluetooth keyboard can inject a safe key sequence.
+- Confirm an authenticated Android Bluetooth keyboard can inject a safe key sequence, then set keyboard permission off and verify injection stops immediately.
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
-- With `GLYPHRAY_ENABLE_TOUCH_INJECTION=1`, confirm Android finger input is received by Windows as native touch input in a touch-aware app.
-- With `GLYPHRAY_ENABLE_MOUSE_INJECTION=1`, confirm Bluetooth mouse movement/buttons/wheel are injected after approval.
+- Confirm Android finger input is received by Windows as native touch input only after approval and secure-session establishment.
+- Confirm Bluetooth mouse movement/buttons/wheel are injected after approval, and rejected when mouse permission is off.
 - With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a pairing request from Android, approve once in the Windows dialog and confirm `PairingResult accepted=true` plus `DisplayInfo`; repeat and reject once, confirming the client sees rejection.
 - After approving a device, run `trust list` and confirm the trusted-device id, label, last peer, approval timestamp, and permission flags are present. Run `trust forget <id>` and confirm only that record is removed; run `trust clear` on a disposable profile and confirm all records are removed.
 - Pair the same Android device twice and confirm the second request receives `AuthChallenge`, Android replies with `AuthResponse`, and the host accepts only when the saved Android public-key fingerprint and ECDSA signature verify. Delete the trusted record and confirm approval is required again.
@@ -110,7 +110,7 @@ cargo test --workspace
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.
 - Run `encoder override 1920x1080 120 35000`, `encoder save`, restart the backend, and confirm `encoder status` reports the saved override before any client connects.
-- Run `encoder preset save studio-120`, `encoder preset list`, `encoder preset apply studio-120`, and `encoder preset delete studio-120`; confirm apply restarts the video pump when `GLYPHRAY_ENABLE_VIDEO_STREAM=1` is set and delete removes only the named preset, not the saved default override.
+- Run `encoder preset save studio-120`, `encoder preset list`, `encoder preset apply studio-120`, and `encoder preset delete studio-120`; confirm apply restarts the default video pump and delete removes only the named preset, not the saved default override.
 - Post a safe CGEvent mouse move/click and keyboard test only after Accessibility permission is granted.
 
 ## Integration Tests To Add
