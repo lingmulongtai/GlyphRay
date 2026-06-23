@@ -57,6 +57,7 @@ pub enum MessageKind {
     GamepadInput = 20,
     SessionKeyExchange = 21,
     SessionKeyConfirm = 22,
+    PairingChallenge = 23,
 }
 
 impl TryFrom<u16> for MessageKind {
@@ -86,6 +87,7 @@ impl TryFrom<u16> for MessageKind {
             20 => Ok(Self::GamepadInput),
             21 => Ok(Self::SessionKeyExchange),
             22 => Ok(Self::SessionKeyConfirm),
+            23 => Ok(Self::PairingChallenge),
             _ => Err(ProtocolError::Serialization(format!(
                 "unknown message kind {value}"
             ))),
@@ -115,6 +117,7 @@ pub enum Message {
     Disconnect(Disconnect),
     TouchInputBatch(TouchInputBatch),
     GamepadInput(GamepadInput),
+    PairingChallenge(PairingChallenge),
 }
 
 impl Message {
@@ -140,6 +143,7 @@ impl Message {
             Self::Disconnect(_) => MessageKind::Disconnect,
             Self::TouchInputBatch(_) => MessageKind::TouchInputBatch,
             Self::GamepadInput(_) => MessageKind::GamepadInput,
+            Self::PairingChallenge(_) => MessageKind::PairingChallenge,
         }
     }
 }
@@ -283,6 +287,13 @@ pub struct PairingResult {
     pub accepted: bool,
     pub trusted_device_id: Option<String>,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PairingChallenge {
+    pub salt: [u8; 32],
+    pub expires_at_unix_ms: u64,
+    pub code_digits: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -662,5 +673,21 @@ mod tests {
                 .message,
             gamepad
         );
+    }
+
+    #[test]
+    fn pairing_challenge_round_trips_without_changing_existing_variants() {
+        let message = Message::PairingChallenge(PairingChallenge {
+            salt: [0x5a; 32],
+            expires_at_unix_ms: 1_700_000_000_000,
+            code_digits: 6,
+        });
+        let encoded = encode_frame(42, &message).expect("encode");
+        assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 23);
+        assert_eq!(
+            u32::from_le_bytes(encoded[HEADER_LEN..HEADER_LEN + 4].try_into().unwrap()),
+            20
+        );
+        assert_eq!(decode_frame(&encoded).expect("decode").message, message);
     }
 }

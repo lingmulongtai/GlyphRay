@@ -36,9 +36,22 @@ The datagram layer is intentionally smaller than the session protocol frame. It 
 
 The input channel is ordered as real-time state. Receivers should treat older sequence numbers or backward-moving input timestamps as late packets and drop them before OS injection. This avoids visible cursor or pen jitter when UDP packets arrive out of order.
 
+## First-Time Pairing Proof
+
+An untrusted Android device first sends `PairingRequest` with an empty `pairing_code_hash` and its Android Keystore public key. A Windows or macOS host responds with `PairingChallenge` (message kind `23`, bincode message variant `20`) containing a peer-specific 32-byte random salt, an absolute expiry, and `code_digits = 6`. The host displays a freshly generated `DDD-DDD` code locally; the code itself is never sent over the network.
+
+Android canonicalizes the entered code to six ASCII digits and sends a second `PairingRequest` with:
+
+```text
+HMAC-SHA256(key = challenge_salt,
+            data = "GlyphRay pairing proof v1" || six_ascii_digits)
+```
+
+The challenge is bound to the source endpoint and expires after two minutes. The displayed code expires after five minutes and rotates immediately after one successful proof, invalidating other outstanding challenges. Five failed proofs within two minutes temporarily block further attempts. Only a verified request reaches the host permission dialog or `approve` command. Returning devices whose stored public-key fingerprint matches skip the numeric code and complete signed `AuthChallenge` / `AuthResponse` verification instead.
+
 ## Secure Session Handshake And Datagram
 
-After an accepted pairing or trusted-device authentication, Windows sends a `SessionKeyExchange` transport packet with a binary `GLYH` payload. It contains a 16-byte session id, expiry, 32-byte salt, ephemeral P-256 public key DER, persistent host identity public key DER, and host ECDSA signature. Android verifies the offer, checks its pinned host fingerprint, creates an ephemeral P-256 key, and returns a signed `SessionKeyConfirm` `GLYH` payload.
+After an accepted pairing or trusted-device authentication, Windows or macOS sends a `SessionKeyExchange` transport packet with a binary `GLYH` payload. It contains a 16-byte session id, expiry, 32-byte salt, ephemeral P-256 public key DER, persistent host identity public key DER, and host ECDSA signature. Android verifies the offer, checks its pinned host fingerprint, creates an ephemeral P-256 key, and returns a signed `SessionKeyConfirm` `GLYH` payload.
 
 Both peers hash the same transcript and derive independent `host-to-client` and `client-to-host` AES-256-GCM keys. Directional keys prevent nonce reuse when both sides start counters at one. Once confirmation succeeds, each complete `GLYT` packet is sealed inside `GLYE`:
 
@@ -50,7 +63,7 @@ Both peers hash the same transcript and derive independent `host-to-client` and 
 | ciphertext_len | 4 | encrypted bytes including the GCM tag |
 | ciphertext | variable | AES-256-GCM sealed `GLYT` datagram |
 
-The AES-GCM nonce is the ASCII prefix `GLYR` plus the counter encoded as big-endian `u64`. Associated data is `GlyphRay secure datagram v1` followed by the 16-byte session id. Windows and Android reject plaintext after the session becomes secure and use a 4096-counter replay window for reordered UDP delivery.
+The AES-GCM nonce is the ASCII prefix `GLYR` plus the counter encoded as big-endian `u64`. Associated data is `GlyphRay secure datagram v1` followed by the 16-byte session id. Windows, Android, and macOS reject plaintext after the session becomes secure and use a 4096-counter replay window for reordered UDP delivery.
 
 ## Video Fragment Payload
 
@@ -79,9 +92,9 @@ The complete encoded access unit inside the fragment stream is:
 
 Android mirrors this reassembly path in `VideoFragmentReassembler.kt`.
 
-The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams. The VideoToolbox H.264 path converts length-prefixed NAL units into Annex B and prepends SPS/PPS on keyframes so Android decoder integration has the expected stream shape. `MacUdpDatagramSender.swift` can send generated datagrams to a manual UDP target for smoke testing, and `MacUdpVideoPublisher.swift` keeps a continuous Video-channel stream running for manual receiver loopback or the newest approved Android endpoint. The continuous publisher is bounded: if too many UDP sends are in flight, new video datagrams are counted as dropped rather than accumulating unbounded latency.
+The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `MacEncodedFrame` payloads are wrapped into the same encoded access-unit envelope, split into `GLYF` fragments, and then wrapped in `GLYT` Video-channel datagrams. The VideoToolbox H.264 path converts length-prefixed NAL units into Annex B and prepends SPS/PPS on keyframes. `MacUdpVideoPublisher.swift` accepts only an explicit datagram transform; the production caller supplies the approved client's `GLYE` codec, so the video publisher has no identity plaintext fallback. Its bounded in-flight queue drops new video datagrams instead of accumulating latency.
 
-`MacControlRuntime.swift` also understands the shared `GLYT` Control channel and `GLYR` protocol frame headers for the initial macOS host path. It accepts Android `PairingRequest`, sends `PairingResult`, responds to `LatencyPing`, records `EncoderConfig`, and can issue signed trusted-device `AuthChallenge` messages for returning Android clients. This implementation still needs encrypted session transport and reconnect/backpressure ownership before production use.
+`MacControlRuntime.swift` implements the shared signed `GLYH` handshake and directional `GLYE` codec with a 4096-counter replay window. The persistent host signing identity and trusted Android public keys are stored through Keychain. After key confirmation it sends encrypted `DisplayInfo`, requires encryption for latency and realtime input, seals approved-client video, and chooses only active secure targets for streaming. It also applies client `EncoderConfig` display, resolution, FPS, bitrate, and keyframe settings. macOS CI, real Android interoperability, and long-run reconnect/backpressure behavior still need validation.
 
 `MacLanDiscoveryAdvertiser.swift` emits `GLYD` discovery advertisements using the same host advertisement shape as the Rust transport crate. It marks H.264 support and pairing-required mode, but not Windows Ink support because native Windows Ink-style pen injection remains Windows-specific.
 
@@ -91,7 +104,7 @@ The macOS host mirrors the sender side in `MacVideoTransportPacketizer.swift`: `
 
 - Handshake: `ClientHello`, `HostHello`
 - Authentication: `AuthChallenge`, `AuthResponse`
-- Pairing: `PairingRequest`, `PairingResult`
+- Pairing: `PairingRequest`, `PairingChallenge`, `PairingResult`
 - Display and encoder: `DisplayInfo`, `EncoderConfig`
 - Media: `VideoFrame`, `AudioFrame`
 - Input: `StylusInputBatch`, `TouchInputBatch`, `MouseInput`, `KeyboardInput`, `GamepadInput`
@@ -196,6 +209,8 @@ The Windows host injects approved touch packets through `PT_TOUCH` after encrypt
 
 The Windows host can inject cursor movement, primary/secondary/middle buttons, and wheel events after encrypted-session and per-device mouse-permission checks.
 
+The macOS host decodes the same encrypted mouse and keyboard payloads and posts mapped CGEvents after its secure session is established. Single-finger `TouchInputBatch` is currently translated to pointer down/drag/up because public macOS APIs do not provide Windows-style native synthetic multi-touch injection.
+
 ## GamepadInput
 
 `GamepadInput` carries Android-connected controller state:
@@ -208,7 +223,7 @@ The Windows host can inject cursor movement, primary/secondary/middle buttons, a
 - left/right triggers
 - left/right stick axes
 
-The Windows host currently decodes these reports. Actual Windows controller presentation still needs a virtual gamepad backend such as ViGEm or a virtual HID driver.
+The Windows host decodes these reports, checks the trusted-device gamepad permission before processing them, and routes approved packets through a virtual gamepad bridge that clamps triggers/sticks and prepares an XInput-style report. Actual Windows controller presentation still needs a linked ViGEm or signed virtual HID native backend plus hardware validation.
 
 ## Compact Stylus Wire Packet
 

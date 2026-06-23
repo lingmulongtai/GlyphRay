@@ -13,6 +13,7 @@ struct MacUdpPublisherSnapshot: Equatable {
     let droppedDatagrams: Int
     let droppedBytes: Int
     let inFlightDatagrams: Int
+    let maxInFlightDatagrams: Int
     let highWatermarkDatagrams: Int
     let lastError: String?
 }
@@ -20,6 +21,7 @@ struct MacUdpPublisherSnapshot: Equatable {
 final class MacUdpVideoPublisher {
     private let target: MacUdpSendTarget
     private let maxInFlightDatagrams: Int
+    private let transformDatagram: (Data) throws -> Data
     private let queue = DispatchQueue(label: "com.glyphray.mac.udp-video-publisher")
     private var scheduledDatagrams = 0
     private var scheduledBytes = 0
@@ -35,9 +37,14 @@ final class MacUdpVideoPublisher {
     private var connection: NWConnection?
     #endif
 
-    init(target: MacUdpSendTarget, maxInFlightDatagrams: Int = 96) throws {
+    init(
+        target: MacUdpSendTarget,
+        maxInFlightDatagrams: Int = 96,
+        transformDatagram: @escaping (Data) throws -> Data
+    ) throws {
         self.target = target
         self.maxInFlightDatagrams = max(1, maxInFlightDatagrams)
+        self.transformDatagram = transformDatagram
 
         #if canImport(Network)
         guard let port = NWEndpoint.Port(rawValue: target.port) else {
@@ -57,21 +64,30 @@ final class MacUdpVideoPublisher {
 
     func publish(_ datagram: MacVideoTransportDatagram) {
         #if canImport(Network)
-        let bytes = datagram.bytes
+        let plaintextBytes = datagram.bytes
         queue.async { [weak self] in
             guard let self else {
                 return
             }
             guard let connection = self.connection else {
                 self.droppedDatagrams += 1
-                self.droppedBytes += bytes.count
+                self.droppedBytes += plaintextBytes.count
                 self.lastError = "video publisher is stopped"
                 return
             }
             guard self.inFlightDatagrams < self.maxInFlightDatagrams else {
                 self.droppedDatagrams += 1
-                self.droppedBytes += bytes.count
+                self.droppedBytes += plaintextBytes.count
                 self.lastError = "video send backlog capped at \(self.maxInFlightDatagrams) datagrams"
+                return
+            }
+            let bytes: Data
+            do {
+                bytes = try self.transformDatagram(plaintextBytes)
+            } catch {
+                self.droppedDatagrams += 1
+                self.droppedBytes += plaintextBytes.count
+                self.lastError = "video datagram transform failed: \(error)"
                 return
             }
             self.scheduledDatagrams += 1
@@ -125,6 +141,7 @@ final class MacUdpVideoPublisher {
             droppedDatagrams: droppedDatagrams,
             droppedBytes: droppedBytes,
             inFlightDatagrams: inFlightDatagrams,
+            maxInFlightDatagrams: maxInFlightDatagrams,
             highWatermarkDatagrams: highWatermarkDatagrams,
             lastError: lastError
         )

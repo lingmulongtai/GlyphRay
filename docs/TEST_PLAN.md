@@ -83,35 +83,36 @@ cargo test --workspace
 - Confirm Win and PrintScreen overlay keys are blocked until the host peer is approved and keyboard injection is explicitly enabled.
 - Confirm Android finger input is received by Windows as native touch input only after approval and secure-session establishment.
 - Confirm Bluetooth mouse movement/buttons/wheel are injected after approval, and rejected when mouse permission is off.
-- With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a pairing request from Android, approve once in the Windows dialog and confirm `PairingResult accepted=true` plus `DisplayInfo`; repeat and reject once, confirming the client sees rejection.
+- With `GLYPHRAY_ENABLE_PERMISSION_DIALOG=1`, send a first-time pairing request from Android, confirm Android receives `PairingChallenge`, enter the six-digit code printed by Windows, then approve in the Windows dialog and confirm `PairingResult accepted=true` plus encrypted `DisplayInfo`.
+- Enter a wrong code five times and confirm further challenges are blocked until the two-minute attempt window resets. Confirm a challenge expires after two minutes, the displayed code rotates after five minutes or immediately after success, and a captured proof cannot be reused from another UDP endpoint.
 - After approving a device, run `trust list` and confirm the trusted-device id, label, last peer, approval timestamp, and permission flags are present. Run `trust forget <id>` and confirm only that record is removed; run `trust clear` on a disposable profile and confirm all records are removed.
 - Pair the same Android device twice and confirm the second request receives `AuthChallenge`, Android replies with `AuthResponse`, and the host accepts only when the saved Android public-key fingerprint and ECDSA signature verify. Delete the trusted record and confirm approval is required again.
-- Confirm gamepad packets are decoded, then validate virtual-controller injection once ViGEm/virtual HID backend exists.
+- Confirm gamepad packets are decoded and reach the Windows virtual gamepad bridge. Once a ViGEm/virtual HID backend is linked, validate that Windows sees an Xbox-compatible controller, buttons/sticks/triggers update correctly, disconnect removes the virtual controller, and no controller input is accepted when the trusted-device gamepad permission is disabled.
 
 ## macOS Manual Tests
 
-- Build the SwiftPM host on macOS 13+ with `swift build`.
-- Confirm GitHub Actions `CI / macOS host SwiftPM build` passes on `macos-14`.
+- Run `swift test -c release` and `swift build -c release` on macOS 13+.
+- Confirm GitHub Actions `CI / macOS host SwiftPM build` passes secure-session and Android-compatible input wire tests on `macos-14`.
 - Launch the host and confirm Screen Recording, Accessibility, Input Monitoring, and audio readiness states are visible.
 - Use the Screen Recording, Accessibility, and Audio request buttons and confirm macOS opens the expected permission prompts.
 - Confirm ScreenCaptureKit display listing shows each available display with geometry.
 - Start the macOS Control runtime and confirm the discovery status reports sent announcements. On a LAN that allows broadcast, confirm Android host discovery shows the macOS host.
-- Start the macOS Control runtime, add the macOS host manually in Android using UDP port `44999`, send a pairing request, and confirm macOS lists the approved client while Android receives `PairingResult`.
-- After pairing, confirm the macOS UDP target fields are populated with the Android client endpoint learned from the control packet source.
-- After pairing, press `Start Approved Stream` and confirm the stream targets the approved Android endpoint without manually typing host/port.
+- Start the macOS Control runtime, add the macOS host manually in Android using UDP port `44999`, send a pairing request, enter the code displayed in the macOS window, and confirm macOS lists the approved client while Android receives `PairingResult`.
+- After pairing, confirm the macOS status reaches one secure client, Android receives encrypted `DisplayInfo`, and plaintext latency/input is rejected.
+- Press `Start Approved Stream` and confirm it is disabled before key confirmation, then streams encrypted `GLYE` video to the approved endpoint after confirmation.
 - Restart the macOS host after a successful pairing and confirm the trusted client list is restored from Keychain. Pair the same Android device again and confirm macOS sends `AuthChallenge`, Android returns `AuthResponse`, and macOS accepts only after signature verification. Use `Clear Trust` and confirm the list is removed.
 - Run the Live Capture Probe and confirm a short `SCStream` session reports at least one captured frame.
 - Run the VideoToolbox encoder smoke test and confirm a low-latency H.264 session can be created.
 - Run the Live Encode Probe and confirm captured frame count, encoded frame count, and encoded byte count are non-zero after Screen Recording permission is granted.
 - Run the Live Transport Probe and confirm captured frame count, encoded frame count, Video-channel datagram count, and transport byte count are non-zero.
-- Run a local UDP listener on the typed target port, then run UDP Send Probe and confirm the listener receives `GLYT` Video-channel datagrams.
-- Run the continuous UDP stream path against a local UDP listener, leave it active for at least ten seconds, then stop it and confirm the UI reports non-zero encoded frames, scheduled/sent datagrams, scheduled/sent bytes, in-flight count, high watermark, and dropped datagrams. Under artificial receiver/network delay, confirm drops increase instead of latency growing without bound.
+- Request a non-native resolution, 60/90/120 fps, bitrate, and keyframe interval from Android; confirm the stream reports the selected display and clamped output settings. Confirm unsupported codecs fail explicitly.
+- Leave the approved encrypted stream active for at least ten seconds, then stop it and confirm the UI reports non-zero encoded frames, scheduled/sent datagrams, bytes, high watermark, and drops. Under artificial delay, confirm drops increase instead of unbounded latency.
 - Run the Keychain smoke test and confirm save/load/delete passes before wiring device identity.
 - Run the Windows DPAPI `PlatformSecretStore` round-trip test and confirm secrets survive reopening the store.
 - Run `glyphray-windows-host startup status`, then enable and disable startup on a disposable Windows test user and confirm the HKCU Run value changes as expected.
 - Run `encoder override 1920x1080 120 35000`, `encoder save`, restart the backend, and confirm `encoder status` reports the saved override before any client connects.
 - Run `encoder preset save studio-120`, `encoder preset list`, `encoder preset apply studio-120`, and `encoder preset delete studio-120`; confirm apply restarts the default video pump and delete removes only the named preset, not the saved default override.
-- Post a safe CGEvent mouse move/click and keyboard test only after Accessibility permission is granted.
+- With Accessibility granted, validate encrypted Bluetooth mouse movement/buttons/wheel, keyboard letters/modifiers/function keys, and single-finger touch pointer down/drag/up. Confirm stale input sequences are dropped.
 
 ## Integration Tests To Add
 

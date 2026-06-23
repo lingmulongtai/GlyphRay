@@ -1,3 +1,4 @@
+use crate::persistence::{atomic_write, quarantine_file};
 use glyphray_security::{DeviceId, SecretBytes, SecretStore, SecurityError};
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{Signature, SigningKey};
@@ -17,6 +18,11 @@ pub struct PlatformSecretStore {
 #[derive(Clone)]
 pub struct HostIdentity {
     signing_key: SigningKey,
+}
+
+pub struct HostIdentityLoad {
+    pub identity: HostIdentity,
+    pub quarantined_path: Option<PathBuf>,
 }
 
 impl HostIdentity {
@@ -56,19 +62,47 @@ impl std::fmt::Debug for HostIdentity {
 pub fn load_or_create_host_identity(
     store: &mut PlatformSecretStore,
 ) -> Result<HostIdentity, SecurityError> {
+    Ok(load_or_recover_host_identity(store)?.identity)
+}
+
+pub fn load_or_recover_host_identity(
+    store: &mut PlatformSecretStore,
+) -> Result<HostIdentityLoad, SecurityError> {
     let device_id = DeviceId::new("glyphray-host-identity-v1");
-    if let Some(secret) = store.get_device_secret(&device_id)? {
-        let signing_key = SigningKey::from_slice(secret.expose())
-            .map_err(|error| SecurityError::SecretStore(error.to_string()))?;
-        return Ok(HostIdentity { signing_key });
+    match store.get_device_secret(&device_id) {
+        Ok(Some(secret)) => {
+            if let Ok(signing_key) = SigningKey::from_slice(secret.expose()) {
+                return Ok(HostIdentityLoad {
+                    identity: HostIdentity { signing_key },
+                    quarantined_path: None,
+                });
+            }
+        }
+        Ok(None) => {}
+        Err(_) => {
+            let quarantined_path = store.quarantine_device_secret(&device_id)?;
+            return create_recovered_identity(store, &device_id, quarantined_path);
+        }
     }
 
+    let quarantined_path = store.quarantine_device_secret(&device_id)?;
+    create_recovered_identity(store, &device_id, quarantined_path)
+}
+
+fn create_recovered_identity(
+    store: &mut PlatformSecretStore,
+    device_id: &DeviceId,
+    quarantined_path: Option<PathBuf>,
+) -> Result<HostIdentityLoad, SecurityError> {
     let identity = HostIdentity::generate();
     store.put_device_secret(
-        &device_id,
+        device_id,
         SecretBytes::from_bytes(identity.signing_key.to_bytes().to_vec()),
     )?;
-    Ok(identity)
+    Ok(HostIdentityLoad {
+        identity,
+        quarantined_path,
+    })
 }
 
 #[cfg(not(windows))]
@@ -94,6 +128,13 @@ impl PlatformSecretStore {
             stable_device_id_hash(device_id)
         ))
     }
+
+    fn quarantine_device_secret(
+        &self,
+        device_id: &DeviceId,
+    ) -> Result<Option<PathBuf>, SecurityError> {
+        quarantine_file(&self.path_for(device_id), "corrupt").map_err(secret_error)
+    }
 }
 
 #[cfg(not(windows))]
@@ -109,6 +150,13 @@ impl PlatformSecretStore {
             inner: InMemorySecretStore::default(),
         })
     }
+
+    fn quarantine_device_secret(
+        &self,
+        _device_id: &DeviceId,
+    ) -> Result<Option<PathBuf>, SecurityError> {
+        Ok(None)
+    }
 }
 
 #[cfg(windows)]
@@ -119,7 +167,7 @@ impl SecretStore for PlatformSecretStore {
         secret: SecretBytes,
     ) -> Result<(), SecurityError> {
         let protected = dpapi::protect_secret(secret.expose())?;
-        std::fs::write(self.path_for(device_id), protected).map_err(secret_error)
+        atomic_write(&self.path_for(device_id), &protected).map_err(secret_error)
     }
 
     fn get_device_secret(
@@ -314,10 +362,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn corrupt_host_identity_is_quarantined_and_regenerated() {
+        let root = unique_temp_dir().join("corrupt-host-identity");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut store = PlatformSecretStore::open_at(&root).expect("open");
+        let device_id = DeviceId::new("glyphray-host-identity-v1");
+        std::fs::write(store.path_for(&device_id), b"not a DPAPI blob")
+            .expect("write corrupt identity");
+
+        let recovered = load_or_recover_host_identity(&mut store).expect("recover identity");
+        let backup = recovered.quarantined_path.expect("quarantine path");
+        assert_eq!(
+            std::fs::read(backup).expect("backup bytes"),
+            b"not a DPAPI blob"
+        );
+        let reopened = load_or_recover_host_identity(&mut store).expect("reopen identity");
+        assert!(reopened.quarantined_path.is_none());
+        assert_eq!(
+            recovered.identity.fingerprint().expect("fingerprint"),
+            reopened.identity.fingerprint().expect("fingerprint")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     fn unique_temp_dir() -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(1);
         std::env::temp_dir().join(format!(
-            "glyphray-platform-secret-store-{}",
-            std::process::id()
+            "glyphray-platform-secret-store-{}-{}",
+            std::process::id(),
+            NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed)
         ))
     }
 

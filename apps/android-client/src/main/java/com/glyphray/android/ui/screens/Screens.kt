@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import android.view.KeyEvent
@@ -170,7 +172,7 @@ fun PairingScreen(onDone: () -> Unit) {
     ) {
         StatusBand(
             items = listOf(
-                StatusMetric("Method", "Code / QR-ready", Tone.Primary),
+                StatusMetric("Method", "6-digit code", Tone.Primary),
                 StatusMetric("Auth", "Mutual", Tone.Good),
                 StatusMetric("Secrets", "Keystore", Tone.Good),
             ),
@@ -261,7 +263,10 @@ fun RemoteSessionScreen(
     realtimeInputSender: SessionRealtimeInputSender,
     onPenSettings: () -> Unit,
     onDiagnostics: () -> Unit,
+    onSubmitPairingCode: (String) -> Unit,
+    onRequestPairingCode: () -> Unit,
 ) {
+    var pairingCode by remember { mutableStateOf("") }
     val stylusBridge = remember(realtimeInputSender) {
         StylusLanBridgeController(realtimeInputSender)
     }
@@ -302,6 +307,40 @@ fun RemoteSessionScreen(
             ),
         )
         Spacer(Modifier.height(14.dp))
+
+        if (controlState.pairingChallenge != null || controlState.lastPairingAccepted == false) {
+            InfoPanel {
+                SectionTitle("Verify this connection")
+                Text(
+                    text = "Enter the six-digit code shown by the GlyphRay host.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(10.dp))
+                TextField(
+                    value = pairingCode,
+                    onValueChange = { value ->
+                        pairingCode = value.filter(Char::isDigit).take(6)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Pairing code") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                )
+                Spacer(Modifier.height(10.dp))
+                ChipRow {
+                    PrimaryAction(
+                        label = "Verify code",
+                        enabled = pairingCode.length == 6 && controlState.pairingChallenge != null,
+                    ) {
+                        onSubmitPairingCode(pairingCode)
+                    }
+                    if (controlState.pairingChallenge == null) {
+                        PrimaryAction("Request new code", onRequestPairingCode)
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+        }
 
         RemoteDisplayView(
             telemetry = SessionTelemetrySnapshot(
@@ -586,7 +625,7 @@ fun SecuritySettingsScreen() {
         InfoPanel {
             SectionTitle("Local trust")
             MetricRow("Device identity", "Android Keystore")
-            MetricRow("Pairing", "One-time code / QR-ready")
+            MetricRow("Pairing", "Salted one-time code")
             MetricRow("Session tokens", "Short-lived")
             MetricRow("Trusted hosts", "Per-device list")
         }

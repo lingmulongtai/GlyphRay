@@ -19,6 +19,7 @@ enum class TransportChannel(val wireId: Int) {
 
 object TransportMessageKind {
     const val videoFrame = 9
+    const val audioFrame = 10
     const val authChallenge = 3
     const val authResponse = 4
     const val pairingRequest = 5
@@ -34,6 +35,7 @@ object TransportMessageKind {
     const val gamepadInput = 20
     const val sessionKeyExchange = 21
     const val sessionKeyConfirm = 22
+    const val pairingChallenge = 23
 }
 
 data class DecodedTransportPacket(

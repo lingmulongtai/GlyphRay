@@ -1,6 +1,6 @@
 # Roadmap
 
-Current implementation progress estimate: 90%. Production release readiness: 72%.
+Current implementation progress estimate: 95%. Production release readiness: 82%.
 
 ## Milestone 1
 
@@ -30,7 +30,8 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Implement a stateful DXGI Desktop Duplication capture path with D3D11 staging readback, rotation, timeout reuse, and access-loss recreation.
 - [x] Add encoder trait with H.264 low-latency configuration.
 - [x] Add a Windows Media Foundation H.264 software fallback with low-latency/keyframe controls.
-- [ ] Add explicit hardware MFT/NVENC/AMF selection and GPU-path validation.
+- [x] Add hardware MFT enumeration, Intel/NVIDIA/AMD selection, asynchronous MFT event handling, Auto software fallback, and local NVENC path validation.
+- [ ] Validate Intel Quick Sync and AMD AMF encode paths on representative driver/hardware combinations.
 - [x] Add Android MediaCodec H.264 decode pipeline.
 - [x] Add Android LAN host discovery receiver for host advertisements.
 - [x] Add Android control-channel sender for pairing and latency smoke tests.
@@ -84,7 +85,8 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Add native Windows mouse injection for approved clients behind an explicit smoke-test flag.
 - [x] Add Android direct-touch protocol path and Windows native touch injection smoke-test path.
 - [x] Add Android gamepad protocol path and Windows host gamepad decode.
-- [ ] Add virtual gamepad injection backend for Windows.
+- [x] Add Windows virtual gamepad injection bridge, permission-gated router wiring, and normalized XInput-style report boundary.
+- [ ] Link and validate a production virtual controller backend such as ViGEm or a signed virtual HID driver.
 - [x] Add first-pass touch gesture translation for trackpad and gesture assist modes.
 - [x] Add Android system-bar fullscreen handling.
 - [ ] Connect Android stylus packets to Windows native pen injection over LAN.
@@ -102,6 +104,7 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Reject plaintext traffic after key establishment and require secure sessions before video queueing or realtime input.
 - [x] Enforce persisted per-device pen/touch/keyboard/mouse/gamepad permissions in the host router.
 - [x] Add Android Keystore device identity foundation.
+- [x] Require a salted six-digit one-time code before first trust on Windows/macOS, with HMAC proof, expiry, one-use rotation, and attempt throttling.
 - [x] Add Windows platform secret-store boundary.
 - [x] Add reconnect and adaptive bitrate controllers.
 - [x] Add pending-session cap and late input packet dropping in the host router.
@@ -126,6 +129,9 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Add GitHub Pages deployment workflow for the download site.
 - [x] Replace Windows development secret store with DPAPI-protected per-user storage.
 - [x] Add macOS Keychain implementation.
+- [x] Atomically replace Windows settings/DPAPI files and quarantine corrupt host state before recovery.
+- [x] Make macOS Keychain identity/trust updates gap-free and quarantine corrupt records before recovery.
+- [x] Add rotating fixed-schema Windows event logs that exclude raw keyboard and secret material.
 - [ ] Add signed production installers.
 - [x] Add Android Play Store signing workflow driven only by CI secrets.
 - [ ] Upload a signed AAB to the Play Store internal testing track and complete store compliance.
@@ -140,7 +146,7 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Add macOS ScreenCaptureKit live frame probe.
 - [x] Add macOS ScreenCaptureKit-to-VideoToolbox live encode probe.
 - [x] Add macOS encoded-frame packetizer for GlyphRay Video-channel datagrams.
-- [x] Add macOS manual UDP send probe for generated Video-channel datagrams.
+- [x] Retire the macOS manual plaintext UDP sender after the encrypted approved-client path landed.
 - [x] Add macOS continuous UDP video stream start/stop path for manual receiver loopback.
 - [x] Add macOS lightweight UDP control runtime for Android manual-host `PairingRequest`, `PairingResult`, latency pong, and client video preference intake.
 - [x] Add macOS LAN discovery advertiser for Android host-list visibility on local networks.
@@ -149,10 +155,20 @@ Current implementation progress estimate: 90%. Production release readiness: 72%
 - [x] Add macOS bounded UDP video publisher backpressure counters for continuous stream probes.
 - [x] Add macOS approved-client stream action that targets the newest paired Android endpoint.
 - [x] Add macOS audio permission request path in the host UI.
+- [x] Add Keychain-backed macOS host signing identity and signed `GLYH` P-256 ECDH key exchange.
+- [x] Add directional AES-256-GCM `GLYE` protection and replay rejection for macOS sessions.
+- [x] Require encryption for macOS approved-client video, latency, mouse, keyboard, and touch-pointer traffic.
+- [x] Send encrypted macOS display metadata after key confirmation.
+- [x] Apply client-selected display, resolution, FPS, bitrate, and keyframe interval to macOS capture/encoding.
+- [x] Route encrypted Android mouse, keyboard, and single-touch input through macOS CGEvent injection.
+- [x] Add macOS secure-session and Android-compatible input wire tests to SwiftPM CI.
 - [x] Add audio packetization primitives.
 - [x] Add optional relay architecture notes and route selection logic.
 - [x] Add beta release checklist.
-- [ ] Harden the macOS lightweight control/discovery runtime with macOS CI/real-device validation, encrypted transport, reconnect, and backpressure-aware stream ownership.
-- [ ] Add Windows/macOS audio capture and Android playback.
+- [x] Add macOS secure-target stream ownership, encrypted target selection, reconnection replacement, and backpressure visibility.
+- [ ] Validate the macOS encrypted runtime on GitHub Actions and physical Android hardware with long-run reconnect/backpressure soak tests.
+- [x] Add Android AudioFrame decode and low-latency PCM16 AudioTrack playback foundation.
+- [x] Add Windows host AudioFrame packet pipeline and secure approved-peer Audio-channel queueing.
+- [ ] Add Windows WASAPI loopback capture, macOS audio capture, Opus encode/decode, and Android clock-drift correction.
 - [ ] Implement relay server/client.
 - [ ] Prepare signed beta release.

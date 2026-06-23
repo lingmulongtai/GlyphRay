@@ -1,9 +1,12 @@
 use glyphray_core::{CoordinateMapper, PressureMapper};
 use glyphray_protocol::{
-    KeyboardInput, MouseInput, StylusAction, StylusInputBatch, StylusSample, TouchInputBatch,
+    GamepadInput, KeyboardInput, MouseInput, StylusAction, StylusInputBatch, StylusSample,
+    TouchInputBatch,
 };
 use std::collections::HashMap;
 
+#[cfg(windows)]
+mod win32_gamepad;
 #[cfg(windows)]
 mod win32_keyboard;
 #[cfg(windows)]
@@ -18,9 +21,12 @@ mod stub;
 
 #[cfg(not(windows))]
 pub use stub::{
-    PlatformKeyboardInjector, PlatformMouseInjector, PlatformPenInjector, PlatformTouchInjector,
+    PlatformGamepadInjector, PlatformKeyboardInjector, PlatformMouseInjector, PlatformPenInjector,
+    PlatformTouchInjector,
 };
 
+#[cfg(windows)]
+pub use win32_gamepad::PlatformGamepadInjector;
 #[cfg(windows)]
 pub use win32_keyboard::PlatformKeyboardInjector;
 #[cfg(windows)]
@@ -46,6 +52,10 @@ pub enum InputError {
     TouchInjectionFailed,
     #[error("failed to inject native mouse input event")]
     MouseInjectionFailed,
+    #[error("virtual gamepad backend is unavailable: {0}")]
+    GamepadBackendUnavailable(&'static str),
+    #[error("failed to inject virtual gamepad input event")]
+    GamepadInjectionFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +77,12 @@ pub struct TouchInjectionReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MouseInjectionReport {
     pub injected_events: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GamepadInjectionReport {
+    pub updated_controllers: usize,
+    pub disconnected_controllers: usize,
 }
 
 pub trait PenInjector {
@@ -134,6 +150,25 @@ pub trait MouseInjector {
     ) -> Result<MouseInjectionReport, InputError>;
 }
 
+pub trait GamepadInjector {
+    fn inject_gamepad(
+        &mut self,
+        input: &GamepadInput,
+    ) -> Result<GamepadInjectionReport, InputError>;
+}
+
+impl<T> GamepadInjector for Box<T>
+where
+    T: GamepadInjector + ?Sized,
+{
+    fn inject_gamepad(
+        &mut self,
+        input: &GamepadInput,
+    ) -> Result<GamepadInjectionReport, InputError> {
+        self.as_mut().inject_gamepad(input)
+    }
+}
+
 impl<T> MouseInjector for Box<T>
 where
     T: MouseInjector + ?Sized,
@@ -161,6 +196,10 @@ pub fn create_touch_injector() -> Result<Box<dyn TouchInjector>, InputError> {
 
 pub fn create_mouse_injector() -> Result<Box<dyn MouseInjector>, InputError> {
     Ok(Box::new(PlatformMouseInjector::open()?))
+}
+
+pub fn create_gamepad_injector() -> Result<Box<dyn GamepadInjector>, InputError> {
+    Ok(Box::new(PlatformGamepadInjector::open()?))
 }
 
 pub struct StylusInputBridge<I> {
@@ -280,6 +319,10 @@ pub struct MouseInputBridge<I> {
     mapper: CoordinateMapper,
 }
 
+pub struct GamepadInputBridge<I> {
+    injector: I,
+}
+
 impl<I> MouseInputBridge<I>
 where
     I: MouseInjector,
@@ -312,6 +355,39 @@ where
     }
 }
 
+impl<I> GamepadInputBridge<I>
+where
+    I: GamepadInjector,
+{
+    pub fn new(injector: I) -> Self {
+        Self { injector }
+    }
+
+    pub fn inject_remote_gamepad(
+        &mut self,
+        input: &GamepadInput,
+    ) -> Result<GamepadInjectionReport, InputError> {
+        let prepared = normalize_gamepad_input(input);
+        self.injector.inject_gamepad(&prepared)
+    }
+}
+
+fn normalize_gamepad_input(input: &GamepadInput) -> GamepadInput {
+    GamepadInput {
+        sequence: input.sequence,
+        timestamp_us: input.timestamp_us,
+        controller_id: input.controller_id,
+        connected: input.connected,
+        buttons: input.buttons,
+        left_trigger: input.left_trigger.clamp(0.0, 1.0),
+        right_trigger: input.right_trigger.clamp(0.0, 1.0),
+        left_stick_x: input.left_stick_x.clamp(-1.0, 1.0),
+        left_stick_y: input.left_stick_y.clamp(-1.0, 1.0),
+        right_stick_x: input.right_stick_x.clamp(-1.0, 1.0),
+        right_stick_y: input.right_stick_y.clamp(-1.0, 1.0),
+    }
+}
+
 pub(crate) fn map_action_to_contact(action: StylusAction, sample: &StylusSample) -> bool {
     matches!(
         action,
@@ -324,8 +400,8 @@ mod tests {
     use super::*;
     use glyphray_core::{DisplayRect, MappingMode, SourceRect};
     use glyphray_protocol::{
-        KeyboardInput, MouseInput, StylusAction, StylusToolType, TouchAction, TouchInputBatch,
-        TouchSample,
+        GamepadInput, KeyboardInput, MouseInput, StylusAction, StylusToolType, TouchAction,
+        TouchInputBatch, TouchSample,
     };
 
     #[derive(Default)]
@@ -407,6 +483,24 @@ mod tests {
         ) -> Result<MouseInjectionReport, InputError> {
             self.events += 1;
             Ok(MouseInjectionReport { injected_events: 1 })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingGamepadInjector {
+        reports: Vec<GamepadInput>,
+    }
+
+    impl GamepadInjector for RecordingGamepadInjector {
+        fn inject_gamepad(
+            &mut self,
+            input: &GamepadInput,
+        ) -> Result<GamepadInjectionReport, InputError> {
+            self.reports.push(input.clone());
+            Ok(GamepadInjectionReport {
+                updated_controllers: usize::from(input.connected),
+                disconnected_controllers: usize::from(!input.connected),
+            })
         }
     }
 
@@ -551,6 +645,32 @@ mod tests {
         let report = bridge.inject_remote_mouse(&input).expect("inject");
 
         assert_eq!(report.injected_events, 1);
+    }
+
+    #[test]
+    fn gamepad_bridge_normalizes_axes_before_injection() {
+        let mut bridge = GamepadInputBridge::new(RecordingGamepadInjector::default());
+        let input = GamepadInput {
+            sequence: 1,
+            timestamp_us: 1,
+            controller_id: 9,
+            connected: true,
+            buttons: 1,
+            left_trigger: -1.0,
+            right_trigger: 2.0,
+            left_stick_x: -2.0,
+            left_stick_y: 2.0,
+            right_stick_x: 0.25,
+            right_stick_y: -0.25,
+        };
+
+        let report = bridge.inject_remote_gamepad(&input).expect("inject");
+
+        assert_eq!(report.updated_controllers, 1);
+        assert_eq!(bridge.injector.reports[0].left_trigger, 0.0);
+        assert_eq!(bridge.injector.reports[0].right_trigger, 1.0);
+        assert_eq!(bridge.injector.reports[0].left_stick_x, -1.0);
+        assert_eq!(bridge.injector.reports[0].left_stick_y, 1.0);
     }
 
     fn stylus_sample(

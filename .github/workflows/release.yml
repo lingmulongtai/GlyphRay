@@ -162,6 +162,9 @@ jobs:
       notarized: ${{ steps.signing.outputs.notarized }}
     steps:
       - uses: actions/checkout@v4
+      - name: Test macOS host
+        working-directory: hosts/macos-host
+        run: swift test -c release
       - id: signing
         name: Restore optional Developer ID certificates
         env:

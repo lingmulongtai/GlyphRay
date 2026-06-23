@@ -1,9 +1,12 @@
 use super::{
-    InjectionReport, InputError, KeyboardInjectionReport, KeyboardInjector, MouseInjectionReport,
-    MouseInjector, PenInjector, TouchInjectionReport, TouchInjector,
+    GamepadInjectionReport, GamepadInjector, InjectionReport, InputError, KeyboardInjectionReport,
+    KeyboardInjector, MouseInjectionReport, MouseInjector, PenInjector, TouchInjectionReport,
+    TouchInjector,
 };
 use glyphray_core::{CoordinateMapper, PressureMapper};
-use glyphray_protocol::{KeyboardInput, MouseInput, StylusInputBatch, TouchInputBatch};
+use glyphray_protocol::{
+    GamepadInput, KeyboardInput, MouseInput, StylusInputBatch, TouchInputBatch,
+};
 
 pub struct PlatformPenInjector;
 
@@ -73,6 +76,23 @@ impl MouseInjector for PlatformMouseInjector {
         _input: &MouseInput,
         _mapper: &CoordinateMapper,
     ) -> Result<MouseInjectionReport, InputError> {
+        Err(InputError::UnsupportedPlatform)
+    }
+}
+
+pub struct PlatformGamepadInjector;
+
+impl PlatformGamepadInjector {
+    pub fn open() -> Result<Self, InputError> {
+        Err(InputError::UnsupportedPlatform)
+    }
+}
+
+impl GamepadInjector for PlatformGamepadInjector {
+    fn inject_gamepad(
+        &mut self,
+        _input: &GamepadInput,
+    ) -> Result<GamepadInjectionReport, InputError> {
         Err(InputError::UnsupportedPlatform)
     }
 }

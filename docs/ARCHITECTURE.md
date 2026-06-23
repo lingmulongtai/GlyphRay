@@ -66,24 +66,24 @@ flowchart LR
   Packetizer --> Transport
 ```
 
-The current capture implementation includes a GDI fallback for early validation. The production path should move to Windows Graphics Capture or Desktop Duplication.
+Windows capture uses stateful DXGI Desktop Duplication with D3D11 staging readback, rotation correction, unchanged-frame reuse, and access-loss session recreation. Media Foundation enumerates hardware H.264 MFTs, drives asynchronous transforms, and falls back to the Microsoft software MFT in Auto mode.
 
 ## macOS Host
 
 The macOS host is parallel in structure but lower priority:
 
 - SwiftUI shell.
-- ScreenCaptureKit display diagnostics and future capture.
-- VideoToolbox for H.264/H.265 low-latency encoding.
-- CGEvent mouse/keyboard input first.
+- ScreenCaptureKit display enumeration and live capture.
+- VideoToolbox low-latency H.264 encoding and GlyphRay video packetization.
+- Encrypted CGEvent mouse/keyboard/single-touch pointer input.
 - Permission readiness checks for Screen Recording, Accessibility, Input Monitoring, and audio.
-- Keychain secret storage boundary.
+- Keychain-backed host identity and trusted-client storage with corrupt-record quarantine.
 
 Windows Ink-style pen injection remains Windows-specific.
 
 ## Security And Transport
 
-Windows and Android use `SessionCipherPair` and `SecureDatagramCodec` in the live UDP path. A signed P-256 ECDH `GLYH` handshake derives separate directional AES-256-GCM keys, then complete `GLYT` packets are sealed as replay-protected `GLYE` datagrams. Relay selection remains optional and prefers direct trusted LAN routes. The macOS host still needs this same live-session layer.
+Windows, Android, and macOS use a signed P-256 ECDH `GLYH` handshake to derive separate directional AES-256-GCM keys. Complete `GLYT` packets are sealed as replay-protected `GLYE` datagrams; post-handshake plaintext is rejected. Relay selection remains optional and prefers direct trusted LAN routes.
 
 ## Backend Runtime
 

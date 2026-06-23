@@ -17,6 +17,7 @@ struct MacEncoderSettings {
     let fps: Int32
     let bitrate: Int
     let codec: MacVideoCodec
+    let keyframeIntervalMs: Int = 1_000
 
     static let lowLatencyPreview = MacEncoderSettings(
         width: 1920,
@@ -76,7 +77,11 @@ final class VideoToolboxEncoder {
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: settings.bitrate))
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: settings.fps))
-        VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: NSNumber(value: 1))
+        VTSessionSetProperty(
+            createdSession,
+            key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
+            value: NSNumber(value: Double(settings.keyframeIntervalMs) / 1_000.0)
+        )
         VTCompressionSessionPrepareToEncodeFrames(createdSession)
         session = createdSession
         #else
@@ -311,6 +316,7 @@ enum MacHostError: Error, CustomStringConvertible {
     case encoderUnavailable(OSStatus)
     case captureUnavailable(String)
     case transportUnavailable(String)
+    case unsupportedCodec(String)
 
     var description: String {
         switch self {
@@ -322,6 +328,8 @@ enum MacHostError: Error, CustomStringConvertible {
             return "Screen capture unavailable: \(message)"
         case .transportUnavailable(let message):
             return "Transport unavailable: \(message)"
+        case .unsupportedCodec(let codec):
+            return "Unsupported video codec: \(codec)"
         }
     }
 }

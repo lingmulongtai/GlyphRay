@@ -1,4 +1,9 @@
 import Foundation
+import CryptoKit
+
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
 
 #if canImport(Network)
 import Network
@@ -6,6 +11,10 @@ import Network
 
 private let macControlDefaultPort: UInt16 = 44_999
 private let macTrustedAuthChallengeTTLMS: UInt64 = 30_000
+private let macPairingCodeTTLMS: UInt64 = 5 * 60_000
+private let macPairingChallengeTTLMS: UInt64 = 2 * 60_000
+private let macMaxPairingCodeAttempts = 5
+private let macPairingAttemptWindowMS: UInt64 = 2 * 60_000
 
 struct MacPairingClient: Identifiable, Equatable, Codable {
     let id: String
@@ -38,8 +47,17 @@ struct MacControlRuntimeSnapshot: Equatable {
     let pairingRequestsReceived: UInt64
     let acceptedClients: [MacPairingClient]
     let lastApprovedTarget: MacUdpSendTarget?
+    let secureTargets: [MacUdpSendTarget]
     let lastVideoPreference: MacClientVideoPreference?
     let pendingAuthChallenges: Int
+    let pendingPairingChallenges: Int
+    let pairingCode: String?
+    let pendingKeyExchanges: Int
+    let secureClients: Int
+    let hostIdentityFingerprint: String?
+    let mouseEventsInjected: UInt64
+    let keyboardEventsInjected: UInt64
+    let touchBatchesInjected: UInt64
     let lastEvent: String
 }
 
@@ -52,10 +70,17 @@ private struct MacPendingAuthChallenge {
     let deviceName: String
 }
 
+private struct MacPendingPairingChallenge {
+    let salt: Data
+    let expiresAtUnixMs: UInt64
+}
+
 final class MacControlRuntime {
     var onSnapshot: ((MacControlRuntimeSnapshot) -> Void)?
 
     private let trustedClientStore: MacTrustedClientStore
+    private let hostIdentity: MacHostIdentity?
+    private let inputController = InputEventController()
     private let queue = DispatchQueue(label: "com.glyphray.mac.control-runtime")
     private var bindPort: UInt16 = macControlDefaultPort
     private var pairingRequestsReceived: UInt64 = 0
@@ -63,6 +88,17 @@ final class MacControlRuntime {
     private var lastApprovedTarget: MacUdpSendTarget?
     private var lastVideoPreference: MacClientVideoPreference?
     private var pendingAuthChallenges: [String: MacPendingAuthChallenge] = [:]
+    private var pendingPairingChallenges: [String: MacPendingPairingChallenge] = [:]
+    private var pairingCodeAttempts: [String: Int] = [:]
+    private var pairingAttemptWindowStarted: [String: UInt64] = [:]
+    private var pairingCode = MacOneTimePairingCode.generate()
+    private var pairingCodeExpiresAtUnixMs = currentUnixMilliseconds() + macPairingCodeTTLMS
+    private var pendingKeyExchanges: [String: MacPendingKeyExchange] = [:]
+    private var secureSessions: [String: MacSecureSessionCodec] = [:]
+    private var lastInputSequences: [String: UInt64] = [:]
+    private var mouseEventsInjected: UInt64 = 0
+    private var keyboardEventsInjected: UInt64 = 0
+    private var touchBatchesInjected: UInt64 = 0
     private var lastEvent = "Control runtime idle"
 
     #if canImport(Network)
@@ -72,10 +108,29 @@ final class MacControlRuntime {
 
     init(trustedClientStore: MacTrustedClientStore = MacTrustedClientStore()) {
         self.trustedClientStore = trustedClientStore
+        let identityRecoveryEvent: String?
         do {
-            acceptedClients = try trustedClientStore.load()
+            let loaded = try MacHostIdentityStore().loadOrRecover()
+            hostIdentity = loaded.identity
+            identityRecoveryEvent = loaded.quarantinedAccount.map {
+                "Host identity was corrupt and quarantined as \($0); clients must approve the new fingerprint"
+            }
+        } catch {
+            hostIdentity = nil
+            identityRecoveryEvent = nil
+            lastEvent = "Host identity load failed: \(error)"
+        }
+        do {
+            let loadedClients = try trustedClientStore.loadOrRecover()
+            acceptedClients = loadedClients.clients
             lastApprovedTarget = acceptedClients.first?.target
-            if acceptedClients.isEmpty {
+            if hostIdentity == nil {
+                lastEvent = "Host identity unavailable; pairing is disabled"
+            } else if let identityRecoveryEvent {
+                lastEvent = identityRecoveryEvent
+            } else if let quarantine = loadedClients.quarantinedAccount {
+                lastEvent = "Trusted clients were corrupt and quarantined as \(quarantine); pairing approval is required again"
+            } else if acceptedClients.isEmpty {
                 lastEvent = "Control runtime idle"
             } else {
                 lastEvent = "Loaded \(acceptedClients.count) trusted macOS client(s)"
@@ -125,6 +180,12 @@ final class MacControlRuntime {
                 connection.cancel()
             }
             self.connections.removeAll(keepingCapacity: false)
+            self.pendingKeyExchanges.removeAll()
+            self.pendingPairingChallenges.removeAll()
+            self.pairingCodeAttempts.removeAll()
+            self.pairingAttemptWindowStarted.removeAll()
+            self.secureSessions.removeAll()
+            self.lastInputSequences.removeAll()
             self.lastEvent = "Control runtime stopped"
             self.publishSnapshot()
         }
@@ -137,12 +198,40 @@ final class MacControlRuntime {
         }
     }
 
+    func hasSecureSession(for target: MacUdpSendTarget) -> Bool {
+        queue.sync { secureSessions[target.storageKey] != nil }
+    }
+
+    func preferredSecureTarget() -> MacUdpSendTarget? {
+        queue.sync {
+            if let lastApprovedTarget,
+               secureSessions[lastApprovedTarget.storageKey] != nil {
+                return lastApprovedTarget
+            }
+            return acceptedClients.first { client in
+                secureSessions[client.target.storageKey] != nil
+            }?.target
+        }
+    }
+
+    func sealVideoDatagram(_ datagram: Data, for target: MacUdpSendTarget) throws -> Data {
+        try queue.sync {
+            guard let codec = secureSessions[target.storageKey] else {
+                throw MacSecureSessionError.missingSession
+            }
+            return try codec.seal(datagram)
+        }
+    }
+
     func clearTrustedClients() {
         queue.async {
             do {
                 try self.trustedClientStore.clear()
                 self.acceptedClients.removeAll()
                 self.pendingAuthChallenges.removeAll()
+                self.pendingKeyExchanges.removeAll()
+                self.secureSessions.removeAll()
+                self.lastInputSequences.removeAll()
                 self.lastApprovedTarget = nil
                 self.lastEvent = "Trusted macOS clients cleared"
             } catch {
@@ -170,11 +259,17 @@ final class MacControlRuntime {
     private func startConnection(_ connection: NWConnection) {
         connections.append(connection)
         connection.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state {
+            switch state {
+            case .failed(let error):
                 self?.queue.async {
-                    self?.lastEvent = "Control peer failed: \(error)"
-                    self?.publishSnapshot()
+                    self?.dropConnectionState(for: connection, reason: "Control peer failed: \(error)")
                 }
+            case .cancelled:
+                self?.queue.async {
+                    self?.dropConnectionState(for: connection, reason: "Control peer disconnected")
+                }
+            default:
+                break
             }
         }
         connection.start(queue: queue)
@@ -200,8 +295,61 @@ final class MacControlRuntime {
         }
     }
 
+    private func dropConnectionState(for connection: NWConnection, reason: String) {
+        if let target = MacUdpSendTarget(endpoint: connection.endpoint) {
+            let key = target.storageKey
+            pendingAuthChallenges.removeValue(forKey: key)
+            pendingPairingChallenges.removeValue(forKey: key)
+            pendingKeyExchanges.removeValue(forKey: key)
+            secureSessions.removeValue(forKey: key)
+            lastInputSequences.removeValue(forKey: key)
+            if lastApprovedTarget == target {
+                lastApprovedTarget = acceptedClients.first { client in
+                    secureSessions[client.target.storageKey] != nil
+                }?.target
+            }
+        }
+        connections.removeAll { $0 === connection }
+        lastEvent = reason
+        publishSnapshot()
+    }
+
     private func handleDatagram(_ data: Data, from connection: NWConnection) {
-        guard let packet = try? MacTransportDatagram.decode(data), packet.channel == .control else {
+        guard let target = MacUdpSendTarget(endpoint: connection.endpoint) else {
+            return
+        }
+        let storageKey = target.storageKey
+        let plaintext: Data
+        do {
+            if data.starts(with: Data("GLYE".utf8)) {
+                guard let codec = secureSessions[storageKey] else {
+                    throw MacSecureSessionError.missingSession
+                }
+                plaintext = try codec.open(data)
+            } else {
+                guard secureSessions[storageKey] == nil else {
+                    throw MacSecureSessionError.invalidPacket(
+                        "plaintext rejected after secure-session establishment"
+                    )
+                }
+                plaintext = data
+            }
+        } catch {
+            lastEvent = "Rejected control datagram: \(error)"
+            publishSnapshot()
+            return
+        }
+
+        guard let packet = try? MacTransportDatagram.decode(plaintext) else {
+            return
+        }
+        if packet.channel == .input {
+            handleInputPacket(packet, target: target)
+            return
+        }
+        guard packet.channel == .control else { return }
+        if packet.messageKind == .sessionKeyConfirm {
+            handleSessionKeyConfirm(packet: packet, target: target, connection: connection)
             return
         }
         guard let frame = try? MacProtocolFrame.decode(packet.payload) else {
@@ -216,13 +364,23 @@ final class MacControlRuntime {
         case .pairingRequest:
             handlePairingRequest(frame: frame, connection: connection)
         case .encoderConfig:
+            guard secureSessions[storageKey] != nil else {
+                lastEvent = "Rejected plaintext encoder configuration before secure session"
+                publishSnapshot()
+                return
+            }
             if let preference = try? MacClientVideoPreference.decode(frame.payload) {
                 lastVideoPreference = preference
                 lastEvent = "Client requested \(preference.width)x\(preference.height) @ \(preference.maxFPS)fps"
                 publishSnapshot()
             }
         case .latencyPing:
-            handleLatencyPing(frame: frame, connection: connection)
+            guard secureSessions[storageKey] != nil else {
+                lastEvent = "Rejected plaintext latency request before secure session"
+                publishSnapshot()
+                return
+            }
+            handleLatencyPing(frame: frame, target: target, connection: connection)
         default:
             lastEvent = "Ignored control message kind \(frame.messageKind.rawValue)"
             publishSnapshot()
@@ -240,16 +398,37 @@ final class MacControlRuntime {
         }
 
         pairingRequestsReceived += 1
-        let publicKeyDER = request.oneTimePublicKey.isEmpty ? nil : request.oneTimePublicKey
-        let fingerprint = publicKeyDER.map(MacTrustedIdentity.publicKeyFingerprint)
-        let trustedID = publicKeyDER
-            .map(MacTrustedIdentity.trustedDeviceID(forPublicKeyDER:))
-            ?? "trusted-\(target.host)-\(target.port)"
+        guard !request.oneTimePublicKey.isEmpty else {
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "device identity key is required",
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            lastEvent = "Rejected pairing without a device identity key"
+            publishSnapshot()
+            return
+        }
+        guard hostIdentity != nil else {
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "host identity is unavailable",
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            lastEvent = "Rejected pairing because host identity is unavailable"
+            publishSnapshot()
+            return
+        }
+        let publicKeyDER = request.oneTimePublicKey
+        let fingerprint = MacTrustedIdentity.publicKeyFingerprint(publicKeyDER)
+        let trustedID = MacTrustedIdentity.trustedDeviceID(forPublicKeyDER: publicKeyDER)
 
-        if publicKeyDER != nil,
-           let existing = acceptedClients.first(where: {
-               $0.publicKeyFingerprint == fingerprint && $0.publicKeyDER != nil
-           }),
+        if let existing = acceptedClients.first(where: {
+            $0.publicKeyFingerprint == fingerprint && $0.publicKeyDER != nil
+        }),
            let storedPublicKeyDER = existing.publicKeyDER {
             queueTrustedAuthChallenge(
                 expectedDeviceID: existing.id,
@@ -259,6 +438,32 @@ final class MacControlRuntime {
                 frameSequence: frame.sequence,
                 connection: connection
             )
+            return
+        }
+
+        if request.pairingCodeHash.isEmpty {
+            queuePairingCodeChallenge(
+                target: target,
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            return
+        }
+        guard verifyPairingCode(
+            proof: request.pairingCodeHash,
+            target: target
+        ) else {
+            let attempts = pairingCodeAttempts[target.storageKey, default: 0]
+            let remaining = max(0, macMaxPairingCodeAttempts - attempts)
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "pairing code was invalid or expired; \(remaining) attempt(s) remain",
+                frameSequence: frame.sequence,
+                connection: connection
+            )
+            lastEvent = "Rejected invalid pairing code from \(request.deviceName)"
+            publishSnapshot()
             return
         }
 
@@ -279,6 +484,11 @@ final class MacControlRuntime {
             accepted: true,
             trustedDeviceID: trustedID,
             reason: nil,
+            frameSequence: frame.sequence,
+            connection: connection
+        )
+        queueSessionKeyExchange(
+            client: client,
             frameSequence: frame.sequence,
             connection: connection
         )
@@ -368,7 +578,159 @@ final class MacControlRuntime {
             frameSequence: frame.sequence,
             connection: connection
         )
+        queueSessionKeyExchange(
+            client: client,
+            frameSequence: frame.sequence,
+            connection: connection
+        )
         publishSnapshot()
+    }
+
+    private func queueSessionKeyExchange(
+        client: MacPairingClient,
+        frameSequence: UInt64,
+        connection: NWConnection
+    ) {
+        guard let hostIdentity, let clientIdentity = client.publicKeyDER else {
+            lastEvent = "Secure-session key exchange unavailable for \(client.deviceName)"
+            return
+        }
+        do {
+            let (pending, payload) = try MacSecureSessionHandshake.begin(
+                hostIdentity: hostIdentity,
+                expectedDeviceID: client.id,
+                clientIdentityPublicKeyDER: clientIdentity,
+                nowUnixMs: currentUnixMilliseconds()
+            )
+            pendingKeyExchanges[client.target.storageKey] = pending
+            secureSessions.removeValue(forKey: client.target.storageKey)
+            let datagram = MacTransportDatagram.encode(
+                channel: .control,
+                messageKind: .sessionKeyExchange,
+                sequence: frameSequence,
+                timestampUs: monotonicMicroseconds(),
+                payload: payload
+            )
+            connection.send(content: datagram, completion: .contentProcessed { _ in })
+            lastEvent = "Secure-session offer sent to \(client.deviceName)"
+        } catch {
+            pendingKeyExchanges.removeValue(forKey: client.target.storageKey)
+            lastEvent = "Secure-session offer failed: \(error)"
+        }
+    }
+
+    private func handleSessionKeyConfirm(
+        packet: MacTransportDatagram,
+        target: MacUdpSendTarget,
+        connection: NWConnection
+    ) {
+        let key = target.storageKey
+        guard let pending = pendingKeyExchanges[key] else {
+            lastEvent = "Rejected unexpected secure-session confirmation"
+            publishSnapshot()
+            return
+        }
+        do {
+            let codec = try MacSecureSessionHandshake.finish(
+                pending: pending,
+                encodedConfirm: packet.payload,
+                nowUnixMs: currentUnixMilliseconds()
+            )
+            pendingKeyExchanges.removeValue(forKey: key)
+            secureSessions[key] = codec
+            lastInputSequences.removeValue(forKey: key)
+            lastApprovedTarget = target
+            try sendDisplayInfo(
+                target: target,
+                frameSequence: packet.sequence,
+                connection: connection
+            )
+            lastEvent = "Encrypted session established; display info sent to \(target.host):\(target.port)"
+            publishSnapshot()
+        } catch {
+            pendingKeyExchanges.removeValue(forKey: key)
+            secureSessions.removeValue(forKey: key)
+            lastEvent = "Secure-session confirmation rejected: \(error)"
+            connection.cancel()
+            publishSnapshot()
+        }
+    }
+
+    private func handleInputPacket(_ packet: MacTransportDatagram, target: MacUdpSendTarget) {
+        let key = target.storageKey
+        guard secureSessions[key] != nil else {
+            lastEvent = "Rejected input before encrypted session establishment"
+            publishSnapshot()
+            return
+        }
+        guard lastInputSequences[key].map({ packet.sequence > $0 }) ?? true else {
+            lastEvent = "Dropped stale input sequence from \(target.host)"
+            publishSnapshot()
+            return
+        }
+        do {
+            let frame = try MacProtocolFrame.decode(packet.payload)
+            guard frame.messageKind == packet.messageKind else {
+                throw MacHostError.transportUnavailable("Input message kind mismatch")
+            }
+            switch frame.messageKind {
+            case .mouseInput:
+                let input = try MacRemoteInputDecoder.decodeMouse(frame.payload)
+                inputController.postMouse(event: RemotePointerEvent(
+                    x: Double(input.x),
+                    y: Double(input.y),
+                    wheelDeltaX: Double(input.wheelDeltaX),
+                    wheelDeltaY: Double(input.wheelDeltaY),
+                    buttonFlags: input.buttonFlags
+                ))
+                mouseEventsInjected += 1
+                lastEvent = "Injected remote mouse input"
+            case .keyboardInput:
+                if inputController.postKeyboard(
+                    event: try MacRemoteInputDecoder.decodeKeyboard(frame.payload)
+                ) {
+                    keyboardEventsInjected += 1
+                    lastEvent = "Injected remote keyboard input"
+                } else {
+                    lastEvent = "Ignored unmapped remote keyboard key"
+                }
+            case .touchInputBatch:
+                inputController.postTouch(
+                    batch: try MacRemoteInputDecoder.decodeTouchBatch(frame.payload)
+                )
+                touchBatchesInjected += 1
+                lastEvent = "Injected remote touch as pointer input"
+            default:
+                lastEvent = "Input kind \(frame.messageKind.rawValue) is not available on macOS"
+            }
+            lastInputSequences[key] = packet.sequence
+        } catch {
+            lastEvent = "Rejected malformed remote input: \(error)"
+        }
+        publishSnapshot()
+    }
+
+    private func sendDisplayInfo(
+        target: MacUdpSendTarget,
+        frameSequence: UInt64,
+        connection: NWConnection
+    ) throws {
+        guard let codec = secureSessions[target.storageKey] else {
+            throw MacSecureSessionError.missingSession
+        }
+        let frame = MacProtocolFrame.encode(
+            sequence: frameSequence,
+            messageKind: .displayInfo,
+            payload: try MacDisplayInfo.encodeActiveDisplays()
+        )
+        let datagram = MacTransportDatagram.encode(
+            channel: .control,
+            messageKind: .displayInfo,
+            sequence: frameSequence,
+            timestampUs: monotonicMicroseconds(),
+            payload: frame
+        )
+        connection.send(content: try codec.seal(datagram), completion: .contentProcessed { _ in })
     }
 
     private func queueTrustedAuthChallenge(
@@ -431,6 +793,103 @@ final class MacControlRuntime {
         }
     }
 
+    private func queuePairingCodeChallenge(
+        target: MacUdpSendTarget,
+        frameSequence: UInt64,
+        connection: NWConnection
+    ) {
+        let now = currentUnixMilliseconds()
+        if now >= pairingCodeExpiresAtUnixMs {
+            rotatePairingCode()
+        }
+        let key = target.storageKey
+        refreshPairingAttemptWindow(key: key, now: now)
+        guard pairingCodeAttempts[key, default: 0] < macMaxPairingCodeAttempts else {
+            sendPairingResult(
+                accepted: false,
+                trustedDeviceID: nil,
+                reason: "pairing code attempt limit reached",
+                frameSequence: frameSequence,
+                connection: connection
+            )
+            lastEvent = "Pairing attempt limit reached for \(target.host)"
+            publishSnapshot()
+            return
+        }
+
+        let salt = MacOneTimePairingCode.randomBytes(count: 32)
+        let expiresAtUnixMs = min(now + macPairingChallengeTTLMS, pairingCodeExpiresAtUnixMs)
+        pendingPairingChallenges[key] = MacPendingPairingChallenge(
+            salt: salt,
+            expiresAtUnixMs: expiresAtUnixMs
+        )
+        let frame = MacProtocolFrame.encode(
+            sequence: frameSequence,
+            messageKind: .pairingChallenge,
+            payload: MacPairingChallenge.encode(
+                salt: salt,
+                expiresAtUnixMs: expiresAtUnixMs
+            )
+        )
+        let datagram = MacTransportDatagram.encode(
+            channel: .control,
+            messageKind: .pairingChallenge,
+            sequence: frameSequence,
+            timestampUs: monotonicMicroseconds(),
+            payload: frame
+        )
+        connection.send(content: datagram, completion: .contentProcessed { _ in })
+        lastEvent = "Pairing code required for \(target.host)"
+        publishSnapshot()
+    }
+
+    private func verifyPairingCode(proof: Data, target: MacUdpSendTarget) -> Bool {
+        let key = target.storageKey
+        let now = currentUnixMilliseconds()
+        refreshPairingAttemptWindow(key: key, now: now)
+        guard pairingCodeAttempts[key, default: 0] < macMaxPairingCodeAttempts else {
+            return false
+        }
+        guard let challenge = pendingPairingChallenges.removeValue(forKey: key) else {
+            pairingCodeAttempts[key, default: 0] += 1
+            return false
+        }
+        guard now <= challenge.expiresAtUnixMs, now <= pairingCodeExpiresAtUnixMs else {
+            pairingCodeAttempts[key, default: 0] += 1
+            return false
+        }
+        guard MacPairingCodeProof.verify(
+            code: pairingCode,
+            salt: challenge.salt,
+            proof: proof
+        ) else {
+            pairingCodeAttempts[key, default: 0] += 1
+            return false
+        }
+
+        pairingCodeAttempts.removeValue(forKey: key)
+        pairingAttemptWindowStarted.removeValue(forKey: key)
+        rotatePairingCode()
+        return true
+    }
+
+    private func refreshPairingAttemptWindow(key: String, now: UInt64) {
+        guard let started = pairingAttemptWindowStarted[key] else {
+            pairingAttemptWindowStarted[key] = now
+            return
+        }
+        if now >= started, now - started >= macPairingAttemptWindowMS {
+            pairingCodeAttempts[key] = 0
+            pairingAttemptWindowStarted[key] = now
+        }
+    }
+
+    private func rotatePairingCode() {
+        pairingCode = MacOneTimePairingCode.generate()
+        pairingCodeExpiresAtUnixMs = currentUnixMilliseconds() + macPairingCodeTTLMS
+        pendingPairingChallenges.removeAll()
+    }
+
     private func sendPairingResult(
         accepted: Bool,
         trustedDeviceID: String?,
@@ -459,6 +918,7 @@ final class MacControlRuntime {
 
     private func handleLatencyPing(
         frame: MacProtocolFrame,
+        target: MacUdpSendTarget,
         connection: NWConnection
     ) {
         guard let ping = try? MacLatencyPing.decode(frame.payload) else {
@@ -483,7 +943,17 @@ final class MacControlRuntime {
             timestampUs: hostSendUs,
             payload: pongFrame
         )
-        connection.send(content: datagram, completion: .contentProcessed { _ in })
+        do {
+            guard let codec = secureSessions[target.storageKey] else {
+                throw MacSecureSessionError.missingSession
+            }
+            let outgoing = try codec.seal(datagram)
+            connection.send(content: outgoing, completion: .contentProcessed { _ in })
+        } catch {
+            lastEvent = "Latency pong encryption failed: \(error)"
+            publishSnapshot()
+            return
+        }
         lastEvent = "Latency pong sent"
         publishSnapshot()
     }
@@ -501,8 +971,19 @@ final class MacControlRuntime {
             pairingRequestsReceived: pairingRequestsReceived,
             acceptedClients: acceptedClients,
             lastApprovedTarget: lastApprovedTarget,
+            secureTargets: acceptedClients.compactMap { client in
+                secureSessions[client.target.storageKey] == nil ? nil : client.target
+            },
             lastVideoPreference: lastVideoPreference,
             pendingAuthChallenges: pendingAuthChallenges.count,
+            pendingPairingChallenges: pendingPairingChallenges.count,
+            pairingCode: pendingPairingChallenges.isEmpty ? nil : pairingCode,
+            pendingKeyExchanges: pendingKeyExchanges.count,
+            secureClients: secureSessions.count,
+            hostIdentityFingerprint: hostIdentity?.fingerprint,
+            mouseEventsInjected: mouseEventsInjected,
+            keyboardEventsInjected: keyboardEventsInjected,
+            touchBatchesInjected: touchBatchesInjected,
             lastEvent: lastEvent
         )
     }
@@ -527,8 +1008,16 @@ private enum MacControlMessageKind: UInt16 {
     case displayInfo = 7
     case encoderConfig = 8
     case videoFrame = 9
+    case stylusInputBatch = 11
+    case mouseInput = 12
+    case keyboardInput = 13
     case latencyPing = 15
     case latencyPong = 16
+    case touchInputBatch = 19
+    case gamepadInput = 20
+    case sessionKeyExchange = 21
+    case sessionKeyConfirm = 22
+    case pairingChallenge = 23
 }
 
 private struct MacTransportDatagram {
@@ -631,6 +1120,7 @@ private struct MacProtocolFrame {
 
 private struct MacPairingRequest {
     let deviceName: String
+    let pairingCodeHash: Data
     let oneTimePublicKey: Data
 
     static func decode(_ payload: Data) throws -> MacPairingRequest {
@@ -639,9 +1129,16 @@ private struct MacPairingRequest {
             throw MacHostError.transportUnavailable("Payload did not contain PairingRequest")
         }
         let deviceName = try reader.readBincodeString()
-        _ = try reader.readBincodeBytes()
+        let pairingCodeHash = try reader.readBincodeBytes()
         let oneTimePublicKey = try reader.readBincodeBytes()
-        return MacPairingRequest(deviceName: deviceName, oneTimePublicKey: oneTimePublicKey)
+        guard reader.isAtEnd else {
+            throw MacHostError.transportUnavailable("PairingRequest contained trailing bytes")
+        }
+        return MacPairingRequest(
+            deviceName: deviceName,
+            pairingCodeHash: pairingCodeHash,
+            oneTimePublicKey: oneTimePublicKey
+        )
     }
 }
 
@@ -686,6 +1183,99 @@ private enum MacPairingResult {
         out.appendBincodeOptionString(trustedDeviceID)
         out.appendBincodeOptionString(reason)
         return out
+    }
+}
+
+private enum MacPairingChallenge {
+    static func encode(salt: Data, expiresAtUnixMs: UInt64) -> Data {
+        precondition(salt.count == 32)
+        var out = Data()
+        out.appendLittleEndian(UInt32(20))
+        out.append(salt)
+        out.appendLittleEndian(expiresAtUnixMs)
+        out.append(UInt8(6))
+        return out
+    }
+}
+
+enum MacOneTimePairingCode {
+    static func generate() -> String {
+        let bytes = randomBytes(count: 4)
+        let value = bytes.reduce(UInt32(0)) { partial, byte in
+            (partial << 8) | UInt32(byte)
+        } % 1_000_000
+        return String(format: "%03d-%03d", value / 1_000, value % 1_000)
+    }
+
+    static func randomBytes(count: Int) -> Data {
+        var generator = SystemRandomNumberGenerator()
+        return Data((0..<count).map { _ in UInt8.random(in: .min ... .max, using: &generator) })
+    }
+}
+
+enum MacPairingCodeProof {
+    private static let domain = Data("GlyphRay pairing proof v1".utf8)
+
+    static func create(code: String, salt: Data) -> Data? {
+        let codeData = Data(code.utf8.filter { byte in byte >= 48 && byte <= 57 })
+        guard codeData.count == 6, salt.count == 32 else {
+            return nil
+        }
+        let key = SymmetricKey(data: salt)
+        var message = domain
+        message.append(codeData)
+        return Data(HMAC<SHA256>.authenticationCode(for: message, using: key))
+    }
+
+    static func verify(code: String, salt: Data, proof: Data) -> Bool {
+        let codeData = Data(code.utf8.filter { byte in byte >= 48 && byte <= 57 })
+        guard codeData.count == 6, salt.count == 32 else { return false }
+        let key = SymmetricKey(data: salt)
+        var message = domain
+        message.append(codeData)
+        return HMAC<SHA256>.isValidAuthenticationCode(proof, authenticating: message, using: key)
+    }
+}
+
+private enum MacDisplayInfo {
+    static func encodeActiveDisplays() throws -> Data {
+        #if canImport(CoreGraphics)
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success else {
+            throw MacHostError.captureUnavailable("Unable to count active displays")
+        }
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displayIDs, &count) == .success else {
+            throw MacHostError.captureUnavailable("Unable to enumerate active displays")
+        }
+        displayIDs = Array(displayIDs.prefix(Int(count)))
+
+        var out = Data()
+        out.appendLittleEndian(UInt32(6))
+        out.appendLittleEndian(UInt64(displayIDs.count))
+        for displayID in displayIDs {
+            let bounds = CGDisplayBounds(displayID)
+            let refreshRate = CGDisplayCopyDisplayMode(displayID)?.refreshRate ?? 0
+            out.appendLittleEndian(UInt32(displayID))
+            out.appendBincodeString("Display \(displayID)")
+            out.appendLittleEndian(Int32(bounds.origin.x.rounded()))
+            out.appendLittleEndian(Int32(bounds.origin.y.rounded()))
+            out.appendLittleEndian(UInt32(CGDisplayPixelsWide(displayID)))
+            out.appendLittleEndian(UInt32(CGDisplayPixelsHigh(displayID)))
+            out.appendFloat32(1)
+            out.appendLittleEndian(UInt16(normalizedRotation(CGDisplayRotation(displayID))))
+            out.appendFloat32(Float(refreshRate > 0 ? refreshRate : 60))
+            out.append(CGDisplayIsMain(displayID) != 0 ? UInt8(1) : UInt8(0))
+        }
+        return out
+        #else
+        throw MacHostError.frameworkUnavailable("CoreGraphics")
+        #endif
+    }
+
+    private static func normalizedRotation(_ rotation: Double) -> Int {
+        let rounded = Int(rotation.rounded()) % 360
+        return rounded >= 0 ? rounded : rounded + 360
     }
 }
 
@@ -821,6 +1411,10 @@ private extension Data {
         let bytes = Data(string.utf8)
         appendLittleEndian(UInt64(bytes.count))
         append(bytes)
+    }
+
+    mutating func appendFloat32(_ value: Float) {
+        appendLittleEndian(value.bitPattern)
     }
 
     mutating func appendBincodeOptionString(_ string: String?) {

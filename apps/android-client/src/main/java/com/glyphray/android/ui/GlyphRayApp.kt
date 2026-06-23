@@ -182,6 +182,8 @@ fun GlyphRayApp() {
                     realtimeInputSender = sessionControlController,
                     onPenSettings = { screen = GlyphRayScreen.Pen },
                     onDiagnostics = { screen = GlyphRayScreen.Diagnostics },
+                    onSubmitPairingCode = sessionControlController::submitPairingCode,
+                    onRequestPairingCode = { sessionControlController.sendPairingRequest() },
                 )
                 GlyphRayScreen.Pen -> PenSettingsScreen(onDiagnostics = { screen = GlyphRayScreen.Diagnostics })
                 GlyphRayScreen.Video -> VideoSettingsScreen(

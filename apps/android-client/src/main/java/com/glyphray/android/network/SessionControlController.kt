@@ -13,6 +13,7 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.glyphray.android.audio.RemoteAudioStreamController
 import com.glyphray.android.security.AndroidDeviceKeys
 import com.glyphray.android.security.TrustedHostIdentityStore
 import com.glyphray.android.input.StylusStreamPacket
@@ -32,6 +33,7 @@ data class SessionControlState(
     val packetsSent: Long = 0,
     val responsesReceived: Long = 0,
     val lastPairingAccepted: Boolean? = null,
+    val pairingChallenge: ControlProtocolMessage.PairingChallenge? = null,
     val trustedDeviceId: String? = null,
     val lastRoundTripMs: Long? = null,
     val displays: List<RemoteDisplayDescriptor> = emptyList(),
@@ -39,6 +41,9 @@ data class SessionControlState(
     val videoFramesCompleted: Long = 0,
     val videoFramesQueuedToDecoder: Long = 0,
     val lastVideoSequence: Long? = null,
+    val audioPacketsReceived: Long = 0,
+    val audioBytesQueued: Long = 0,
+    val lastAudioSequence: Long? = null,
     val secureSession: Boolean = false,
     val hostIdentityFingerprint: String? = null,
     val videoSettings: ClientVideoSettings = ClientVideoSettings(),
@@ -62,6 +67,7 @@ class SessionControlController(
     private val receiverExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: ControlUdpClient? = null
     private var gamepadButtons: Int = 0
+    private val audioStreamController = RemoteAudioStreamController()
     @Volatile private var receiving = false
     @Volatile private var videoStreamController: RemoteVideoStreamController? = null
 
@@ -83,6 +89,7 @@ class SessionControlController(
                     isConnected = true,
                     connectedHostName = host.hostName,
                     secureSession = false,
+                    pairingChallenge = null,
                     hostIdentityFingerprint = null,
                     lastAction = "Connected to ${host.hostName}",
                     lastError = null,
@@ -102,6 +109,26 @@ class SessionControlController(
         executor.execute {
             sendControl("Pairing request") { client ->
                 client.sendPairingRequest(deviceName)
+            }
+        }
+    }
+
+    fun submitPairingCode(code: String, deviceName: String = defaultDeviceName()) {
+        executor.execute {
+            val challenge = state.pairingChallenge
+            if (challenge == null) {
+                state = state.copy(lastAction = "Pairing code unavailable", lastError = "Request a new pairing code first")
+                return@execute
+            }
+            if (System.currentTimeMillis() > challenge.expiresAtUnixMs) {
+                state = state.copy(pairingChallenge = null, lastAction = "Pairing code expired", lastError = "Request a new pairing code")
+                return@execute
+            }
+            sendControl("Pairing code proof") { client ->
+                client.sendPairingRequest(
+                    deviceName = deviceName,
+                    pairingCodeHash = PairingCodeProof.create(code, challenge.salt),
+                )
             }
         }
     }
@@ -235,12 +262,16 @@ class SessionControlController(
             client?.close()
             client = null
             receiving = false
+            audioStreamController.release()
             state = state.copy(
                 isConnected = false,
                 connectedHostName = null,
                 secureSession = false,
                 hostIdentityFingerprint = null,
                 displays = emptyList(),
+                audioPacketsReceived = 0,
+                audioBytesQueued = 0,
+                lastAudioSequence = null,
                 lastAction = "Disconnected",
                 lastError = null,
             )
@@ -317,7 +348,19 @@ class SessionControlController(
                     lastError = null,
                 )
             }
-            TransportChannel.Audio,
+            TransportChannel.Audio -> {
+                if (packet.messageKind != TransportMessageKind.audioFrame) {
+                    return
+                }
+                val result = audioStreamController.onAudioFrame(packet.payload)
+                state = state.copy(
+                    audioPacketsReceived = state.audioPacketsReceived + 1,
+                    audioBytesQueued = state.audioBytesQueued + result.queuedBytes,
+                    lastAudioSequence = result.frameSequence ?: state.lastAudioSequence,
+                    lastAction = if (result.accepted) "Audio frame queued" else "Audio frame skipped",
+                    lastError = result.reason,
+                )
+            }
             TransportChannel.Input -> Unit
         }
     }
@@ -340,6 +383,15 @@ class SessionControlController(
 
     private fun handleControlMessage(message: ControlProtocolMessage) {
         when (message) {
+            is ControlProtocolMessage.PairingChallenge -> {
+                state = state.copy(
+                    responsesReceived = state.responsesReceived + 1,
+                    pairingChallenge = message,
+                    lastPairingAccepted = null,
+                    lastAction = "Enter the code shown on the host",
+                    lastError = null,
+                )
+            }
             is ControlProtocolMessage.AuthChallenge -> {
                 state = state.copy(
                     responsesReceived = state.responsesReceived + 1,
@@ -356,6 +408,7 @@ class SessionControlController(
                 state = state.copy(
                     responsesReceived = state.responsesReceived + 1,
                     lastPairingAccepted = message.accepted,
+                    pairingChallenge = null,
                     trustedDeviceId = message.trustedDeviceId,
                     lastAction = if (message.accepted) "Pairing accepted" else "Pairing rejected",
                     lastError = message.reason,
@@ -379,6 +432,12 @@ class SessionControlController(
                     lastError = null,
                 )
             }
+            is ControlProtocolMessage.AudioFrame -> {
+                state = state.copy(
+                    lastAction = "Audio frame ignored on control channel",
+                    lastError = "Audio frames must arrive on the audio transport channel",
+                )
+            }
         }
     }
 
@@ -386,6 +445,7 @@ class SessionControlController(
         receiving = false
         client?.close()
         client = null
+        audioStreamController.release()
         executor.shutdownNow()
         receiverExecutor.shutdownNow()
     }
@@ -435,10 +495,14 @@ private class ControlUdpClient(
     }
 
     @Synchronized
-    fun sendPairingRequest(deviceName: String): Int {
+    fun sendPairingRequest(
+        deviceName: String,
+        pairingCodeHash: ByteArray = ByteArray(0),
+    ): Int {
         val frame = ProtocolFrameCodec.encodePairingRequest(
             sequence = nextFrameSequence++,
             deviceName = deviceName,
+            pairingCodeHash = pairingCodeHash,
             oneTimePublicKey = runCatching { deviceKeys.publicKeyBytes() }.getOrDefault(ByteArray(0)),
         )
         return sendControl(TransportMessageKind.pairingRequest, frame)

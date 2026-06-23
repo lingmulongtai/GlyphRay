@@ -81,11 +81,16 @@ final class MacHostIdentity {
 }
 
 final class MacHostIdentityStore {
-    private let keychain: KeychainSecretStore
+    struct LoadResult {
+        let identity: MacHostIdentity
+        let quarantinedAccount: String?
+    }
+
+    private let keychain: KeychainSecretStoring
     private let account: String
 
     init(
-        keychain: KeychainSecretStore = KeychainSecretStore(),
+        keychain: KeychainSecretStoring = KeychainSecretStore(),
         account: String = "host-signing-identity-p256-v1"
     ) {
         self.keychain = keychain
@@ -93,13 +98,34 @@ final class MacHostIdentityStore {
     }
 
     func loadOrCreate() throws -> MacHostIdentity {
+        try loadOrRecover().identity
+    }
+
+    func loadOrRecover() throws -> LoadResult {
         if let stored = try keychain.load(account: account) {
-            return try MacHostIdentity(rawRepresentation: stored)
+            do {
+                return LoadResult(
+                    identity: try MacHostIdentity(rawRepresentation: stored),
+                    quarantinedAccount: nil
+                )
+            } catch {
+                let quarantine = macRecoveryAccount(for: account)
+                try keychain.save(stored, account: quarantine)
+                try keychain.delete(account: account)
+                let identity = MacHostIdentity()
+                try keychain.save(identity.rawRepresentation, account: account)
+                return LoadResult(identity: identity, quarantinedAccount: quarantine)
+            }
         }
         let identity = MacHostIdentity()
         try keychain.save(identity.rawRepresentation, account: account)
-        return identity
+        return LoadResult(identity: identity, quarantinedAccount: nil)
     }
+}
+
+func macRecoveryAccount(for account: String) -> String {
+    let timestamp = UInt64(max(0, Date().timeIntervalSince1970 * 1_000))
+    return "\(account)-corrupt-\(timestamp)-\(UUID().uuidString.lowercased())"
 }
 
 struct MacServerKeyExchange {
@@ -189,8 +215,8 @@ final class MacSecureSessionCodec {
         let nonce = try AES.GCM.Nonce(data: secureNonce(counter: counter))
         let box = try AES.GCM.SealedBox(
             nonce: nonce,
-            ciphertext: combinedCiphertext.prefix(split),
-            tag: combinedCiphertext.suffix(16)
+            ciphertext: Data(combinedCiphertext.prefix(split)),
+            tag: Data(combinedCiphertext.suffix(16))
         )
         let plaintext = try AES.GCM.open(box, using: inboundKey, authenticating: associatedData)
         record(counter)
@@ -214,7 +240,7 @@ final class MacSecureSessionCodec {
         let oldest = (highestReceived ?? counter) >= replayWindow - 1
             ? (highestReceived ?? counter) - (replayWindow - 1)
             : 0
-        receivedCounters = receivedCounters.filter { $0 >= oldest }
+        receivedCounters = Set(receivedCounters.filter { $0 >= oldest })
     }
 }
 
@@ -234,7 +260,7 @@ enum MacSecureSessionHandshake {
             sessionID: try secureRandom(count: 16),
             expiresAtUnixMs: nowUnixMs + handshakeTTLMS,
             salt: try secureRandom(count: 32),
-            ephemeralPublicKeyDER: ephemeralPrivateKey.publicKey.derRepresentation,
+            ephemeralPublicKeyDER: try encodeKeyAgreementPublicKey(ephemeralPrivateKey.publicKey),
             hostIdentityPublicKeyDER: hostIdentity.publicKeyDER,
             signature: Data()
         )
@@ -272,9 +298,7 @@ enum MacSecureSessionHandshake {
         ) else {
             throw MacSecureSessionError.invalidSignature
         }
-        let clientEphemeral = try P256.KeyAgreement.PublicKey(
-            derRepresentation: confirm.ephemeralPublicKeyDER
-        )
+        let clientEphemeral = try decodeKeyAgreementPublicKey(confirm.ephemeralPublicKeyDER)
         let shared = try pending.ephemeralPrivateKey.sharedSecretFromKeyAgreement(
             with: clientEphemeral
         )
@@ -369,6 +393,23 @@ enum MacSecureSessionHandshake {
         return Data(SHA256.hash(data: serverPayload + clientPayload))
     }
 
+    static func encodeKeyAgreementPublicKey(
+        _ publicKey: P256.KeyAgreement.PublicKey
+    ) throws -> Data {
+        try P256.Signing.PublicKey(
+            x963Representation: publicKey.x963Representation
+        ).derRepresentation
+    }
+
+    static func decodeKeyAgreementPublicKey(
+        _ derRepresentation: Data
+    ) throws -> P256.KeyAgreement.PublicKey {
+        let signingKey = try P256.Signing.PublicKey(derRepresentation: derRepresentation)
+        return try P256.KeyAgreement.PublicKey(
+            x963Representation: signingKey.x963Representation
+        )
+    }
+
     private static func handshakeHeader(type: UInt8) -> Data {
         var output = Data("GLYH".utf8)
         output.appendSecureLittleEndian(UInt16(1))
@@ -393,7 +434,7 @@ enum MacSecureSessionHandshake {
 
     private static func secureRandom(count: Int) throws -> Data {
         let bytes = try MacTrustedIdentity.makeChallengeNonce()
-        return count == bytes.count ? bytes : bytes.prefix(count)
+        return Data(bytes.prefix(count))
     }
 }
 

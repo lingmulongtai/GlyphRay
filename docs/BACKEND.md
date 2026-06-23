@@ -14,7 +14,7 @@ The Windows host backend now has the pieces needed for a LAN-first host runtime:
 - Keyboard packet decode and opt-in `SendInput` injection for Bluetooth keyboard and special-key smoke tests.
 - Native touch packet decode and opt-in `PT_TOUCH` injection for Android finger input smoke tests.
 - Bluetooth mouse packet decode and opt-in native cursor/button/wheel injection.
-- Gamepad packet decode for Android-connected controllers.
+- Gamepad packet decode for Android-connected controllers, permission-gated routing, and a virtual gamepad bridge that normalizes controller state to an XInput-style report boundary.
 - Signed P-256 ECDH session negotiation, directional AES-256-GCM transport, replay rejection, and plaintext rejection after key establishment.
 - Permission gating before input packets are accepted, including persisted per-device pen/touch/keyboard/mouse/gamepad enforcement.
 - Pending-session cap of 50 unapproved peers, with oldest pending peer eviction to limit UDP spam memory growth.
@@ -43,7 +43,7 @@ cargo run -p glyphray-windows-host -- serve
 
 When enabled, each incoming pairing request opens a Win32 yes/no dialog on a helper thread. The backend keeps polling while the prompt is open, and the dialog result is fed back through the same command queue as console approval. If the session has already been approved or rejected by the time the dialog returns, the stale result is ignored.
 
-Approved peers are recorded into the local host settings file as trusted-device records. When Android provides its Keystore public key in `PairingRequest.one_time_public_key`, the host stores the SHA-256 public-key fingerprint and DER public key. Returning devices are not approved on fingerprint alone: the host queues an `AuthChallenge`, Android signs the stable challenge payload with its Keystore ECDSA key, and the host verifies the `AuthResponse` before sending an accepted `PairingResult`.
+New peers must first answer a peer-specific `PairingChallenge` with a salted HMAC proof of the six-digit code displayed by the host. Only a successful, unexpired, one-use proof can reach the native permission dialog or manual approval command. Approved peers are recorded into the local host settings file as trusted-device records. When Android provides its Keystore public key in `PairingRequest.one_time_public_key`, the host stores the SHA-256 public-key fingerprint and DER public key. Returning devices are not approved on fingerprint alone and do not reuse the numeric code: the host queues an `AuthChallenge`, Android signs the stable challenge payload with its Keystore ECDSA key, and the host verifies the `AuthResponse` before sending an accepted `PairingResult`.
 
 ```powershell
 trust list
@@ -95,7 +95,7 @@ Preset names are ASCII tokens containing letters, numbers, `-`, `_`, or `.`. App
 
 `startup status`, `startup enable`, and `startup disable` manage the current user's Windows startup registration. The implementation uses the HKCU Run key and launches the host with `serve` after user logon.
 
-The video pump uses the capture/encoder abstraction and queues fragmented H.264 access units to approved peers. Windows capture now uses DXGI Desktop Duplication with a D3D11 staging texture, row-pitch-safe BGRA readback, portrait rotation, unchanged-frame reuse after acquisition timeout, and session recreation after `DXGI_ERROR_ACCESS_LOST`. Display enumeration reports the active refresh rate and DPI scale. `PlatformVideoEncoder` selects the Microsoft Media Foundation H.264 software MFT and performs BGRA-to-NV12 conversion, low-latency/CBR configuration, B-frame disabling, periodic and requested keyframes, and Annex B normalization. Production video still needs hardware MFT selection and continuous Android-device validation.
+The video pump uses the capture/encoder abstraction and queues fragmented H.264 access units to approved peers. Windows capture uses DXGI Desktop Duplication with a D3D11 staging texture, row-pitch-safe BGRA readback, portrait rotation, unchanged-frame reuse after acquisition timeout, and session recreation after `DXGI_ERROR_ACCESS_LOST`. Display enumeration reports active refresh rate and DPI scale. `PlatformVideoEncoder` enumerates hardware Media Foundation H.264 MFTs, classifies Intel/NVIDIA/AMD providers, handles asynchronous input/output events, and uses the Microsoft software MFT when Auto candidates fail. It performs BGRA-to-NV12 conversion, low-latency rate control, Baseline profile/no-B-frame configuration, keyframe control, and Annex B normalization. Production video still needs continuous Android-device validation and Intel/AMD hardware coverage.
 
 The current opt-in pen injection bridge uses temporary 1920x1080 stretch mapping. Display negotiation, selected monitor geometry, high-DPI scaling, and calibration must replace this before beta use.
 
@@ -122,7 +122,7 @@ Android now has matching `GLYD` discovery decode and `GLYT` stylus datagram enco
 - Keyboard injection currently uses Windows virtual keys and needs layout-aware text/IME handling before beta.
 - `GLYPHRAY_DEV_AUTO_APPROVE` is for smoke tests only and should stay out of normal user flows now that challenge/response trusted-device validation exists.
 - Native pen/touch/keyboard/mouse paths are enabled by default, but only authenticated encrypted peers with the matching persisted permission can reach them.
-- Gamepad reports are decoded, but Windows virtual-controller injection needs a ViGEm or virtual HID backend.
+- Gamepad reports reach the Windows virtual gamepad bridge, but production controller presentation still needs a linked ViGEm or signed virtual HID backend and physical controller validation.
 - The live control loop drives capture/encode/packetize/send by default; interactive-session, lock/unlock, and physical-device soak validation remain.
-- Windows platform secret storage uses DPAPI-protected per-user files. Beta still needs migration and corrupted-store recovery tests.
+- Windows platform secret storage uses atomically replaced DPAPI-protected per-user files. Corrupt settings or identity state is quarantined before defaults/identity regeneration; installer-upgrade migration and physical backup/restore validation remain beta gates.
 - Real app validation for Windows Ink input is still required.

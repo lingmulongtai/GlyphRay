@@ -107,6 +107,32 @@ class ProtocolFrameCodecTest {
     }
 
     @Test
+    fun pairingChallengeAndProofMatchRustLayoutAndVector() {
+        val salt = ByteArray(32) { it.toByte() }
+        val payload = ByteBuffer
+            .allocate(4 + 32 + 8 + 1)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(20)
+            .put(salt)
+            .putLong(1_900_000)
+            .put(6.toByte())
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(
+            encodeFrame(47, TransportMessageKind.pairingChallenge, payload),
+        )
+        val message = frame.message as ControlProtocolMessage.PairingChallenge
+        assertArrayEquals(salt, message.salt)
+        assertEquals(1_900_000, message.expiresAtUnixMs)
+        assertEquals(6, message.codeDigits)
+        assertEquals(
+            "f9b2e23be7a5543d2f02ce8063bf94df5c74485737dee573cc8bd3802d29d280",
+            PairingCodeProof.create("123-456", salt)
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) },
+        )
+    }
+
+    @Test
     fun authResponseFrameUsesRustBincodeLayout() {
         val frame = ProtocolFrameCodec.encodeAuthResponse(
             sequence = 46,
@@ -183,6 +209,34 @@ class ProtocolFrameCodecTest {
         assertEquals(1920, message.displays[0].widthPx)
         assertEquals(1080, message.displays[0].heightPx)
         assertEquals(true, message.displays[0].primary)
+    }
+
+    @Test
+    fun audioFrameDecodesRustBincodeLayout() {
+        val pcm = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val payload = ByteBuffer
+            .allocate(4 + 8 + 8 + 4 + 1 + 8 + pcm.size)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(9)
+            .putLong(77)
+            .putLong(123_000)
+            .putInt(48_000)
+            .put(2.toByte())
+            .putLong(pcm.size.toLong())
+            .put(pcm)
+            .array()
+
+        val frame = ProtocolFrameCodec.decodeFrame(
+            encodeFrame(48, TransportMessageKind.audioFrame, payload),
+        )
+        val message = frame.message as ControlProtocolMessage.AudioFrame
+
+        assertEquals(48, frame.sequence)
+        assertEquals(77, message.sequence)
+        assertEquals(123_000, message.captureTimestampUs)
+        assertEquals(48_000, message.sampleRate)
+        assertEquals(2, message.channels)
+        assertArrayEquals(pcm, message.payload)
     }
 
     @Test

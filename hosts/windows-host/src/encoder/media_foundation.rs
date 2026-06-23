@@ -3,30 +3,70 @@ use crate::capture::CapturedFrame;
 use glyphray_protocol::VideoCodec;
 use std::collections::VecDeque;
 use std::mem::ManuallyDrop;
-use std::time::{SystemTime, UNIX_EPOCH};
-use windows::core::{Interface, VARIANT};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use windows::core::{Interface, PWSTR, VARIANT};
 use windows::Win32::Media::MediaFoundation::{
     eAVEncCommonRateControlMode_CBR, eAVEncCommonRateControlMode_LowDelayVBR,
     eAVEncH264VProfile_Base, CLSID_MSH264EncoderMFT, CODECAPI_AVEncCommonQualityVsSpeed,
     CODECAPI_AVEncCommonRateControlMode, CODECAPI_AVEncMPVDefaultBPictureCount,
     CODECAPI_AVEncMPVGOPSize, CODECAPI_AVEncVideoForceKeyFrame, CODECAPI_AVLowLatencyMode,
-    ICodecAPI, IMFMediaBuffer, IMFSample, IMFTransform, MFCreateMediaType, MFCreateMemoryBuffer,
+    ICodecAPI, IMFActivate, IMFMediaBuffer, IMFMediaEventGenerator, IMFSample, IMFTransform,
+    METransformHaveOutput, METransformNeedInput, MFCreateMediaType, MFCreateMemoryBuffer,
     MFCreateSample, MFMediaType_Video, MFSampleExtension_CleanPoint, MFShutdown, MFStartup,
-    MFVideoFormat_H264, MFVideoFormat_NV12, MFVideoInterlace_Progressive, MFSTARTUP_LITE,
-    MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, MFT_MESSAGE_NOTIFY_END_OF_STREAM,
-    MFT_MESSAGE_NOTIFY_END_STREAMING, MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER,
-    MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MF_E_TRANSFORM_NEED_MORE_INPUT,
-    MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AVG_BITRATE, MF_MT_FIXED_SIZE_SAMPLES, MF_MT_FRAME_RATE,
-    MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE,
-    MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SAMPLE_SIZE, MF_MT_SUBTYPE, MF_VERSION,
+    MFTEnumEx, MFT_FRIENDLY_NAME_Attribute, MFVideoFormat_H264, MFVideoFormat_NV12,
+    MFVideoInterlace_Progressive, MFSTARTUP_LITE, MFT_CATEGORY_VIDEO_ENCODER,
+    MFT_ENUM_FLAG_HARDWARE, MFT_ENUM_FLAG_SORTANDFILTER, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
+    MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
+    MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_OUTPUT_DATA_BUFFER, MFT_OUTPUT_STREAM_PROVIDES_SAMPLES,
+    MFT_REGISTER_TYPE_INFO, MF_EVENT_FLAG_NO_WAIT, MF_E_NO_EVENTS_AVAILABLE,
+    MF_E_TRANSFORM_NEED_MORE_INPUT, MF_MT_ALL_SAMPLES_INDEPENDENT, MF_MT_AVG_BITRATE,
+    MF_MT_FIXED_SIZE_SAMPLES, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE,
+    MF_MT_MAJOR_TYPE, MF_MT_MPEG2_PROFILE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SAMPLE_SIZE,
+    MF_MT_SUBTYPE, MF_TRANSFORM_ASYNC, MF_TRANSFORM_ASYNC_UNLOCK, MF_VERSION,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_MULTITHREADED,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HardwareEncoderInfo {
+    pub backend: EncoderBackend,
+    pub friendly_name: String,
+}
+
+struct HardwareEncoderCandidate {
+    activate: IMFActivate,
+    info: HardwareEncoderInfo,
+}
+
+pub fn available_h264_hardware_encoders() -> Result<Vec<HardwareEncoderInfo>, EncoderError> {
+    unsafe {
+        CoInitializeEx(None, COINIT_MULTITHREADED)
+            .ok()
+            .map_err(|error| backend_error("CoInitializeEx", error))?;
+        if let Err(error) = MFStartup(MF_VERSION, MFSTARTUP_LITE) {
+            CoUninitialize();
+            return Err(backend_error("MFStartup", error));
+        }
+        let result = enumerate_hardware_encoders().map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|candidate| candidate.info)
+                .collect()
+        });
+        let _ = MFShutdown();
+        CoUninitialize();
+        result
+    }
+}
 
 pub struct MediaFoundationH264Encoder {
     settings: EncoderSettings,
+    requested_backend: EncoderBackend,
+    backend_name: String,
     transform: Option<IMFTransform>,
+    event_generator: Option<IMFMediaEventGenerator>,
     next_sequence: u64,
     pending_frames: VecDeque<(u64, u64)>,
     force_keyframe: bool,
@@ -38,16 +78,17 @@ pub struct MediaFoundationH264Encoder {
 }
 
 impl MediaFoundationH264Encoder {
-    pub fn new(mut settings: EncoderSettings) -> Self {
-        if settings.backend == EncoderBackend::Auto {
-            settings.backend = EncoderBackend::Software;
-        }
+    pub fn new(settings: EncoderSettings) -> Self {
+        let requested_backend = settings.backend;
         let frame_duration_hns = 10_000_000_i64 / i64::from(settings.fps.max(1));
         let pixels = settings.width.saturating_mul(settings.height);
         let output_buffer_size = pixels.saturating_mul(2).max(1_048_576);
         Self {
             settings,
+            requested_backend,
+            backend_name: "not started".to_string(),
             transform: None,
+            event_generator: None,
             next_sequence: 1,
             pending_frames: VecDeque::new(),
             force_keyframe: true,
@@ -87,10 +128,89 @@ impl MediaFoundationH264Encoder {
         MFStartup(MF_VERSION, MFSTARTUP_LITE).map_err(|error| backend_error("MFStartup", error))?;
         self.media_foundation_started = true;
 
+        if self.requested_backend != EncoderBackend::Software {
+            let candidates = match enumerate_hardware_encoders() {
+                Ok(candidates) => candidates,
+                Err(_) if self.requested_backend == EncoderBackend::Auto => Vec::new(),
+                Err(error) => return Err(error),
+            };
+            let mut failures = Vec::new();
+            for candidate in candidates
+                .into_iter()
+                .filter(|candidate| backend_matches(self.requested_backend, candidate.info.backend))
+            {
+                let transform = match candidate.activate.ActivateObject::<IMFTransform>() {
+                    Ok(transform) => transform,
+                    Err(error) => {
+                        failures.push(format!(
+                            "{} activation: {error}",
+                            candidate.info.friendly_name
+                        ));
+                        continue;
+                    }
+                };
+                let is_async = transform
+                    .GetAttributes()
+                    .ok()
+                    .map(|attributes| {
+                        let is_async = attributes
+                            .GetUINT32(&MF_TRANSFORM_ASYNC)
+                            .unwrap_or_default()
+                            != 0;
+                        if is_async {
+                            let _ = attributes.SetUINT32(&MF_TRANSFORM_ASYNC_UNLOCK, 1);
+                        }
+                        is_async
+                    })
+                    .unwrap_or(false);
+                match self.configure_transform(&transform) {
+                    Ok(()) => {
+                        if is_async {
+                            match transform.cast::<IMFMediaEventGenerator>() {
+                                Ok(generator) => self.event_generator = Some(generator),
+                                Err(error) => {
+                                    failures.push(format!(
+                                        "{} event interface: {error}",
+                                        candidate.info.friendly_name
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
+                        self.settings.backend = candidate.info.backend;
+                        self.backend_name = candidate.info.friendly_name;
+                        return Ok(transform);
+                    }
+                    Err(error) => failures.push(format!(
+                        "{} configuration: {error}",
+                        candidate.info.friendly_name
+                    )),
+                }
+            }
+
+            if self.requested_backend != EncoderBackend::Auto {
+                if failures.is_empty() {
+                    return Err(EncoderError::BackendUnavailable(self.requested_backend));
+                }
+                return Err(EncoderError::Backend(format!(
+                    "requested {:?} encoder could not start: {}",
+                    self.requested_backend,
+                    failures.join("; ")
+                )));
+            }
+        }
+
         let transform: IMFTransform =
             CoCreateInstance(&CLSID_MSH264EncoderMFT, None, CLSCTX_INPROC_SERVER)
                 .map_err(|error| backend_error("create Microsoft H.264 encoder MFT", error))?;
+        self.configure_transform(&transform)?;
+        self.event_generator = None;
+        self.settings.backend = EncoderBackend::Software;
+        self.backend_name = "Microsoft H.264 Video Encoder MFT".to_string();
+        Ok(transform)
+    }
 
+    unsafe fn configure_transform(&self, transform: &IMFTransform) -> Result<(), EncoderError> {
         let output_type = MFCreateMediaType()
             .map_err(|error| backend_error("MFCreateMediaType(output)", error))?;
         output_type
@@ -156,14 +276,76 @@ impl MediaFoundationH264Encoder {
             .SetInputType(0, &input_type, 0)
             .map_err(|error| backend_error("IMFTransform::SetInputType", error))?;
 
-        configure_codec_api(&transform, &self.settings)?;
+        configure_codec_api(transform, &self.settings)?;
 
         transform
             .ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)
             .and_then(|_| transform.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0))
             .map_err(|error| backend_error("start H.264 transform stream", error))?;
 
-        Ok(transform)
+        Ok(())
+    }
+
+    unsafe fn switch_to_software_encoder(&mut self) -> Result<(), EncoderError> {
+        self.event_generator = None;
+        if let Some(transform) = self.transform.take() {
+            let _ = transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+            let _ = transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+        }
+        self.pending_frames.clear();
+        self.force_keyframe = true;
+
+        let transform: IMFTransform =
+            CoCreateInstance(&CLSID_MSH264EncoderMFT, None, CLSCTX_INPROC_SERVER).map_err(
+                |error| backend_error("create fallback Microsoft H.264 encoder MFT", error),
+            )?;
+        self.configure_transform(&transform)?;
+        self.settings.backend = EncoderBackend::Software;
+        self.backend_name = "Microsoft H.264 Video Encoder MFT (runtime fallback)".to_string();
+        self.transform = Some(transform);
+        Ok(())
+    }
+
+    fn encode_once(&mut self, frame: &CapturedFrame) -> Result<EncodedVideoFrame, EncoderError> {
+        let transform = self.transform.clone().ok_or(EncoderError::NotStarted)?;
+        bgra_to_nv12(frame, &mut self.nv12)?;
+
+        let sequence = self.next_sequence;
+        let sample_time_hns =
+            (sequence.saturating_sub(1) as i64).saturating_mul(self.frame_duration_hns);
+        let input_sample = unsafe { self.make_input_sample(sample_time_hns)? };
+
+        if std::mem::take(&mut self.force_keyframe) {
+            unsafe { force_keyframe(&transform)? };
+        }
+        unsafe {
+            if let Some(generator) = &self.event_generator {
+                wait_for_transform_event(generator, METransformNeedInput.0 as u32)?;
+            }
+            transform
+                .ProcessInput(0, &input_sample, 0)
+                .map_err(|error| backend_error("IMFTransform::ProcessInput", error))?;
+            if let Some(generator) = &self.event_generator {
+                wait_for_transform_event(generator, METransformHaveOutput.0 as u32)?;
+            }
+        }
+        self.pending_frames
+            .push_back((sequence, frame.capture_timestamp_us));
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        let (payload, is_keyframe) = unsafe { self.take_output(&transform)? };
+        let (output_sequence, capture_timestamp_us) = self
+            .pending_frames
+            .pop_front()
+            .ok_or(EncoderError::OutputUnavailable)?;
+
+        Ok(EncodedVideoFrame {
+            sequence: output_sequence,
+            codec: VideoCodec::H264,
+            capture_timestamp_us,
+            encode_done_timestamp_us: now_us(),
+            is_keyframe,
+            payload,
+        })
     }
 
     unsafe fn make_input_sample(&self, sample_time_hns: i64) -> Result<IMFSample, EncoderError> {
@@ -245,9 +427,102 @@ impl MediaFoundationH264Encoder {
     }
 }
 
+unsafe fn enumerate_hardware_encoders() -> Result<Vec<HardwareEncoderCandidate>, EncoderError> {
+    let input_type = MFT_REGISTER_TYPE_INFO {
+        guidMajorType: MFMediaType_Video,
+        guidSubtype: MFVideoFormat_NV12,
+    };
+    let output_type = MFT_REGISTER_TYPE_INFO {
+        guidMajorType: MFMediaType_Video,
+        guidSubtype: MFVideoFormat_H264,
+    };
+    let mut raw_activates: *mut Option<IMFActivate> = std::ptr::null_mut();
+    let mut count = 0_u32;
+    MFTEnumEx(
+        MFT_CATEGORY_VIDEO_ENCODER,
+        MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SORTANDFILTER,
+        Some(&input_type),
+        Some(&output_type),
+        &mut raw_activates,
+        &mut count,
+    )
+    .map_err(|error| backend_error("enumerate hardware H.264 encoder MFTs", error))?;
+
+    if raw_activates.is_null() || count == 0 {
+        if !raw_activates.is_null() {
+            CoTaskMemFree(Some(raw_activates.cast()));
+        }
+        return Ok(Vec::new());
+    }
+
+    let mut candidates = Vec::with_capacity(count as usize);
+    let activates = std::slice::from_raw_parts_mut(raw_activates, count as usize);
+    for activate in activates.iter_mut().filter_map(Option::take) {
+        let friendly_name = activation_friendly_name(&activate)
+            .unwrap_or_else(|_| "Unknown hardware H.264 encoder".to_string());
+        candidates.push(HardwareEncoderCandidate {
+            activate,
+            info: HardwareEncoderInfo {
+                backend: classify_hardware_backend(&friendly_name),
+                friendly_name,
+            },
+        });
+    }
+    CoTaskMemFree(Some(raw_activates.cast()));
+    Ok(candidates)
+}
+
+unsafe fn activation_friendly_name(activate: &IMFActivate) -> Result<String, EncoderError> {
+    let mut value = PWSTR(std::ptr::null_mut());
+    let mut length = 0_u32;
+    activate
+        .GetAllocatedString(&MFT_FRIENDLY_NAME_Attribute, &mut value, &mut length)
+        .map_err(|error| backend_error("read hardware encoder friendly name", error))?;
+    if value.is_null() {
+        return Ok("Unknown hardware H.264 encoder".to_string());
+    }
+    let name = String::from_utf16_lossy(std::slice::from_raw_parts(value.0, length as usize));
+    CoTaskMemFree(Some(value.0.cast()));
+    Ok(name)
+}
+
+fn classify_hardware_backend(friendly_name: &str) -> EncoderBackend {
+    let name = friendly_name.to_ascii_lowercase();
+    if name.contains("intel") || name.contains("quick sync") {
+        EncoderBackend::IntelQuickSync
+    } else if name.contains("nvidia") || name.contains("nvenc") {
+        EncoderBackend::NvidiaNvenc
+    } else if name.contains("amd")
+        || name.contains("advanced micro devices")
+        || name.contains("amf")
+    {
+        EncoderBackend::AmdAmf
+    } else {
+        EncoderBackend::Hardware
+    }
+}
+
+fn backend_matches(requested: EncoderBackend, candidate: EncoderBackend) -> bool {
+    matches!(requested, EncoderBackend::Auto | EncoderBackend::Hardware) || requested == candidate
+}
+
+fn should_runtime_fallback(
+    requested: EncoderBackend,
+    selected: EncoderBackend,
+    error: &EncoderError,
+) -> bool {
+    requested == EncoderBackend::Auto
+        && selected != EncoderBackend::Software
+        && matches!(error, EncoderError::Backend(_))
+}
+
 impl VideoEncoder for MediaFoundationH264Encoder {
     fn settings(&self) -> &EncoderSettings {
         &self.settings
+    }
+
+    fn backend_name(&self) -> &str {
+        &self.backend_name
     }
 
     fn start(&mut self) -> Result<(), EncoderError> {
@@ -265,39 +540,19 @@ impl VideoEncoder for MediaFoundationH264Encoder {
         if frame.width != self.settings.width || frame.height != self.settings.height {
             return Err(EncoderError::DimensionMismatch);
         }
-        let transform = self.transform.clone().ok_or(EncoderError::NotStarted)?;
-        bgra_to_nv12(frame, &mut self.nv12)?;
-
-        let sequence = self.next_sequence;
-        let sample_time_hns =
-            (sequence.saturating_sub(1) as i64).saturating_mul(self.frame_duration_hns);
-        let input_sample = unsafe { self.make_input_sample(sample_time_hns)? };
-
-        if std::mem::take(&mut self.force_keyframe) {
-            unsafe { force_keyframe(&transform)? };
+        match self.encode_once(frame) {
+            Err(error)
+                if should_runtime_fallback(
+                    self.requested_backend,
+                    self.settings.backend,
+                    &error,
+                ) =>
+            {
+                unsafe { self.switch_to_software_encoder()? };
+                self.encode_once(frame)
+            }
+            result => result,
         }
-        unsafe {
-            transform
-                .ProcessInput(0, &input_sample, 0)
-                .map_err(|error| backend_error("IMFTransform::ProcessInput", error))?;
-        }
-        self.pending_frames
-            .push_back((sequence, frame.capture_timestamp_us));
-        self.next_sequence = self.next_sequence.saturating_add(1);
-        let (payload, is_keyframe) = unsafe { self.take_output(&transform)? };
-        let (output_sequence, capture_timestamp_us) = self
-            .pending_frames
-            .pop_front()
-            .ok_or(EncoderError::OutputUnavailable)?;
-
-        Ok(EncodedVideoFrame {
-            sequence: output_sequence,
-            codec: VideoCodec::H264,
-            capture_timestamp_us,
-            encode_done_timestamp_us: now_us(),
-            is_keyframe,
-            payload,
-        })
     }
 
     fn request_keyframe(&mut self) -> Result<(), EncoderError> {
@@ -309,6 +564,7 @@ impl VideoEncoder for MediaFoundationH264Encoder {
 impl Drop for MediaFoundationH264Encoder {
     fn drop(&mut self) {
         unsafe {
+            self.event_generator = None;
             if let Some(transform) = self.transform.take() {
                 let _ = transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
                 let _ = transform.ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
@@ -318,6 +574,48 @@ impl Drop for MediaFoundationH264Encoder {
             }
             if self.com_initialized {
                 CoUninitialize();
+            }
+        }
+    }
+}
+
+unsafe fn wait_for_transform_event(
+    generator: &IMFMediaEventGenerator,
+    expected_type: u32,
+) -> Result<(), EncoderError> {
+    let deadline = Instant::now() + Duration::from_millis(50);
+    loop {
+        match generator.GetEvent(MF_EVENT_FLAG_NO_WAIT) {
+            Ok(event) => {
+                let status = event
+                    .GetStatus()
+                    .map_err(|error| backend_error("read asynchronous encoder event", error))?;
+                if status.is_err() {
+                    return Err(EncoderError::Backend(format!(
+                        "asynchronous encoder event failed: {status:?}"
+                    )));
+                }
+                if event
+                    .GetType()
+                    .map_err(|error| backend_error("read asynchronous encoder event type", error))?
+                    == expected_type
+                {
+                    return Ok(());
+                }
+            }
+            Err(error) if error.code() == MF_E_NO_EVENTS_AVAILABLE => {
+                if Instant::now() >= deadline {
+                    return Err(EncoderError::Backend(
+                        "asynchronous encoder event timed out after 50 ms".to_string(),
+                    ));
+                }
+                std::thread::sleep(Duration::from_micros(100));
+            }
+            Err(error) => {
+                return Err(backend_error(
+                    "read asynchronous encoder event queue",
+                    error,
+                ));
             }
         }
     }
@@ -347,12 +645,13 @@ unsafe fn configure_codec_api(
             )
             .map_err(|error| backend_error("set CBR rate control fallback", error))?;
     }
-    codec_api
-        .SetValue(
-            &CODECAPI_AVEncMPVDefaultBPictureCount,
-            &VARIANT::from(0_u32),
-        )
-        .map_err(|error| backend_error("disable H.264 B pictures", error))?;
+    // Some hardware MFTs reject the B-picture property even while honoring the
+    // Baseline profile, which cannot contain B slices. Keep the explicit request
+    // where supported without excluding those otherwise valid encoders.
+    let _ = codec_api.SetValue(
+        &CODECAPI_AVEncMPVDefaultBPictureCount,
+        &VARIANT::from(0_u32),
+    );
     let gop_frames = (u64::from(settings.fps) * u64::from(settings.keyframe_interval_ms) / 1_000)
         .clamp(1, u64::from(u32::MAX)) as u32;
     let _ = codec_api.SetValue(&CODECAPI_AVEncMPVGOPSize, &VARIANT::from(gop_frames));
@@ -568,5 +867,50 @@ mod tests {
         let converted = normalize_h264_access_unit(vec![0, 0, 0, 2, 0x65, 0x88]);
         assert_eq!(converted, vec![0, 0, 0, 1, 0x65, 0x88]);
         assert!(annex_b_contains_idr(&converted));
+    }
+
+    #[test]
+    fn hardware_vendor_is_classified_from_friendly_name() {
+        assert_eq!(
+            classify_hardware_backend("Intel Quick Sync H.264 Encoder"),
+            EncoderBackend::IntelQuickSync
+        );
+        assert_eq!(
+            classify_hardware_backend("NVIDIA NVENC H264 Encoder MFT"),
+            EncoderBackend::NvidiaNvenc
+        );
+        assert_eq!(
+            classify_hardware_backend("AMD AMF Video Encoder"),
+            EncoderBackend::AmdAmf
+        );
+        assert_eq!(
+            classify_hardware_backend("Vendor GPU Encoder"),
+            EncoderBackend::Hardware
+        );
+    }
+
+    #[test]
+    fn runtime_fallback_is_limited_to_auto_selected_hardware_failures() {
+        let failure = EncoderError::Backend("driver reset".to_string());
+        assert!(should_runtime_fallback(
+            EncoderBackend::Auto,
+            EncoderBackend::NvidiaNvenc,
+            &failure
+        ));
+        assert!(!should_runtime_fallback(
+            EncoderBackend::NvidiaNvenc,
+            EncoderBackend::NvidiaNvenc,
+            &failure
+        ));
+        assert!(!should_runtime_fallback(
+            EncoderBackend::Auto,
+            EncoderBackend::Software,
+            &failure
+        ));
+        assert!(!should_runtime_fallback(
+            EncoderBackend::Auto,
+            EncoderBackend::NvidiaNvenc,
+            &EncoderError::DimensionMismatch
+        ));
     }
 }

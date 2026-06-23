@@ -51,7 +51,9 @@ final class MacSecureSessionTests: XCTestCase {
         var confirm = MacClientKeyConfirm(
             sessionID: exchange.sessionID,
             deviceID: deviceID,
-            ephemeralPublicKeyDER: clientEphemeral.publicKey.derRepresentation,
+            ephemeralPublicKeyDER: try MacSecureSessionHandshake.encodeKeyAgreementPublicKey(
+                clientEphemeral.publicKey
+            ),
             signature: Data()
         )
         let serverHash = Data(SHA256.hash(
@@ -64,8 +66,8 @@ final class MacSecureSessionTests: XCTestCase {
             )
         ).derRepresentation
 
-        let hostEphemeral = try P256.KeyAgreement.PublicKey(
-            derRepresentation: exchange.ephemeralPublicKeyDER
+        let hostEphemeral = try MacSecureSessionHandshake.decodeKeyAgreementPublicKey(
+            exchange.ephemeralPublicKeyDER
         )
         let shared = try clientEphemeral.sharedSecretFromKeyAgreement(with: hostEphemeral)
             .withUnsafeBytes { Data($0) }

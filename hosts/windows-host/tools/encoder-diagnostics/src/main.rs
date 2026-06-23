@@ -2,7 +2,8 @@ use glyphray_transport::udp::{decode_packet, encode_packet};
 use glyphray_transport::video::{EncodedVideoAccessUnit, VideoPacketizer, VideoReassembler};
 use glyphray_windows_host::capture::{CapturedFrame, ScreenCapture, WindowsGraphicsCaptureBackend};
 use glyphray_windows_host::encoder::{
-    EncoderError, EncoderSettings, PlatformVideoEncoder, VideoEncoder,
+    available_h264_hardware_encoders, parse_encoder_backend, EncoderError, EncoderSettings,
+    PlatformVideoEncoder, VideoEncoder,
 };
 use std::time::Instant;
 
@@ -14,6 +15,19 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    match available_h264_hardware_encoders() {
+        Ok(encoders) if encoders.is_empty() => {
+            println!("Hardware H.264 MFT candidates: none");
+        }
+        Ok(encoders) => {
+            println!("Hardware H.264 MFT candidates:");
+            for encoder in encoders {
+                println!("  {:?}: {}", encoder.backend, encoder.friendly_name);
+            }
+        }
+        Err(error) => eprintln!("Hardware H.264 MFT enumeration failed: {error}"),
+    }
+
     let mut capture = WindowsGraphicsCaptureBackend::new();
     let displays = capture.list_displays()?;
     let display = displays
@@ -32,18 +46,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let settings = EncoderSettings::low_latency_h264(first_frame.width, first_frame.height, 60);
+    let mut settings = EncoderSettings::low_latency_h264(first_frame.width, first_frame.height, 60);
+    if let Ok(value) = std::env::var("GLYPHRAY_ENCODER_BACKEND") {
+        settings.backend = parse_encoder_backend(&value).ok_or(
+            "GLYPHRAY_ENCODER_BACKEND must be auto, hardware, intel, nvidia, amd, or software",
+        )?;
+    }
     let mut encoder = PlatformVideoEncoder::new(settings.clone());
     encoder.start()?;
 
     println!(
-        "Encoding display {} at {}x{}, {}fps, {}kbps with {:?}",
+        "Encoding display {} at {}x{}, {}fps, {}kbps with {:?} ({})",
         display.id,
         settings.width,
         settings.height,
         settings.fps,
         settings.target_bitrate_kbps,
-        encoder.settings().backend
+        encoder.settings().backend,
+        encoder.backend_name()
     );
 
     for attempt in 1..=120 {

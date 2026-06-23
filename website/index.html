@@ -51,7 +51,7 @@
             </div>
             <div>
               <dt>Status</dt>
-              <dd>90% implementation, 72% release ready</dd>
+              <dd>95% implementation, 82% release ready</dd>
             </div>
           </dl>
         </div>
@@ -100,11 +100,11 @@
           <article class="download-card">
             <div class="platform">macOS Host</div>
             <h3>Phase 2/5 preview</h3>
-            <p>SwiftUI shell with UDP control pairing, Keychain trusted-client persistence, signed Android trusted-device challenge/response, LAN discovery advertisements, ScreenCaptureKit diagnostics, live capture, live encode, H.264 Annex B conversion, Video-channel packetizer, approved-client stream action, bounded continuous UDP video streaming, permission readiness checks, audio permission request, and VideoToolbox smoke tests.</p>
+            <p>SwiftUI host with Keychain identities, signed P-256 ECDH, encrypted control/video/input, secure-client stream ownership, ScreenCaptureKit capture, VideoToolbox H.264, client-selected quality, bounded streaming, and CGEvent input compatibility.</p>
             <ul>
               <li>macOS 13+ foundation</li>
-              <li>Mouse and keyboard compatibility path first</li>
-              <li>Encrypted session and reconnect work remains</li>
+              <li>Encrypted mouse, keyboard, and touch-pointer path</li>
+              <li>macOS CI, device validation, and reconnect remain</li>
             </ul>
             <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
           </article>
@@ -155,19 +155,19 @@
           <h2 id="status-title">Current repository progress</h2>
         </div>
         <div class="status-layout">
-          <div class="progress-meter" aria-label="Implementation progress 86 percent">
-            <div class="progress-number">90%</div>
+          <div class="progress-meter" aria-label="Implementation progress 95 percent">
+            <div class="progress-number">95%</div>
             <div class="progress-track">
-              <span style="width: 90%"></span>
+              <span style="width: 95%"></span>
             </div>
-            <p>Buildable developer preview with reproducible APK/AAB, MSI, and macOS app/pkg candidates, DXGI Desktop Duplication, Media Foundation H.264, and encrypted Windows/Android live sessions. Production readiness is 72% because interactive hardware validation, signed distribution credentials, macOS session encryption, and store review remain.</p>
+            <p>Buildable developer preview with reproducible APK/AAB, MSI, and macOS app/pkg candidates, DXGI Desktop Duplication, hardware Media Foundation H.264, encrypted Windows/Android/macOS sessions, salted six-digit first-time pairing, secure macOS stream ownership, Windows host Audio-channel packetization, Android AudioFrame playback foundation, and a Windows virtual gamepad bridge. Production readiness is 82% because interactive hardware validation, signed distribution credentials, WASAPI/macOS audio capture, virtual-controller driver validation, long-run reconnect validation, and store review remain.</p>
           </div>
           <ol class="milestones">
             <li><span>100%</span> Milestone 1 foundation</li>
-            <li><span>88%</span> Video and transport foundation</li>
-            <li><span>82%</span> Android stylus to Windows Ink path</li>
-            <li><span>94%</span> Security hardening and packaging</li>
-            <li><span>74%</span> macOS, audio, relay readiness</li>
+            <li><span>93%</span> Video and transport foundation</li>
+            <li><span>86%</span> Android stylus to Windows Ink path</li>
+            <li><span>98%</span> Security hardening and packaging</li>
+            <li><span>90%</span> macOS, audio, relay readiness</li>
           </ol>
         </div>
       </section>

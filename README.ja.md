@@ -8,31 +8,31 @@ GlyphRay は、Android タブレットやスマートフォンを Windows / macO
 
 ## 現在の進捗
 
-**実装進捗見積もり: 90%**<br>
-**製品リリース準備度: 72%**
+**実装進捗見積もり: 95%**<br>
+**製品リリース準備度: 82%**
 
-最終更新: 2026-06-22 JST
+最終更新: 2026-06-23 JST
 
 ```mermaid
 pie title 全体進捗
-  "実装済み・ビルド可能" : 90
-  "残りの製品化作業" : 10
+  "実装済み基盤" : 95
+  "残りの製品化作業" : 5
 ```
 
 | 領域 | 状態 | 進捗 |
 | --- | --- | ---: |
 | Milestone 1 基盤構築 | 完了 | 100% |
-| Milestone 2 映像・transport 基盤 | 進行中 | 90% |
+| Milestone 2 映像・transport 基盤 | 進行中 | 93% |
 | Milestone 3 Android stylus から Windows Ink | 進行中 | 86% |
-| Milestone 4 security hardening / packaging | 進行中 | 94% |
-| Milestone 5 macOS / audio / relay | 進行中 | 74% |
+| Milestone 4 security hardening / packaging | 進行中 | 98% |
+| Milestone 5 macOS / audio / relay | 進行中 | 90% |
 
 ```text
 M1 基盤構築                  [####################] 100%
-M2 映像 + Transport          [##################--]  90%
+M2 映像 + Transport          [###################-]  93%
 M3 Stylus -> Windows Ink     [#################---]  86%
-M4 Security + Packaging      [###################-]  94%
-M5 macOS + Audio + Relay     [###############-----]  74%
+M4 Security + Packaging      [####################]  98%
+M5 macOS + Audio + Relay     [##################--]  90%
 ```
 
 開発日記: [docs/DEVELOPMENT_DIARY.md](docs/DEVELOPMENT_DIARY.md)
@@ -69,15 +69,15 @@ flowchart TB
 
 | パス | 役割 | 現在入っているもの |
 | --- | --- | --- |
-| `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、Android Keystore public-key pairing identity、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface |
-| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、DXGI Desktop Duplication capture、Media Foundation H.264 software encoder、approved-peer video fragment queueing、health/status metrics、native permission dialog、signed trusted-device challenge/response、Win32 synthetic pen injection wrapper |
-| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、UDP control pairing runtime、Keychain trusted-client persistence、signed Android trusted-device challenge/response path、LAN discovery advertiser、ScreenCaptureKit display enumeration、live capture probe、live capture-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay video packetizer、manual UDP send probe、bounded backpressure 付き continuous UDP video stream start/stop path、permission readiness UI |
+| `apps/android-client` | Android client | Compose UI、LAN host discovery、control handshake send/receive、Android Keystore public-key pairing identity、stylus diagnostics、live stylus UDP sender、MediaCodec decode surface、PCM16 AudioFrame playback 基盤 |
+| `hosts/windows-host` | 最優先の desktop host | LAN backend runtime、UDP routing、QoS outbound queues、DXGI Desktop Duplication capture、Media Foundation hardware/software H.264選択、approved-peer video/audio packet queueing、health/status metrics、native permission dialog、signed trusted-device challenge/response、Win32 synthetic pen injection wrapper、virtual gamepad injection bridge |
+| `hosts/macos-host` | Phase 2/5 の desktop host | SwiftUI shell、Keychain host/trusted-client identity、signed P-256 ECDH + AES-GCM session、encrypted control/video/input routing、secure client stream ownership、ScreenCaptureKit、VideoToolbox H.264、client指定display/quality、bounded video backpressure、CGEvent mouse/keyboard/single-touch pointer injection |
 | `crates/core` | 共有ロジック | coordinate mapping、calibration、pressure curve、session state |
 | `crates/protocol` | binary protocol | `GLYR` frame、compact `GLYS` stylus batch |
 | `crates/transport` | realtime packet layer | UDP `GLYT`、LAN discovery `GLYD`、video fragmentation、reusable UDP buffers、secure datagram、reconnect、bitrate / keyframe adaptation logic |
 | `crates/security` | pairing / session security | pairing code、HMAC challenge response、session cipher、replay guard、secret-store trait |
 | `crates/telemetry` | local diagnostics | latency breakdown、rolling metrics |
-| `crates/audio` | audio 基盤 | audio packetization primitives |
+| `crates/audio` | audio 基盤 | Windows host Audio-channel packetization と Android `AudioTrack` playback につながる audio packetization primitives |
 | `docs` | knowledge base | architecture、security、Windows Ink、Android stylus、macOS、test plan、performance targets |
 | `website` | GitHub Pages site | 静的 download page、生成 hero image、release links、setup command generator |
 
@@ -157,7 +157,7 @@ sequenceDiagram
 - Android touch mode は direct native touch、trackpad 的な cursor movement、two-finger gesture wheel translation に対応。
 - Android の realtime receive path は、transport socket で受けた `VideoFrame` packet を `RemoteVideoStreamController` と MediaCodec decoder へ流せるようになった。
 - Android の low-latency `SurfaceView` と `MediaCodec` H.264 decoder 基盤。
-- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、optional native permission dialog、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode、permission gate、latency pong。
+- Windows backend runtime。LAN discovery、UDP server routing、session registry、pairing request handling、console approval / rejection、optional native permission dialog、`PairingResult`、display-info response、encoder config intake、opt-in keyboard / mouse / touch injection、gamepad decode と virtual-controller injection bridge、permission gate、latency pong。
 - Windows backend hardening。pending session cap、IPごとの pending attempt rate limit、late input packet drop、channel-aware nonblocking QoS outbound queue、approved-peer video fragment queueing、console-visible queue/backpressure health metrics。
 - Windows host は approved device を local host settings に記録し、Android public-key SHA-256 fingerprint と DER public key がある場合は保存する。returning device には `AuthChallenge` を返し、Android Keystore の ECDSA `AuthResponse` を検証してから承認する。`trust list`、`trust forget <id>`、`trust clear` で管理できる。
 - Windows host の video pump は approved client の `EncoderConfig` で再起動でき、host console の `encoder override` command でも stream 設定を変更できる。
@@ -170,10 +170,12 @@ sequenceDiagram
 - LAN smoke test 用の Windows backend opt-in native pen injection bridge。
 - Windows stylus input bridge と Win32 synthetic pen injection wrapper。
 - Windows DXGI monitor enumeration、現在のrefresh/DPI情報、stateful Desktop Duplication capture、回転対応BGRA readback、encoder abstraction、streaming pipeline。
-- BGRA-to-NV12変換、low-latency mode、CBR fallback、B-frame無効化、keyframe制御、Annex B正規化を持つWindows Media Foundation H.264 software fallbackと実encoder diagnostic CLI。
+- Windows Media Foundation H.264はhardware MFTを列挙し、Intel Quick Sync / NVIDIA NVENC / AMD AMFを分類して非同期MFT eventを処理します。Autoでは実行時GPU障害もsoftwareへ復旧し、選択結果をstatus/diagnosticsへ表示します。NVENCからAnnex B生成、UDP分割、再構成までローカル実機で確認済みです。
+- Windows host設定とDPAPI identityはatomic replacementと破損file隔離に対応し、再生成時は再pairing警告を出します。固定schemaのrotation logはraw keyboard入力とsecretを記録しません。
 - 署名付きP-256 ECDH、方向別AES-256-GCM鍵、replay防止、Androidのhost identity pin、DPAPI永続Windows host identityによるWindows/Android実session暗号化。
+- Androidの初回pairingはWindows/macOS hostに表示される6桁one-time codeを必須にしました。peer別32-byte salt、HMAC-SHA256 proof、有効期限、成功時rotation、5回/2分の試行制限により、codeの平文送信と別peerへのproof replayを防ぎます。
 - Windows `PlatformSecretStore` は Windows 上で DPAPI 保護の per-user secret file を使う。non-Windows build では in-memory fallback を使う。
-- macOS SwiftUI shell、UDP control pairing runtime、Keychain-backed trusted-client persistence、SHA-256 Android public-key trusted id、returning Android client 向け signed `AuthChallenge` / `AuthResponse` 検証、LAN discovery advertiser、ScreenCaptureKit display diagnostics、live capture frame probe、ScreenCaptureKit-to-VideoToolbox encode probe、H.264 Annex B conversion、GlyphRay Video-channel packetizer、manual UDP send probe、approved-client UDP stream start、bounded send backpressure / drop counter 付き continuous UDP video stream start/stop path、permission readiness checks と audio permission request、CGEvent mouse / keyboard 基盤、Keychain secret-store smoke test、audio permission plumbing。
+- macOS SwiftUI host、Keychain-backed persistent host identity / trusted client、signed `GLYH` P-256 ECDH、direction別 AES-256-GCM `GLYE`、replay rejection、secure-target stream ownership、encrypted approved-client video、encrypted mouse/keyboard/single-touch routing、LAN discovery、encrypted display metadata、client指定display/resolution/FPS/bitrate/keyframe設定、ScreenCaptureKit、VideoToolbox H.264、Annex B変換、bounded send backpressure metrics、permission diagnostics。
 - Rust tests、Android unit tests、Android debug build、`macos-14` 上の macOS SwiftPM host build 用 GitHub Actions CI。
 - GitHub Pages 用の静的 download site。setup command generator と original hero artwork 付き。
 
@@ -196,11 +198,15 @@ cargo run -p glyphray-encoder-diagnostics
 cargo run -p glyphray-host-diagnostics
 ```
 
+encoderはhardware-firstのAuto選択が標準です。`GLYPHRAY_ENCODER_BACKEND=hardware|intel|nvidia|amd|software`で検証対象を固定でき、`glyphray-encoder-diagnostics`は発見したMFTと実際に起動したbackendを表示します。現在のWindows test machineでは、release最適化したNVENCによる合成1280x720 keyframeのencodeが8.174msで、その後のpacketizeと完全再構成も成功しました。対話desktopでのDesktop DuplicationとAndroid実機への連続送信を含まないため、end-to-end latency値としてはまだ扱いません。
+
 Windows backend runtime:
 
 ```powershell
 cargo run -p glyphray-windows-host -- serve
 ```
+
+初回接続ではhost consoleに6桁one-time pairing codeが表示され、Androidに数字入力欄が開きます。deviceを承認する前にそのcodeを入力してください。次回以降のtrusted deviceはAndroid Keystore署名で認証され、code再入力は不要です。
 
 backend 起動中は host console で `encoder status`、`encoder override 1920x1080 120 35000`、`encoder save`、`encoder preset save studio-120`、`encoder preset apply studio-120`、`encoder preset delete studio-120`、`encoder clear` を使い、stream-control smoke test ができます。`encoder save` は active host override、または最新の approved client `EncoderConfig` を保存し、次回 backend startup 時に復元します。名前付き preset は default override と同じ設定ファイルに保存され、60fps / 120fps / bitrate 検証を素早く切り替えるために使えます。
 
@@ -258,12 +264,13 @@ macOS 13+ と Xcode がある環境で実行します。
 
 ```bash
 cd hosts/macos-host
-swift build
+swift test -c release
+swift build -c release
 ```
 
 Windows から開発している場合は、[ci.yml](.github/workflows/ci.yml) の `macOS host SwiftPM build` job が macOS host の推奨検証経路です。
 
-macOS host はまだ Phase 2/5 の基盤です。native pen injection の主戦場は Windows です。
+macOS hostにも暗号化Android session経路が入りましたが、macOS CIと物理Android端末での相互運用検証が必要です。native pen injection の主戦場は Windows です。
 
 ## 重要ドキュメント
 
@@ -300,19 +307,19 @@ Start-Process .\website\index.html
 - Rust tests と Android debug build は Windows 上で確認済みです。Android unit tests は JDK 17 で実行してください。
 - host router には pending peer spam と outbound backpressure 向けの in-memory DoS guard / console-visible health counters、opt-in native permission dialog、Android public key による signed challenge/response trusted-device authentication が入りました。
 - Windows capture はDXGI Desktop Duplicationへ移行済みです。現在のCodex automation sessionでは`DuplicateOutput`が拒否されるため、通常のinteractive Windows desktopでの連続captureとlock/unlock復旧検証は残っています。
-- Media Foundation H.264 access unitはapproved clientのVideo queueへ接続済みです。NVENC / Quick Sync / AMFの明示選択とAndroid実機での連続検証は残っています。
+- Media Foundation H.264 access unitはapproved clientのVideo queueへ接続済みで、hardware MFT選択とNVENC実動も確認済みです。Intel/AMD個別検証とAndroid実機での連続検証は残っています。
 - Android stylus packet は remote display surface から capture して UDP 送信できますが、本番 pairing / session handshake はさらに hardening が必要です。
 - permission dialog と trusted-device commands は最小の host-console 機能で、tray / settings UI ではまだありません。`GLYPHRAY_DEV_AUTO_APPROVE` は local smoke test 専用です。
-- macOS live capture は UDP control pairing listener、Keychain trusted-client persistence、signed returning-client challenge/response、LAN discovery advertisement、ScreenCaptureKit frame capture、VideoToolbox encode、GlyphRay Video-channel packetizer、manual UDP send probe、continuous UDP video stream start/stop path、bounded video send backpressure counter まで進みました。通常セッション経路にするには macOS CI / 実機検証、encrypted session transport、reconnect、session ownership の hardening がまだ必要です。
+- macOSはshared signed `GLYH` / AES-GCM `GLYE` sessionでcontrol、video、mouse、keyboard、single-touch pointerを保護し、鍵確認後のdisplay metadata送信、client video設定反映、secure target単位のstream ownershipまで進みました。macOS CI、物理Android検証、長時間reconnect/backpressure soak、multi-touch semanticsは残っています。
 - native inputは認証済み暗号sessionからのみ受理し、保存済み端末別pen/touch/keyboard/mouse/gamepad permissionを毎packet確認します。consoleでpermission編集ができ、tray/settings UIは今後の課題です。
-- gamepad packet は Windows で decode できますが、仮想 controller 注入には ViGEm / virtual HID backend がまだ必要です。
+- gamepad packet は Windows router から virtual gamepad bridge まで流れ、XInput形式に近い正規化reportへ変換されます。製品版には ViGEm / virtual HID のnative binding、署名済みdriver、実機検証がまだ必要です。
 - Windows Ink の pressure / tilt / hover は、実際の creative apps で検証が必要です。
 
 ## 次に進めること
 
 ```mermaid
 flowchart LR
-  A["macOS encrypted session"] --> B["物理Android相互運用"]
+  A["macOS CI / 実機検証"] --> B["物理Android相互運用"]
   B --> C["Native Windows Ink検証"]
   C --> D["Hardware encoder / 120fps soak"]
   D --> E["Tray settings UI"]
@@ -322,8 +329,8 @@ flowchart LR
 直近の開発フォーカス:
 
 - native permission dialog と trusted-device commands を tray / settings UI に載せる。
-- lightweight macOS pairing / discovery runtime を encrypted transport、reconnect、backpressure-aware stream ownership で固める。
+- macOS encrypted sessionをGitHub Actionsと物理Android端末で検証し、reconnect / backpressure の長時間soak testを行う。
 - Android stylus UDP packet を Windows native pen bridge まで通して LAN smoke test する。
 - Desktop Duplicationのaccess-loss復旧と、対応するinteractive Windows desktopで1080p60/120fps連続captureを検証する。
 - 物理Android端末に対する連続capture/encode/send/decodeを検証する。
-- hardware MFTの明示選択と、継続packet loss下のadaptive reconnectを検証する。
+- Intel/AMD hardware MFT、Android実機での連続1080p60 decode、継続packet loss下のadaptive reconnectを検証する。

@@ -1,3 +1,4 @@
+use crate::persistence::{atomic_write, quarantine_file};
 use glyphray_protocol::{ColorSpace, EncoderConfig, VideoCodec};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -82,6 +83,12 @@ pub struct HostSettingsStore {
     path: PathBuf,
 }
 
+#[derive(Debug)]
+pub struct HostSettingsLoad {
+    pub settings: HostSettings,
+    pub quarantined_path: Option<PathBuf>,
+}
+
 impl HostSettingsStore {
     pub fn open() -> Result<Self, HostSettingsError> {
         Self::open_at(default_settings_path())
@@ -102,8 +109,27 @@ impl HostSettingsStore {
         parse_settings(&std::fs::read_to_string(&self.path)?)
     }
 
+    pub fn load_or_recover(&self) -> Result<HostSettingsLoad, HostSettingsError> {
+        match self.load() {
+            Ok(settings) => Ok(HostSettingsLoad {
+                settings,
+                quarantined_path: None,
+            }),
+            Err(error) if recoverable_settings_error(&error) => {
+                let quarantined_path = quarantine_file(&self.path, "corrupt")?;
+                let settings = HostSettings::default();
+                self.save(&settings)?;
+                Ok(HostSettingsLoad {
+                    settings,
+                    quarantined_path,
+                })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn save(&self, settings: &HostSettings) -> Result<(), HostSettingsError> {
-        std::fs::write(&self.path, serialize_settings(settings))?;
+        atomic_write(&self.path, serialize_settings(settings).as_bytes())?;
         Ok(())
     }
 
@@ -203,6 +229,13 @@ impl HostSettingsStore {
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+fn recoverable_settings_error(error: &HostSettingsError) -> bool {
+    match error {
+        HostSettingsError::Parse(_) => true,
+        HostSettingsError::Io(error) => error.kind() == std::io::ErrorKind::InvalidData,
     }
 }
 
@@ -874,5 +907,33 @@ mod tests {
             .trusted_devices
             .is_empty());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn corrupt_settings_are_quarantined_and_replaced_with_defaults() {
+        let root = std::env::temp_dir().join(format!(
+            "glyphray-host-settings-recovery-{}",
+            std::process::id()
+        ));
+        let path = root.join("host-settings.conf");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(&path, b"encoder.width=broken\ntrusted_device.0.id=")
+            .expect("write corrupt settings");
+        let store = HostSettingsStore::open_at(&path).expect("open settings store");
+
+        let recovered = store.load_or_recover().expect("recover settings");
+        assert_eq!(recovered.settings, HostSettings::default());
+        let backup = recovered.quarantined_path.expect("quarantine path");
+        assert!(backup.exists());
+        assert_eq!(
+            store.load().expect("replacement settings"),
+            HostSettings::default()
+        );
+        assert_eq!(
+            std::fs::read(backup).expect("backup bytes"),
+            b"encoder.width=broken\ntrusted_device.0.id="
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

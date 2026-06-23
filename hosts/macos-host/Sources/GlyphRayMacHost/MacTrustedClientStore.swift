@@ -1,13 +1,18 @@
 import Foundation
 
 final class MacTrustedClientStore {
-    private let keychain: KeychainSecretStore
+    struct LoadResult {
+        let clients: [MacPairingClient]
+        let quarantinedAccount: String?
+    }
+
+    private let keychain: KeychainSecretStoring
     private let account: String
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(
-        keychain: KeychainSecretStore = KeychainSecretStore(),
+        keychain: KeychainSecretStoring = KeychainSecretStore(),
         account: String = "trusted-mac-clients-v1"
     ) {
         self.keychain = keychain
@@ -15,10 +20,24 @@ final class MacTrustedClientStore {
     }
 
     func load() throws -> [MacPairingClient] {
+        try loadOrRecover().clients
+    }
+
+    func loadOrRecover() throws -> LoadResult {
         guard let data = try keychain.load(account: account) else {
-            return []
+            return LoadResult(clients: [], quarantinedAccount: nil)
         }
-        return try decoder.decode([MacPairingClient].self, from: data)
+        do {
+            return LoadResult(
+                clients: try decoder.decode([MacPairingClient].self, from: data),
+                quarantinedAccount: nil
+            )
+        } catch {
+            let quarantine = macRecoveryAccount(for: account)
+            try keychain.save(data, account: quarantine)
+            try keychain.delete(account: account)
+            return LoadResult(clients: [], quarantinedAccount: quarantine)
+        }
     }
 
     func save(_ clients: [MacPairingClient]) throws {

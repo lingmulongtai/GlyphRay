@@ -5,7 +5,9 @@ use glyphray_protocol::{ColorSpace, VideoCodec};
 mod media_foundation;
 
 #[cfg(windows)]
-pub use media_foundation::MediaFoundationH264Encoder as PlatformVideoEncoder;
+pub use media_foundation::{
+    available_h264_hardware_encoders, MediaFoundationH264Encoder as PlatformVideoEncoder,
+};
 
 #[cfg(not(windows))]
 pub type PlatformVideoEncoder = PendingHardwareEncoder;
@@ -13,6 +15,7 @@ pub type PlatformVideoEncoder = PendingHardwareEncoder;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncoderBackend {
     Auto,
+    Hardware,
     IntelQuickSync,
     NvidiaNvenc,
     AmdAmf,
@@ -81,6 +84,7 @@ pub enum EncoderError {
 
 pub trait VideoEncoder {
     fn settings(&self) -> &EncoderSettings;
+    fn backend_name(&self) -> &str;
     fn start(&mut self) -> Result<(), EncoderError>;
     fn encode(&mut self, frame: &CapturedFrame) -> Result<EncodedVideoFrame, EncoderError>;
     fn request_keyframe(&mut self) -> Result<(), EncoderError>;
@@ -107,6 +111,10 @@ impl PendingHardwareEncoder {
 impl VideoEncoder for PendingHardwareEncoder {
     fn settings(&self) -> &EncoderSettings {
         &self.settings
+    }
+
+    fn backend_name(&self) -> &str {
+        "platform encoder placeholder"
     }
 
     fn start(&mut self) -> Result<(), EncoderError> {
@@ -142,6 +150,18 @@ impl VideoEncoder for PendingHardwareEncoder {
     }
 }
 
+pub fn parse_encoder_backend(value: &str) -> Option<EncoderBackend> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(EncoderBackend::Auto),
+        "hardware" | "gpu" => Some(EncoderBackend::Hardware),
+        "intel" | "qsv" | "quick-sync" | "quicksync" => Some(EncoderBackend::IntelQuickSync),
+        "nvidia" | "nvenc" => Some(EncoderBackend::NvidiaNvenc),
+        "amd" | "amf" => Some(EncoderBackend::AmdAmf),
+        "software" | "cpu" => Some(EncoderBackend::Software),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +190,16 @@ mod tests {
         assert_eq!(encoder.encode(&frame), Err(EncoderError::NotStarted));
         encoder.start().expect("start");
         assert_eq!(encoder.encode(&frame).expect("encode").sequence, 1);
+    }
+
+    #[test]
+    fn encoder_backend_parser_accepts_operator_friendly_names() {
+        assert_eq!(parse_encoder_backend("auto"), Some(EncoderBackend::Auto));
+        assert_eq!(
+            parse_encoder_backend("NVENC"),
+            Some(EncoderBackend::NvidiaNvenc)
+        );
+        assert_eq!(parse_encoder_backend("cpu"), Some(EncoderBackend::Software));
+        assert_eq!(parse_encoder_backend("unknown"), None);
     }
 }

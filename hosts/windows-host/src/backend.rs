@@ -1,8 +1,9 @@
 use crate::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
 use crate::config::HostConfig;
 use crate::input::{
-    InjectionReport, InputError, KeyboardInjector, KeyboardInputBridge, MouseInjector,
-    MouseInputBridge, PenInjector, StylusInputBridge, TouchInjector, TouchInputBridge,
+    GamepadInjector, GamepadInputBridge, InjectionReport, InputError, KeyboardInjector,
+    KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector, StylusInputBridge,
+    TouchInjector, TouchInputBridge,
 };
 use crate::secrets::HostIdentity;
 use crate::settings::TrustedDevicePermissions;
@@ -15,9 +16,10 @@ use glyphray_protocol::stylus_wire::{decode_stylus_batch, StylusWireError};
 use glyphray_protocol::{
     decode_frame, encode_frame, trusted_auth_challenge_payload, AuthChallenge, AuthResponse,
     DisplayDescriptor, DisplayInfo, EncoderConfig, GamepadInput, KeyboardInput, LatencyPing,
-    LatencyPong, Message, MessageKind, MouseInput, PairingResult, TouchInputBatch,
+    LatencyPong, Message, MessageKind, MouseInput, PairingChallenge, PairingResult,
+    TouchInputBatch,
 };
-use glyphray_security::{SecretBytes, SessionCipherPair};
+use glyphray_security::{verify_pairing_code_proof, PairingCode, SecretBytes, SessionCipherPair};
 use glyphray_transport::discovery::HostAdvertisement;
 use glyphray_transport::secure::SecureDatagramCodec;
 use glyphray_transport::udp::{decode_packet, encode_packet, ReceivedDatagram, UdpServer};
@@ -52,6 +54,10 @@ const OUTBOUND_QOS_SCHEDULE: [ChannelKind; 8] = [
 const LATE_INPUT_PACKET_REASON: &str = "late input packet";
 const TRUSTED_AUTH_CHALLENGE_TTL_MS: u64 = 30_000;
 const SESSION_KEY_EXCHANGE_TTL_MS: u64 = 30_000;
+const PAIRING_CODE_TTL_MS: u64 = 5 * 60_000;
+const PAIRING_CHALLENGE_TTL_MS: u64 = 2 * 60_000;
+const MAX_PAIRING_CODE_ATTEMPTS: u8 = 5;
+const PAIRING_ATTEMPT_WINDOW_MS: u64 = 2 * 60_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
@@ -86,6 +92,10 @@ pub struct ClientSession {
     pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
     pub pending_auth_challenge: Option<PendingAuthChallenge>,
+    pending_pairing_challenge: Option<PendingPairingChallenge>,
+    pairing_code_attempts: u8,
+    pairing_attempt_window_started_unix_ms: u64,
+    pairing_code_verified: bool,
     pending_key_exchange: Option<PendingKeyExchange>,
     secure_session: Option<ActiveSecureSession>,
     pub permission: PermissionState,
@@ -100,6 +110,12 @@ pub struct ClientSession {
 struct PendingKeyExchange {
     exchange: ServerKeyExchange,
     ephemeral_secret: EphemeralSecret,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingPairingChallenge {
+    salt: [u8; 32],
+    expires_at_unix_ms: u64,
 }
 
 struct ActiveSecureSession {
@@ -124,6 +140,7 @@ pub struct SessionSnapshot {
     pub device_public_key_der: Option<Vec<u8>>,
     pub device_public_key_fingerprint: Option<String>,
     pub has_pending_auth_challenge: bool,
+    pub pairing_code_verified: bool,
     pub has_pending_key_exchange: bool,
     pub secure: bool,
     pub permission: PermissionState,
@@ -139,6 +156,7 @@ pub struct BackendMetrics {
     pub received_packets: u64,
     pub queued_outbound_packets: u64,
     pub queued_video_packets: u64,
+    pub queued_audio_packets: u64,
     pub sent_outbound_packets: u64,
     pub backpressure_events: u64,
     pub pending_rate_limited_packets: u64,
@@ -202,6 +220,10 @@ impl SessionRegistry {
             device_public_key_der: None,
             device_public_key_fingerprint: None,
             pending_auth_challenge: None,
+            pending_pairing_challenge: None,
+            pairing_code_attempts: 0,
+            pairing_attempt_window_started_unix_ms: now_ms(),
+            pairing_code_verified: false,
             pending_key_exchange: None,
             secure_session: None,
             permission: PermissionState::Pending,
@@ -291,6 +313,7 @@ impl SessionRegistry {
                 device_public_key_der: session.device_public_key_der.clone(),
                 device_public_key_fingerprint: session.device_public_key_fingerprint.clone(),
                 has_pending_auth_challenge: session.pending_auth_challenge.is_some(),
+                pairing_code_verified: session.pairing_code_verified,
                 has_pending_key_exchange: session.pending_key_exchange.is_some(),
                 secure: session.secure_session.is_some(),
                 permission: session.permission,
@@ -409,6 +432,17 @@ pub enum BackendEvent {
         peer: SocketAddr,
         device_name: String,
         public_key_fingerprint: Option<String>,
+        code_verified: bool,
+    },
+    PairingCodeChallengeQueued {
+        peer: SocketAddr,
+        display_code: String,
+        expires_at_unix_ms: u64,
+    },
+    PairingCodeRejected {
+        peer: SocketAddr,
+        attempts_remaining: u8,
+        reason: String,
     },
     AuthChallengeQueued {
         peer: SocketAddr,
@@ -464,6 +498,11 @@ pub enum BackendEvent {
         controller_id: u32,
         buttons: u32,
     },
+    GamepadInjected {
+        peer: SocketAddr,
+        controller_id: u32,
+        connected: bool,
+    },
     PermissionRequired {
         peer: SocketAddr,
     },
@@ -493,6 +532,10 @@ pub enum BackendEvent {
         peers: usize,
         packets: usize,
     },
+    AudioFrameQueued {
+        peers: usize,
+        packets: usize,
+    },
     OutboundBackpressure {
         peer: SocketAddr,
         queued_packets: usize,
@@ -515,9 +558,12 @@ pub struct HostPacketRouter<I> {
     keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
     touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
     mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
+    gamepad_bridge: Option<GamepadInputBridge<Box<dyn GamepadInjector>>>,
     permission_policy: PermissionPolicy,
     next_outbound_sequence: u64,
     host_identity: HostIdentity,
+    pairing_code: PairingCode,
+    pairing_code_expires_at_unix_ms: u64,
 }
 
 #[derive(Debug, Default)]
@@ -549,7 +595,7 @@ where
         input_bridge: Option<StylusInputBridge<I>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
-        Self::new_with_input_bridges(input_bridge, None, None, None, permission_policy)
+        Self::new_with_input_bridges(input_bridge, None, None, None, None, permission_policy)
     }
 
     pub fn new_with_input_bridges(
@@ -557,6 +603,7 @@ where
         keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
         touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
         mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
+        gamepad_bridge: Option<GamepadInputBridge<Box<dyn GamepadInjector>>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
         Self {
@@ -565,9 +612,12 @@ where
             keyboard_bridge,
             touch_bridge,
             mouse_bridge,
+            gamepad_bridge,
             permission_policy,
             next_outbound_sequence: 1,
             host_identity: HostIdentity::generate(),
+            pairing_code: PairingCode::generate(),
+            pairing_code_expires_at_unix_ms: now_ms().saturating_add(PAIRING_CODE_TTL_MS),
         }
     }
 
@@ -695,6 +745,93 @@ where
                 payload,
             },
         ))
+    }
+
+    pub fn pairing_code_challenge_with_response(
+        &mut self,
+        peer: SocketAddr,
+    ) -> Result<(String, u64, TransportPacket), BackendError> {
+        let now = now_ms();
+        if now >= self.pairing_code_expires_at_unix_ms {
+            self.rotate_pairing_code();
+        }
+        let session = self.sessions.ensure_pending(peer);
+        refresh_pairing_attempt_window(session, now);
+        if session.pairing_code_attempts >= MAX_PAIRING_CODE_ATTEMPTS {
+            return Err(BackendError::Protocol(
+                "pairing code attempt limit reached".to_string(),
+            ));
+        }
+        let mut salt = [0_u8; 32];
+        OsRng.fill_bytes(&mut salt);
+        let expires_at_unix_ms = now
+            .saturating_add(PAIRING_CHALLENGE_TTL_MS)
+            .min(self.pairing_code_expires_at_unix_ms);
+        session.pending_pairing_challenge = Some(PendingPairingChallenge {
+            salt,
+            expires_at_unix_ms,
+        });
+        session.pairing_code_verified = false;
+
+        let message = Message::PairingChallenge(PairingChallenge {
+            salt,
+            expires_at_unix_ms,
+            code_digits: 6,
+        });
+        let payload = encode_frame(self.next_outbound_sequence, &message)
+            .map_err(|error| BackendError::Protocol(error.to_string()))?;
+        let sequence = self.next_outbound_sequence;
+        self.next_outbound_sequence = self.next_outbound_sequence.saturating_add(1);
+        Ok((
+            self.pairing_code.display().to_string(),
+            expires_at_unix_ms,
+            TransportPacket {
+                sequence,
+                channel: ChannelKind::Control,
+                message_kind: MessageKind::PairingChallenge,
+                enqueue_timestamp_us: now_us(),
+                payload,
+            },
+        ))
+    }
+
+    fn verify_pairing_code_for_peer(
+        &mut self,
+        peer: SocketAddr,
+        proof: &[u8],
+    ) -> Result<(), String> {
+        let now = now_ms();
+        let session = self.sessions.ensure_pending(peer);
+        refresh_pairing_attempt_window(session, now);
+        if session.pairing_code_attempts >= MAX_PAIRING_CODE_ATTEMPTS {
+            return Err("pairing code attempt limit reached".to_string());
+        }
+        session.pairing_code_verified = false;
+        let Some(challenge) = session.pending_pairing_challenge.take() else {
+            session.pairing_code_attempts = session.pairing_code_attempts.saturating_add(1);
+            return Err("pairing code challenge was not requested".to_string());
+        };
+        if now > challenge.expires_at_unix_ms || now > self.pairing_code_expires_at_unix_ms {
+            session.pairing_code_attempts = session.pairing_code_attempts.saturating_add(1);
+            return Err("pairing code expired".to_string());
+        }
+        if verify_pairing_code_proof(&self.pairing_code, &challenge.salt, proof).is_err() {
+            session.pairing_code_attempts = session.pairing_code_attempts.saturating_add(1);
+            return Err("pairing code did not match".to_string());
+        }
+
+        session.pairing_code_attempts = 0;
+        session.pairing_code_verified = true;
+        self.rotate_pairing_code();
+        Ok(())
+    }
+
+    fn rotate_pairing_code(&mut self) {
+        self.pairing_code = PairingCode::generate();
+        self.pairing_code_expires_at_unix_ms = now_ms().saturating_add(PAIRING_CODE_TTL_MS);
+        for session in self.sessions.sessions.values_mut() {
+            session.pending_pairing_challenge = None;
+        }
     }
 
     pub fn reject_peer_with_response(
@@ -861,6 +998,7 @@ where
                     "pairing payload did not contain PairingRequest".to_string(),
                 ));
             };
+            let pairing_code_proof = request.pairing_code_hash;
             let public_key_der = if request.one_time_public_key.is_empty() {
                 None
             } else {
@@ -871,12 +1009,13 @@ where
             session.device_public_key_der = public_key_der;
             session.device_public_key_fingerprint = public_key_fingerprint.clone();
             session.pending_auth_challenge = None;
-            outcome.events.push(BackendEvent::PairingRequested {
-                peer,
-                device_name: request.device_name,
-                public_key_fingerprint: public_key_fingerprint.clone(),
-            });
             if self.permission_policy == PermissionPolicy::DevAutoApprove {
+                outcome.events.push(BackendEvent::PairingRequested {
+                    peer,
+                    device_name: request.device_name,
+                    public_key_fingerprint: public_key_fingerprint.clone(),
+                    code_verified: true,
+                });
                 let device_id = public_key_fingerprint
                     .as_deref()
                     .map(trusted_device_id_from_public_key_fingerprint)
@@ -903,6 +1042,41 @@ where
                     peer,
                     accepted: true,
                 });
+                return Ok(outcome);
+            }
+
+            if pairing_code_proof.is_empty() {
+                outcome.events.push(BackendEvent::PairingRequested {
+                    peer,
+                    device_name: request.device_name,
+                    public_key_fingerprint,
+                    code_verified: false,
+                });
+                return Ok(outcome);
+            }
+
+            match self.verify_pairing_code_for_peer(peer, &pairing_code_proof) {
+                Ok(()) => outcome.events.push(BackendEvent::PairingRequested {
+                    peer,
+                    device_name: request.device_name,
+                    public_key_fingerprint,
+                    code_verified: true,
+                }),
+                Err(reason) => {
+                    let attempts = self.sessions.ensure_pending(peer).pairing_code_attempts;
+                    let attempts_remaining = MAX_PAIRING_CODE_ATTEMPTS.saturating_sub(attempts);
+                    let response = self.build_pairing_result(false, None, Some(reason.clone()))?;
+                    outcome.outbound.push((peer, response));
+                    outcome.events.push(BackendEvent::PairingCodeRejected {
+                        peer,
+                        attempts_remaining,
+                        reason,
+                    });
+                    outcome.events.push(BackendEvent::PairingResultQueued {
+                        peer,
+                        accepted: false,
+                    });
+                }
             }
             return Ok(outcome);
         }
@@ -1133,6 +1307,14 @@ where
                     controller_id: gamepad.controller_id,
                     buttons: gamepad.buttons,
                 });
+                if let Some(bridge) = self.gamepad_bridge.as_mut() {
+                    bridge.inject_remote_gamepad(&gamepad)?;
+                    outcome.events.push(BackendEvent::GamepadInjected {
+                        peer,
+                        controller_id: gamepad.controller_id,
+                        connected: gamepad.connected,
+                    });
+                }
             }
             _ => outcome.events.push(BackendEvent::PacketRouted {
                 peer,
@@ -1221,7 +1403,15 @@ where
         input_bridge: Option<StylusInputBridge<I>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
-        Self::new_with_input_bridges(config, input_bridge, None, None, None, permission_policy)
+        Self::new_with_input_bridges(
+            config,
+            input_bridge,
+            None,
+            None,
+            None,
+            None,
+            permission_policy,
+        )
     }
 
     pub fn new_with_input_bridges(
@@ -1230,6 +1420,7 @@ where
         keyboard_bridge: Option<KeyboardInputBridge<Box<dyn KeyboardInjector>>>,
         touch_bridge: Option<TouchInputBridge<Box<dyn TouchInjector>>>,
         mouse_bridge: Option<MouseInputBridge<Box<dyn MouseInjector>>>,
+        gamepad_bridge: Option<GamepadInputBridge<Box<dyn GamepadInjector>>>,
         permission_policy: PermissionPolicy,
     ) -> Self {
         let advertisement = HostAdvertisement {
@@ -1251,6 +1442,7 @@ where
                 keyboard_bridge,
                 touch_bridge,
                 mouse_bridge,
+                gamepad_bridge,
                 permission_policy,
             ),
             outbound: OutboundPacketQueues::default(),
@@ -1354,6 +1546,29 @@ where
             peer,
             challenge_id,
         }])
+    }
+
+    pub fn issue_pairing_code_challenge(
+        &mut self,
+        server: &mut UdpServer,
+        peer: SocketAddr,
+    ) -> Result<Vec<BackendEvent>, BackendError> {
+        let (display_code, expires_at_unix_ms, response) =
+            self.router.pairing_code_challenge_with_response(peer)?;
+        server.send_to(&response, peer)?;
+        Ok(vec![BackendEvent::PairingCodeChallengeQueued {
+            peer,
+            display_code,
+            expires_at_unix_ms,
+        }])
+    }
+
+    pub fn is_pairing_code_verified(&self, peer: SocketAddr) -> bool {
+        self.router
+            .sessions
+            .sessions
+            .get(&peer)
+            .is_some_and(|session| session.pairing_code_verified)
     }
 
     pub fn reject_peer_and_notify(
@@ -1509,6 +1724,34 @@ where
         self.metrics.queued_outbound_packets += queued as u64;
         self.metrics.queued_video_packets += queued as u64;
         vec![BackendEvent::VideoFrameQueued {
+            peers: peers.len(),
+            packets: queued,
+        }]
+    }
+
+    pub fn queue_audio_packets_for_approved_peers(
+        &mut self,
+        packets: Vec<TransportPacket>,
+    ) -> Vec<BackendEvent> {
+        if packets.is_empty() {
+            return Vec::new();
+        }
+
+        let peers = self.router.sessions.secure_peers();
+        if peers.is_empty() {
+            return Vec::new();
+        }
+
+        let packet_count = packets.len();
+        for peer in &peers {
+            for packet in &packets {
+                self.outbound.push((*peer, packet.clone()));
+            }
+        }
+        let queued = peers.len() * packet_count;
+        self.metrics.queued_outbound_packets += queued as u64;
+        self.metrics.queued_audio_packets += queued as u64;
+        vec![BackendEvent::AudioFrameQueued {
             peers: peers.len(),
             packets: queued,
         }]
@@ -1694,6 +1937,15 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
 }
 
+fn refresh_pairing_attempt_window(session: &mut ClientSession, now_ms: u64) {
+    if now_ms.saturating_sub(session.pairing_attempt_window_started_unix_ms)
+        >= PAIRING_ATTEMPT_WINDOW_MS
+    {
+        session.pairing_code_attempts = 0;
+        session.pairing_attempt_window_started_unix_ms = now_ms;
+    }
+}
+
 fn new_auth_challenge() -> AuthChallenge {
     let mut nonce = [0_u8; 32];
     OsRng.fill_bytes(&mut nonce);
@@ -1856,8 +2108,8 @@ fn decode_gamepad_input(payload: &[u8]) -> Result<GamepadInput, BackendError> {
 mod tests {
     use super::*;
     use crate::input::{
-        KeyboardInjectionReport, KeyboardInjector, MouseInjectionReport, MouseInjector,
-        PenInjector, TouchInjectionReport, TouchInjector,
+        GamepadInjectionReport, GamepadInjector, KeyboardInjectionReport, KeyboardInjector,
+        MouseInjectionReport, MouseInjector, PenInjector, TouchInjectionReport, TouchInjector,
     };
     use glyphray_core::{CoordinateMapper, DisplayRect, MappingMode, PressureMapper, SourceRect};
     use glyphray_protocol::session_wire::{
@@ -1926,6 +2178,21 @@ mod tests {
             _mapper: &CoordinateMapper,
         ) -> Result<MouseInjectionReport, InputError> {
             Ok(MouseInjectionReport { injected_events: 1 })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingGamepadInjector;
+
+    impl GamepadInjector for RecordingGamepadInjector {
+        fn inject_gamepad(
+            &mut self,
+            input: &GamepadInput,
+        ) -> Result<GamepadInjectionReport, InputError> {
+            Ok(GamepadInjectionReport {
+                updated_controllers: usize::from(input.connected),
+                disconnected_controllers: usize::from(!input.connected),
+            })
         }
     }
 
@@ -2033,7 +2300,7 @@ mod tests {
         let peer: SocketAddr = "127.0.0.1:50002".parse().expect("peer");
         let message = Message::PairingRequest(PairingRequest {
             device_name: "Galaxy Tab".to_string(),
-            pairing_code_hash: vec![1, 2, 3],
+            pairing_code_hash: vec![],
             one_time_public_key: vec![4, 5, 6],
         });
         let packet = TransportPacket {
@@ -2050,7 +2317,75 @@ mod tests {
             peer,
             device_name: "Galaxy Tab".to_string(),
             public_key_fingerprint: Some(expected_fingerprint),
+            code_verified: false,
         }));
+    }
+
+    #[test]
+    fn one_time_pairing_code_unlocks_manual_approval_once() {
+        let mut router = HostPacketRouter::<RecordingInjector>::new(None);
+        let peer: SocketAddr = "127.0.0.1:50022".parse().expect("peer");
+        let (display_code, _, challenge_packet) = router
+            .pairing_code_challenge_with_response(peer)
+            .expect("challenge");
+        let challenge_frame = decode_frame(&challenge_packet.payload).expect("decode challenge");
+        let Message::PairingChallenge(challenge) = challenge_frame.message else {
+            panic!("expected pairing challenge");
+        };
+        let proof =
+            glyphray_security::pairing_code_proof(&display_code, &challenge.salt).expect("proof");
+        let message = Message::PairingRequest(PairingRequest {
+            device_name: "Galaxy Tab".to_string(),
+            pairing_code_hash: proof.clone(),
+            one_time_public_key: vec![4, 5, 6],
+        });
+        let packet = TransportPacket {
+            sequence: 2,
+            channel: ChannelKind::Control,
+            message_kind: MessageKind::PairingRequest,
+            enqueue_timestamp_us: 0,
+            payload: encode_frame(2, &message).expect("encode"),
+        };
+
+        let outcome = router.route_packet(peer, packet).expect("route proof");
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            BackendEvent::PairingRequested {
+                peer: event_peer,
+                code_verified: true,
+                ..
+            } if *event_peer == peer
+        )));
+        assert!(
+            router
+                .sessions
+                .sessions
+                .get(&peer)
+                .expect("session")
+                .pairing_code_verified
+        );
+
+        let replay = Message::PairingRequest(PairingRequest {
+            device_name: "Galaxy Tab".to_string(),
+            pairing_code_hash: proof,
+            one_time_public_key: vec![4, 5, 6],
+        });
+        let replay_outcome = router
+            .route_packet(
+                peer,
+                TransportPacket {
+                    sequence: 3,
+                    channel: ChannelKind::Control,
+                    message_kind: MessageKind::PairingRequest,
+                    enqueue_timestamp_us: 0,
+                    payload: encode_frame(3, &replay).expect("encode replay"),
+                },
+            )
+            .expect("route replay");
+        assert!(replay_outcome.events.iter().any(|event| matches!(
+            event,
+            BackendEvent::PairingCodeRejected { peer: event_peer, .. } if *event_peer == peer
+        )));
     }
 
     #[test]
@@ -2361,6 +2696,7 @@ mod tests {
             Some(keyboard_bridge),
             None,
             None,
+            None,
             PermissionPolicy::RequireApproval,
         );
         let peer: SocketAddr = "127.0.0.1:50007".parse().expect("peer");
@@ -2405,6 +2741,7 @@ mod tests {
             None,
             Some(touch_bridge),
             None,
+            None,
             PermissionPolicy::RequireApproval,
         );
         let peer: SocketAddr = "127.0.0.1:50008".parse().expect("peer");
@@ -2434,6 +2771,7 @@ mod tests {
             None,
             None,
             Some(mouse_bridge),
+            None,
             PermissionPolicy::RequireApproval,
         );
         let peer: SocketAddr = "127.0.0.1:50009".parse().expect("peer");
@@ -2489,6 +2827,48 @@ mod tests {
             peer,
             controller_id: 7,
             buttons: 0b11,
+        }));
+    }
+
+    #[test]
+    fn approved_peer_gamepad_packet_can_be_injected() {
+        let gamepad_bridge =
+            GamepadInputBridge::new(Box::new(RecordingGamepadInjector) as Box<dyn GamepadInjector>);
+        let mut router = HostPacketRouter::<RecordingInjector>::new_with_input_bridges(
+            None,
+            None,
+            None,
+            None,
+            Some(gamepad_bridge),
+            PermissionPolicy::RequireApproval,
+        );
+        let peer: SocketAddr = "127.0.0.1:50011".parse().expect("peer");
+        router.approve_peer(peer, "gamepad");
+        let message = Message::GamepadInput(GamepadInput {
+            sequence: 1,
+            timestamp_us: 22,
+            controller_id: 7,
+            connected: true,
+            buttons: 0b11,
+            left_trigger: 0.0,
+            right_trigger: 1.0,
+            left_stick_x: 0.2,
+            left_stick_y: -0.3,
+            right_stick_x: 0.4,
+            right_stick_y: -0.5,
+        });
+
+        let outcome = router
+            .route_packet(
+                peer,
+                framed_input_packet(MessageKind::GamepadInput, message),
+            )
+            .expect("route");
+
+        assert!(outcome.events.contains(&BackendEvent::GamepadInjected {
+            peer,
+            controller_id: 7,
+            connected: true,
         }));
     }
 
@@ -2583,6 +2963,35 @@ mod tests {
         );
         assert_eq!(snapshot.outbound.video, 2);
         assert_eq!(snapshot.metrics.queued_video_packets, 2);
+    }
+
+    #[test]
+    fn runtime_queues_audio_packets_for_secure_peers_only() {
+        let mut runtime = HostBackendRuntime::<RecordingInjector>::new(HostConfig::default(), None);
+        let approved: SocketAddr = "127.0.0.1:53006".parse().expect("peer");
+        let pending: SocketAddr = "127.0.0.1:53007".parse().expect("peer");
+        complete_secure_handshake(&mut runtime.router, approved);
+        runtime
+            .router
+            .route_packet(pending, input_packet(vec![1, 2, 3]))
+            .expect("route");
+
+        let events = runtime.queue_audio_packets_for_approved_peers(vec![packet_with_channel(
+            12,
+            ChannelKind::Audio,
+        )]);
+        let snapshot = runtime.health_snapshot();
+
+        assert_eq!(
+            events,
+            vec![BackendEvent::AudioFrameQueued {
+                peers: 1,
+                packets: 1,
+            }]
+        );
+        assert_eq!(snapshot.outbound.audio, 1);
+        assert_eq!(snapshot.outbound.video, 0);
+        assert_eq!(snapshot.metrics.queued_audio_packets, 1);
     }
 
     fn complete_secure_handshake(

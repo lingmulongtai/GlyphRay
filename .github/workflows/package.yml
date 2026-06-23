@@ -42,6 +42,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Test macOS host
+        working-directory: hosts/macos-host
+        run: swift test -c release
       - name: Build ad-hoc signed app and pkg
         run: bash tools/packaging/macos/build-pkg.sh
       - name: Verify package

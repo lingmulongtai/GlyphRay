@@ -28,10 +28,10 @@ final class HostStatusModel: ObservableObject {
     @Published var discoveryStatus: String = "Discovery advertiser idle"
     @Published var encoderStatus: String = "Encoder idle"
     @Published var keychainStatus: String = "Keychain idle"
-    @Published var udpTargetHost: String = MacUdpSendTarget.localPreview.host
-    @Published var udpTargetPort: String = "\(MacUdpSendTarget.localPreview.port)"
     @Published var controlPort: String = "44999"
     @Published var approvedClients: [MacPairingClient] = []
+    @Published var secureTargets: [MacUdpSendTarget] = []
+    @Published var pairingCode: String?
     @Published var permissions = MacPermissionSnapshot(
         screenRecording: "unknown",
         accessibility: "unknown",
@@ -39,6 +39,7 @@ final class HostStatusModel: ObservableObject {
         inputMonitoring: "manual review"
     )
     @Published var displays: [MacDisplayDescriptor] = []
+    private var latestVideoPreference: MacClientVideoPreference?
 
     init() {
         controlRuntime.onSnapshot = { [weak self] snapshot in
@@ -137,54 +138,35 @@ final class HostStatusModel: ObservableObject {
         }
     }
 
-    func startUdpSendProbe() {
-        guard let port = UInt16(udpTargetPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            liveCaptureStatus = "UDP send unavailable: invalid target port"
-            return
-        }
-
-        let target = MacUdpSendTarget(
-            host: udpTargetHost.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: port
-        )
-        liveCaptureStatus = "Starting capture -> encode -> UDP send probe..."
-        Task {
-            do {
-                let result = try await liveCaptureController.startFirstDisplayUdpSendProbe(to: target)
-                liveCaptureStatus = "Sent \(result.sentDatagrams)/\(result.packetizedDatagrams) datagram(s), \(result.sentBytes) bytes to \(result.target.host):\(result.target.port)"
-            } catch {
-                liveCaptureStatus = "UDP send unavailable: \(error)"
-            }
-        }
-    }
-
-    func startUdpStream() {
-        guard let port = UInt16(udpTargetPort.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            liveCaptureStatus = "UDP stream unavailable: invalid target port"
-            return
-        }
-
-        let target = MacUdpSendTarget(
-            host: udpTargetHost.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: port
-        )
-        startUdpStream(to: target, source: "manual target")
-    }
-
     func startApprovedUdpStream() {
-        guard let target = approvedClients.first?.target else {
-            liveCaptureStatus = "Approved stream unavailable: no trusted client endpoint"
+        guard let target = controlRuntime.preferredSecureTarget() else {
+            liveCaptureStatus = "Approved stream unavailable: no encrypted trusted client endpoint"
             return
         }
-        startUdpStream(to: target, source: "approved client")
+        startUdpStream(
+            to: target,
+            source: "encrypted approved client",
+            transformDatagram: { [controlRuntime = self.controlRuntime] datagram in
+                try controlRuntime.sealVideoDatagram(datagram, for: target)
+            }
+        )
     }
 
-    private func startUdpStream(to target: MacUdpSendTarget, source: String) {
+    private func startUdpStream(
+        to target: MacUdpSendTarget,
+        source: String,
+        transformDatagram: @escaping (Data) throws -> Data
+    ) {
         liveCaptureStatus = "Starting continuous UDP video stream..."
         Task {
             do {
-                let result = try await liveCaptureController.startFirstDisplayUdpStream(to: target)
-                liveCaptureStatus = "Streaming \(source) display \(result.displayID) at \(result.width)x\(result.height) to \(result.target.host):\(result.target.port) · backlog cap high \(result.highWatermarkDatagrams)"
+                let result = try await liveCaptureController.startFirstDisplayUdpStream(
+                    to: target,
+                    preference: latestVideoPreference,
+                    transformDatagram: transformDatagram
+                )
+                let backpressure = result.backpressureLimited ? " · backpressure limited" : ""
+                liveCaptureStatus = "Streaming \(source) display \(result.displayID) at \(result.width)x\(result.height) to \(result.target.host):\(result.target.port) · stream \(result.streamID.uuidString.prefix(8)) · high \(result.highWatermarkDatagrams) · reconnects \(result.reconnectCount)\(backpressure)"
             } catch {
                 liveCaptureStatus = "UDP stream unavailable: \(error)"
             }
@@ -243,11 +225,11 @@ final class HostStatusModel: ObservableObject {
 
     private func applyControlSnapshot(_ snapshot: MacControlRuntimeSnapshot) {
         approvedClients = snapshot.acceptedClients
-        controlStatus = "\(snapshot.lastEvent) · requests \(snapshot.pairingRequestsReceived) · clients \(snapshot.acceptedClients.count) · auth \(snapshot.pendingAuthChallenges)"
-        if let target = snapshot.lastApprovedTarget {
-            udpTargetHost = target.host
-            udpTargetPort = "\(target.port)"
-        }
+        secureTargets = snapshot.secureTargets
+        pairingCode = snapshot.pairingCode
+        latestVideoPreference = snapshot.lastVideoPreference
+        let hostKey = snapshot.hostIdentityFingerprint.map { String($0.prefix(12)) } ?? "unavailable"
+        controlStatus = "\(snapshot.lastEvent) · requests \(snapshot.pairingRequestsReceived) · clients \(snapshot.acceptedClients.count) · secure \(snapshot.secureClients) · streamable \(snapshot.secureTargets.count) · input M\(snapshot.mouseEventsInjected)/K\(snapshot.keyboardEventsInjected)/T\(snapshot.touchBatchesInjected) · auth \(snapshot.pendingAuthChallenges) · key \(hostKey)"
     }
 
     private func applyDiscoverySnapshot(_ snapshot: MacDiscoverySnapshot) {
@@ -269,6 +251,17 @@ struct ContentView: View {
             Label(model.captureStatus, systemImage: "display")
             Label(model.liveCaptureStatus, systemImage: "dot.radiowaves.left.and.right")
             Label(model.controlStatus, systemImage: "network")
+            if let pairingCode = model.pairingCode {
+                HStack {
+                    Label("Pairing code", systemImage: "number.square")
+                    Spacer()
+                    Text(pairingCode)
+                        .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                .padding(10)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            }
             Label(model.discoveryStatus, systemImage: "antenna.radiowaves.left.and.right")
             Label(model.encoderStatus, systemImage: "video")
             Label(model.keychainStatus, systemImage: "key")
@@ -281,12 +274,6 @@ struct ContentView: View {
                 TextField("Control port", text: $model.controlPort)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 100)
-                TextField("UDP target host", text: $model.udpTargetHost)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
-                TextField("Port", text: $model.udpTargetPort)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 82)
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -329,14 +316,8 @@ struct ContentView: View {
                     Button("Clear Trust") {
                         model.clearTrustedClients()
                     }
-                    Button("UDP Send Probe") {
-                        model.startUdpSendProbe()
-                    }
                     Button("Start Approved Stream") {
                         model.startApprovedUdpStream()
-                    }
-                    Button("Start UDP Stream") {
-                        model.startUdpStream()
                     }
                     Button("Stop Stream") {
                         model.stopUdpStream()
@@ -357,7 +338,8 @@ struct ContentView: View {
             if !model.approvedClients.isEmpty {
                 Divider()
                 ForEach(model.approvedClients) { client in
-                    Text("\(client.deviceName) · \(client.target.host):\(client.target.port) · \(client.id) · key \(client.publicKeyStatusLabel)")
+                    let secure = model.secureTargets.contains(client.target) ? "encrypted" : "trusted"
+                    Text("\(client.deviceName) · \(client.target.host):\(client.target.port) · \(secure) · \(client.id) · key \(client.publicKeyStatusLabel)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

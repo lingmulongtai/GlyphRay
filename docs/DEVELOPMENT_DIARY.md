@@ -1,5 +1,83 @@
 # GlyphRay Development Diary
 
+## 2026-06-23 JST - Windows Host Audio Packet Path And Secure Queueing
+
+今日はAndroid側に開いたAudioFrame再生口へ、Windows hostから安全に流し込むためのhost側pipelineを追加した。`hosts/windows-host/src/audio.rs`に`AudioCapture` trait、`CapturedAudioFrame`、format validation、`WindowsWasapiAudioCapture`境界を作り、`streaming.rs`には`AudioPacketPipeline`を追加した。captureされたPCM16 frameはsample rate / channel countを検証し、`crates/audio::AudioPacketizer`で`AudioFrame`へ包み、`GLYR` protocol frame化してから`GLYT` Audio-channel `TransportPacket`になる。
+
+backend runtimeにも`queue_audio_packets_for_approved_peers`を追加した。Videoと同じくsecure sessionが成立したapproved peerだけにqueueし、pending peerには送らない。health snapshotにはaudio queue depthが既にあり、今回から`queued_audio_packets` metricも増えた。これでWASAPI workerが実装できた時に、capture -> AudioFrame -> encrypted Audio channel -> Android AudioTrackまでを既存の安全境界に沿って接続できる。
+
+WASAPI loopback capture本体はまだ未接続で、`WindowsWasapiAudioCapture`は明示的なunavailable errorを返す。これは曖昧なfake captureではなく、実OS captureを差し込むための境界である。新規testではfake captureからAudioFrame payloadを復元し、runtimeがsecure peerだけへaudio packetをqueueすることを確認した。
+
+検証は`cargo test -p glyphray-windows-host --lib`を実行し、61件成功。続けて全workspaceのfmt、clippy、test、Android buildを回す。
+
+現在の実装進捗は95%、製品release準備は82%。残るaudio gateはWindows WASAPI loopback本体、macOS audio capture、Opus encode/decode、clock drift correction、実Androidでの長時間同期検証である。
+
+## 2026-06-23 JST - Android AudioFrame Decode And Low-Latency Playback Foundation
+
+今日はMilestone 5で残っていたaudioの穴を、Android client側から前へ進めた。protocolの`AudioFrame`をKotlin decoderへ追加し、Audio channelで届いたencrypted transport packetを`GLYR` frameとしてdecodeして、PCM16 mono/stereoのpayloadを低遅延`AudioTrack`へ流す`RemoteAudioStreamController`を実装した。`AudioTrack`はsample rate / channel countが変わった時だけ作り直し、端末依存で生成に失敗してもsession全体を落とさず、切断時には明示的にreleaseする。
+
+Session stateにはaudio packet数、queued byte数、last sequenceを追加し、videoと同じreceiver loopからAudio channelを処理するようにした。制御チャンネルへ誤って`AudioFrame`が来た場合は明示的に無視する。Kotlin unit testにはRust bincode enum layoutと同じ`AudioFrame` payloadを手で組み、`TransportMessageKind.audioFrame`から正しくdecodeできることを足した。
+
+検証では`./gradlew.bat :apps:android-client:testDebugUnitTest --no-daemon`と`./gradlew.bat :apps:android-client:assembleDebug --no-daemon`を直列実行して成功した。並列Gradle実行ではKotlin incremental cacheのdaemon警告が出たが、daemon停止後の単独実行では再現しなかったため、CIではAndroid jobを直列に保つ。
+
+現在の実装進捗は95%、製品release準備は81%。残るaudio gateはWindows/macOS host側の実音声capture、Opus encode/decode、audio/video clock drift correction、実Androidでの長時間再生検証である。
+
+## 2026-06-23 JST - Windows Virtual Gamepad Bridge Boundary
+
+今日はAndroid-connected controllerをWindows側で使うための未完了項目を進めた。これまではAndroidが`GamepadInput`を送り、Windows backendがdecodeしてconsole eventに出すところまでだった。今回は`GamepadInjector` trait、`GamepadInputBridge`、`GamepadInjectionReport`を追加し、HostPacketRouterのpermission-gated input pathからgamepad bridgeへ流すようにした。これでtrusted-deviceのgamepad permissionがoffならdecode前に落ち、onならdecode後に仮想controller注入層へ届く。
+
+bridgeはtriggerを0..1、stickを-1..1へclampしてからbackendへ渡す。Windows側には`win32_gamepad.rs`を追加し、XInput-style reportへ正規化する境界を用意した。AndroidのY軸とWindows controller reportの向きが逆になるため、left/right thumbのvertical axisはここで反転する。テストではclamp、trigger変換、axis反転、routerから`GamepadInjected` eventまでを確認した。
+
+実際にWindowsへXbox controllerとして見せるにはViGEmまたはsigned virtual HID driverのnative bindingが必要なので、標準起動では安全にunavailableを返す。`GLYPHRAY_GAMEPAD_BACKEND=vigem`を入口として用意し、未リンク状態では明示的な説明を出す。つまり今日の到達点は「decode-only」ではなく「注入pipelineとdriver境界まで実装済み、production driver bindingと署名・実機検証が残り」である。
+
+検証は`cargo check -p glyphray-windows-host --all-targets`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`が成功。実装進捗は94%のまま、製品release準備は80%に更新した。残る大きなgateはViGEm/virtual HID binding、macOS CI/実機、Android実機の連続video/pen latency、署名済みinstallerとstore配布である。
+
+## 2026-06-23 JST - macOS Secure Stream Ownership And Reconnect Hygiene
+
+今日はmacOS hostの「暗号化できているが、実機検証時に操作を間違えると危ない」部分を詰めた。SwiftUIの`Start Approved Stream`は、単にapproved listの先頭へ送るのではなく、control runtimeが保持しているactive secure sessionを持つtargetだけを選ぶようにした。最後にkey confirmが通ったclientを優先し、無ければsecureなtrusted clientへfallbackする。trustedだが現在暗号sessionが無いendpointへ動画を送る経路は閉じた。
+
+`MacLiveCaptureController`にはstream id、active target、reconnect countを追加した。別のsecure clientへstreamを開始する場合は、既存の`SCStream`、VideoToolbox encoder、UDP publisherを止めてから新しいstreamを作る。これで古いpublisherが残って別clientへvideo datagramを送り続ける状態を避けられる。停止結果と開始結果にはstream id、high watermark、in-flight datagram、backpressure limited flagを載せ、UIにも短いstream idとreconnect countを表示する。
+
+control connectionがfailed/cancelledになった時は、そのendpointのpending auth、pairing challenge、key exchange、secure session、input sequenceをまとめて落とすようにした。これにより切断後の古いsecure codecへvideoをsealし続ける失敗を検出しやすくなる。macOS documentとREADME、GitHub Pagesの進捗も更新し、実装進捗は94%、製品release準備は79%にした。
+
+この変更はWindows環境でSwiftを実行できないため、`macos-14` GitHub Actionsの`swift test -c release`で実コンパイルを確認する必要がある。残るmacOS gateは、実Androidとの物理pairing、長時間stream、reconnect/backpressure soak、Screen Recording/Accessibility権限を含む手動検証である。
+
+## 2026-06-23 JST - Salted One-Time Pairing Across Windows, Android, And macOS
+
+今日はrelease security gateに残っていた初回trustを実装した。protocolには以前から`PairingRequest.pairing_code_hash`があったが、Androidは常に空を送り、hostは検証していなかった。単純にcode hashを入れるだけではLANで見た値を再送できるので、既存bincode variantを動かさずenum末尾へ`PairingChallenge`を追加した。hostはpeerごとの32-byte random salt、有効期限、6桁指定を返し、Androidはhost画面に出たcodeを入力して`HMAC-SHA256(salt, "GlyphRay pairing proof v1" || digits)`だけを返す。code本体はnetworkへ出ない。
+
+Windows hostでは未登録端末の最初のrequestをpermission dialogへ通さず、proof成功後だけconsole `approve`とnative dialogを解放する。challengeは2分、表示codeは5分で期限切れになり、成功した瞬間にrotateして他peerのpending challengeも無効化する。5回失敗すると2分cooldownになる。既存のtrusted public keyが一致する端末はcode入力を繰り返さず、従来のECDSA `AuthChallenge` / `AuthResponse`で本人性を確認する。development auto-approveだけは明示的なlocal smoke-test bypassとして残した。
+
+Androidはmessage kind 23 / bincode variant 20をdecodeし、Session画面にchallenge受信時だけ数字keyboardの入力欄を表示する。6桁になるまで送信buttonは無効で、失敗や期限切れ後は新challengeを要求できる。Rust/Kotlinは同じsalt/codeから`f9b2...d280`になる固定vectorを持ち、Android unit testとdebug APK buildまで通した。macOS hostにも同じchallenge、HMAC、期限、試行制限、成功rotationを実装し、SwiftUIにはpending時だけmonospacedのcodeを表示する。Swiftにも同じ固定vector testを追加し、macOS Actionsの`swift test -c release`で検証する。
+
+回帰確認では`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all -- --check`を通した。Androidはdebug unit testsに加えてrelease APK、Play Store向けAAB、`lintRelease`まで成功し、GitHub ActionsのYAMLもlint済みである。Windows環境ではSwiftを実行できないため、macOSの新規testだけは引き続き`macos-14` Actionsの必須gateとする。
+
+現在の実装進捗は93%、製品release準備は78%。このsecurity項目の残りは、物理Androidと両hostを使ったexpiry/cooldown、packet capture、active LAN attacker試験と、任意のQR表示UXである。
+
+## 2026-06-23 JST - Hardware H.264, Recoverable Host State, And Release Regression Pass
+
+今日はWindows hostの「動くが製品運用にはまだ怖い」部分をまとめて固めた。host settingsとDPAPI identityは同一directoryのtemporary fileへ書いてflushし、Windowsのwrite-through atomic replaceで更新する。破損した設定やidentityは消さずに一意な名前へquarantineし、defaultまたは新identityを作る。identityが変わった場合は既存clientの再承認が必要だと起動時に明示する。macOSもKeychainをdelete-then-addせず`SecItemUpdate`する形へ変え、壊れたhost identity / trusted-client JSONを別accountへ退避してから復旧するtestを追加した。
+
+ログもrelease向けの境界を作った。Windowsのlocal event logは固定schemaだけを受け付け、1 MiBでrotationし、panic payloadやraw keyboard event、secretを記録しない。host console側に残っていたkeyboard decoded/injectedの通常出力も止めた。これは「後からredactionする」のではなく、機密値をlogger APIへ渡せない構造にした。
+
+映像ではMedia Foundationのsoftware固定を外し、H.264 hardware MFTを列挙してIntel Quick Sync、NVIDIA NVENC、AMD AMF、generic hardwareへ分類するようにした。hardware MFTの`NeedInput` / `HaveOutput`非同期eventを処理し、`GLYPHRAY_ENCODER_BACKEND`でAutoまたはvendorを強制できる。Autoは起動できない候補を順に飛ばし、実行中のdriver/MFT errorでもMicrosoft software encoderをkeyframeから再構築する。診断CLIは候補と実選択名を表示する。このWindowsではAMD候補2件とNVIDIA候補1件を検出し、AutoでNVENCを選択、release buildで合成1280x720 keyframeを8.174msでAnnex Bへencodeし、7個のUDP datagramへ分割・再構成してCRC一致まで確認した。自動化desktopではDesktop Duplicationがaccess deniedのため、この値はend-to-endではない。
+
+全体回帰では最初にDPAPI testの一時directoryが並列test間で衝突する問題も拾い、process idだけでなくatomic連番を加えた。その後`cargo clippy --workspace --all-targets -- -D warnings`と`cargo test --workspace`は成功。Androidもdebug unit tests、release APK、release AAB、release lintが成功した。SwiftはWindowsで実行できないため、macOS SwiftPM testはGitHub Actionsの必須gateに残している。
+
+現在の実装進捗は92%、製品release準備は76%。残る大きなgateはinteractive Windowsと実Androidでの連続1080p60/pen遅延検証、Intel/AMD encoder検証、署名済みinstaller/store配布、macOS物理相互運用、audio、virtual gamepad、relayである。
+
+## 2026-06-22 JST - Encrypted macOS Session, Native Input Routing, And Client Video Control
+
+今日はWindows/Androidで完成していたsecure session境界をmacOS hostへ移植した。macOSはKeychainに永続P-256 host signing identityを持ち、pairingまたはreturning-device認証後に署名付き`GLYH` ephemeral ECDH offerを送る。Androidのsigned confirmをCryptoKitで検証し、Rust/Kotlinと同じtranscriptからdirection別AES-256-GCM keyを導出する。全`GLYT` datagramを`GLYE`へ封入し、4096 counterのreplay windowでduplicateと古いpacketを拒否する。固定key derivation vectorと双方向handshake/replay testもSwiftPMへ追加し、macOS CI/package/release workflowはbuild前に`swift test -c release`を必須にした。
+
+映像経路からmanual plaintext senderとtarget UIを外し、approved clientのsecure codecを必須transformとして`MacUdpVideoPublisher`へ渡す形にした。暗号sessionが無ければstream開始できず、latency pongも平文fallbackしない。鍵確認直後にはCoreGraphicsのactive displayをshared bincode `DisplayInfo`で暗号送信する。Androidの`EncoderConfig`からdisplay id、resolution、FPS、bitrate、keyframe intervalをScreenCaptureKit / VideoToolboxへ反映し、現在未対応のH.265/AV1要求は明示的に拒否する。
+
+入力も土台だけだったCGEventをlive Input channelへ接続した。暗号化済みmouse/keyboard/touch packetだけを受け、Kotlinと同じbincode layoutでdecodeし、古いinput sequenceをdropする。Bluetooth mouseは移動、左右/中央button、wheel、Bluetooth keyboardは主要Windows virtual keyとAndroid modifierをmacOS keycode/flagsへ変換する。macOSのpublic APIではWindows同等のnative synthetic multi-touchを作れないため、single finger touchはpointer down/drag/upとして注入し、制限を明記した。
+
+このWindows環境にはSwift toolchainがないため、Swiftの実コンパイルは`macos-14` GitHub Actions gateで確認する。ここでの静的整合確認とworkflow YAML lintは完了しているが、macOS CI結果と物理Android相互運用は次のrelease gateとして残す。
+
+現在の実装進捗は91%、製品release準備は74%。
+
 ## 2026-06-22 JST - Encrypted Windows/Android Live Session And Enforced Device Permissions
 
 今日はsecurity foundationを実際のWindows/Android sessionへ接続した。Windows hostはDPAPIで永続化したP-256 identityを持ち、承認後に署名付きephemeral ECDH offerを送る。Androidはhost署名を検証し、host idごとにidentity fingerprintをpinし、Android Keystore identityでclient ephemeral keyを署名する。両側はhandshake transcriptからhost-to-client / client-to-hostの別々のAES-256-GCM鍵を導出し、control、video、stylus、touch、keyboard、mouse、gamepadの`GLYT` datagram全体を`GLYE`へ封入するようになった。

@@ -7,6 +7,8 @@ import android.view.MotionEvent
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.CRC32
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 private const val frameHeaderLength = 24
 private const val protocolVersion: Short = 1
@@ -45,6 +47,20 @@ sealed interface ControlProtocolMessage {
         val reason: String?,
     ) : ControlProtocolMessage
 
+    data class PairingChallenge(
+        val salt: ByteArray,
+        val expiresAtUnixMs: Long,
+        val codeDigits: Int,
+    ) : ControlProtocolMessage {
+        override fun equals(other: Any?): Boolean =
+            other is PairingChallenge &&
+                salt.contentEquals(other.salt) &&
+                expiresAtUnixMs == other.expiresAtUnixMs &&
+                codeDigits == other.codeDigits
+
+        override fun hashCode(): Int = 31 * (31 * salt.contentHashCode() + expiresAtUnixMs.hashCode()) + codeDigits
+    }
+
     data class LatencyPong(
         val sequence: Long,
         val clientSendTimestampUs: Long,
@@ -55,6 +71,31 @@ sealed interface ControlProtocolMessage {
     data class DisplayInfo(
         val displays: List<RemoteDisplayDescriptor>,
     ) : ControlProtocolMessage
+
+    data class AudioFrame(
+        val sequence: Long,
+        val captureTimestampUs: Long,
+        val sampleRate: Int,
+        val channels: Int,
+        val payload: ByteArray,
+    ) : ControlProtocolMessage {
+        override fun equals(other: Any?): Boolean =
+            other is AudioFrame &&
+                sequence == other.sequence &&
+                captureTimestampUs == other.captureTimestampUs &&
+                sampleRate == other.sampleRate &&
+                channels == other.channels &&
+                payload.contentEquals(other.payload)
+
+        override fun hashCode(): Int {
+            var result = sequence.hashCode()
+            result = 31 * result + captureTimestampUs.hashCode()
+            result = 31 * result + sampleRate
+            result = 31 * result + channels
+            result = 31 * result + payload.contentHashCode()
+            return result
+        }
+    }
 }
 
 data class RemoteDisplayDescriptor(
@@ -290,7 +331,9 @@ object ProtocolFrameCodec {
             TransportMessageKind.authChallenge -> BincodeMessageEncoder.decodeAuthChallenge(payload)
             TransportMessageKind.pairingResult -> BincodeMessageEncoder.decodePairingResult(payload)
             TransportMessageKind.displayInfo -> BincodeMessageEncoder.decodeDisplayInfo(payload)
+            TransportMessageKind.audioFrame -> BincodeMessageEncoder.decodeAudioFrame(payload)
             TransportMessageKind.latencyPong -> BincodeMessageEncoder.decodeLatencyPong(payload)
+            TransportMessageKind.pairingChallenge -> BincodeMessageEncoder.decodePairingChallenge(payload)
             else -> error("Unsupported control protocol message kind: $messageKind")
         }
         return DecodedProtocolFrame(sequence = sequence, messageKind = messageKind, message = message)
@@ -304,12 +347,14 @@ private object BincodeMessageEncoder {
     private const val pairingResultVariant = 5
     private const val displayInfoVariant = 6
     private const val encoderConfigVariant = 7
+    private const val audioFrameVariant = 9
     private const val mouseInputVariant = 11
     private const val keyboardInputVariant = 12
     private const val latencyPingVariant = 14
     private const val latencyPongVariant = 15
     private const val touchInputBatchVariant = 18
     private const val gamepadInputVariant = 19
+    private const val pairingChallengeVariant = 20
 
     fun pairingRequest(
         deviceName: String,
@@ -483,6 +528,19 @@ private object BincodeMessageEncoder {
         )
     }
 
+    fun decodePairingChallenge(payload: ByteArray): ControlProtocolMessage.PairingChallenge {
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val variant = buffer.int
+        require(variant == pairingChallengeVariant) { "Payload did not contain PairingChallenge" }
+        val salt = ByteArray(32)
+        buffer.get(salt)
+        val expiresAtUnixMs = buffer.long
+        val codeDigits = buffer.get().toInt() and 0xff
+        require(codeDigits == 6) { "Unsupported pairing code length: $codeDigits" }
+        require(!buffer.hasRemaining()) { "PairingChallenge contained trailing bytes" }
+        return ControlProtocolMessage.PairingChallenge(salt, expiresAtUnixMs, codeDigits)
+    }
+
     fun decodeAuthChallenge(payload: ByteArray): ControlProtocolMessage.AuthChallenge {
         val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
         val variant = buffer.int
@@ -523,6 +581,27 @@ private object BincodeMessageEncoder {
         return ControlProtocolMessage.DisplayInfo(displays)
     }
 
+    fun decodeAudioFrame(payload: ByteArray): ControlProtocolMessage.AudioFrame {
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val variant = buffer.int
+        require(variant == audioFrameVariant) { "Payload did not contain AudioFrame" }
+        val sequence = buffer.long
+        val captureTimestampUs = buffer.long
+        val sampleRate = buffer.int
+        val channels = buffer.get().toInt() and 0xff
+        val audioPayload = buffer.readBincodeBytes(maxLength = 256 * 1024)
+        require(sampleRate in 8_000..192_000) { "Unsupported audio sample rate: $sampleRate" }
+        require(channels in 1..2) { "Unsupported audio channel count: $channels" }
+        require(!buffer.hasRemaining()) { "AudioFrame contained trailing bytes" }
+        return ControlProtocolMessage.AudioFrame(
+            sequence = sequence,
+            captureTimestampUs = captureTimestampUs,
+            sampleRate = sampleRate,
+            channels = channels,
+            payload = audioPayload,
+        )
+    }
+
     private fun ByteBuffer.putBincodeBytes(bytes: ByteArray): ByteBuffer {
         putLong(bytes.size.toLong())
         put(bytes)
@@ -538,11 +617,18 @@ private object BincodeMessageEncoder {
     }
 
     private fun ByteBuffer.readBincodeString(): String {
+        val bytes = readBincodeBytes()
+        return bytes.toString(Charsets.UTF_8)
+    }
+
+    private fun ByteBuffer.readBincodeBytes(maxLength: Int = remaining()): ByteArray {
         val length = long
-        require(length >= 0 && length <= remaining()) { "Invalid bincode string length: $length" }
+        require(length >= 0 && length <= remaining() && length <= maxLength) {
+            "Invalid bincode byte length: $length"
+        }
         val bytes = ByteArray(length.toInt())
         get(bytes)
-        return bytes.toString(Charsets.UTF_8)
+        return bytes
     }
 
     private fun ByteBuffer.readDisplayDescriptor(): RemoteDisplayDescriptor {
@@ -558,6 +644,20 @@ private object BincodeMessageEncoder {
             refreshHz = float,
             primary = get().toInt() != 0,
         )
+    }
+}
+
+object PairingCodeProof {
+    private val domain = "GlyphRay pairing proof v1".toByteArray(Charsets.UTF_8)
+
+    fun create(code: String, salt: ByteArray): ByteArray {
+        require(salt.size == 32) { "Pairing challenge salt must be 32 bytes" }
+        val canonical = code.filter(Char::isDigit)
+        require(canonical.length == 6) { "Pairing code must contain six digits" }
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(salt, "HmacSHA256"))
+        mac.update(domain)
+        return mac.doFinal(canonical.toByteArray(Charsets.US_ASCII))
     }
 }
 

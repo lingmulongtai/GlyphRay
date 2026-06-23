@@ -3,12 +3,13 @@ use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 use zeroize::Zeroize;
 
 type HmacSha256 = Hmac<Sha256>;
+const PAIRING_PROOF_DOMAIN: &[u8] = b"GlyphRay pairing proof v1";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecurityError {
@@ -84,11 +85,42 @@ impl PairingCode {
     }
 
     pub fn hash_for_transport(&self, salt: &[u8]) -> Vec<u8> {
-        let mut hasher = Sha256::new();
-        hasher.update(salt);
-        hasher.update(self.0.as_bytes());
-        hasher.finalize().to_vec()
+        self.proof(salt)
     }
+
+    pub fn proof(&self, salt: &[u8]) -> Vec<u8> {
+        pairing_code_proof(&self.0, salt).expect("generated pairing codes are valid")
+    }
+}
+
+pub fn pairing_code_proof(code: &str, salt: &[u8]) -> Result<Vec<u8>, SecurityError> {
+    let canonical = canonical_pairing_code(code).ok_or(SecurityError::InvalidPairingCode)?;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(salt).expect("HMAC accepts any key length");
+    mac.update(PAIRING_PROOF_DOMAIN);
+    mac.update(canonical.as_bytes());
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+pub fn verify_pairing_code_proof(
+    code: &PairingCode,
+    salt: &[u8],
+    proof: &[u8],
+) -> Result<(), SecurityError> {
+    let canonical =
+        canonical_pairing_code(code.display()).ok_or(SecurityError::InvalidPairingCode)?;
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(salt).expect("HMAC accepts any key length");
+    mac.update(PAIRING_PROOF_DOMAIN);
+    mac.update(canonical.as_bytes());
+    mac.verify_slice(proof)
+        .map_err(|_| SecurityError::InvalidPairingCode)
+}
+
+fn canonical_pairing_code(code: &str) -> Option<String> {
+    let digits: String = code
+        .chars()
+        .filter(|character| character.is_ascii_digit())
+        .collect();
+    (digits.len() == 6).then_some(digits)
 }
 
 pub struct PairingRateLimiter {
@@ -528,5 +560,26 @@ mod tests {
         let mut guard = ReplayGuard::new(4);
         guard.accept(10).expect("first");
         assert!(matches!(guard.accept(6), Err(SecurityError::Replay)));
+    }
+
+    #[test]
+    fn pairing_proof_accepts_formatted_or_plain_code_and_rejects_other_salt() {
+        let code = PairingCode::from_digits_for_test(123456);
+        let salt: [u8; 32] = std::array::from_fn(|index| index as u8);
+        let proof = pairing_code_proof("123 456", &salt).expect("proof");
+        assert_eq!(
+            hex_lower(&proof),
+            "f9b2e23be7a5543d2f02ce8063bf94df5c74485737dee573cc8bd3802d29d280"
+        );
+        verify_pairing_code_proof(&code, &salt, &proof).expect("verify");
+        assert_eq!(proof, code.proof(&salt));
+        assert!(matches!(
+            verify_pairing_code_proof(&code, &[8_u8; 32], &proof),
+            Err(SecurityError::InvalidPairingCode)
+        ));
+        assert!(matches!(
+            pairing_code_proof("12345", &salt),
+            Err(SecurityError::InvalidPairingCode)
+        ));
     }
 }

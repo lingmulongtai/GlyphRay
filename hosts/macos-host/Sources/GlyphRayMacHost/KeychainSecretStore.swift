@@ -21,7 +21,13 @@ enum MacKeychainError: Error, CustomStringConvertible {
     }
 }
 
-final class KeychainSecretStore {
+protocol KeychainSecretStoring {
+    func save(_ data: Data, account: String) throws
+    func load(account: String) throws -> Data?
+    func delete(account: String) throws
+}
+
+final class KeychainSecretStore: KeychainSecretStoring {
     private let service: String
 
     init(service: String = "com.glyphray.host") {
@@ -30,7 +36,19 @@ final class KeychainSecretStore {
 
     func save(_ data: Data, account: String) throws {
         #if canImport(Security)
-        try deleteIfPresent(account: account)
+        let query = baseQuery(account: account)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return
+        }
+        guard updateStatus == errSecItemNotFound else {
+            throw MacKeychainError.operationFailed(updateStatus)
+        }
+
         var query = baseQuery(account: account)
         query[kSecValueData as String] = data
         query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -68,17 +86,6 @@ final class KeychainSecretStore {
     }
 
     func delete(account: String) throws {
-        #if canImport(Security)
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw MacKeychainError.operationFailed(status)
-        }
-        #else
-        throw MacKeychainError.frameworkUnavailable
-        #endif
-    }
-
-    private func deleteIfPresent(account: String) throws {
         #if canImport(Security)
         let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {

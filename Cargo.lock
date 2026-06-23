@@ -345,6 +345,7 @@ name = "glyphray-windows-host"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "glyphray-audio",
  "glyphray-core",
  "glyphray-protocol",
  "glyphray-security",

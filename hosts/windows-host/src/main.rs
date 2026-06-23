@@ -9,16 +9,20 @@ use glyphray_windows_host::backend::{
     PermissionPolicy, PermissionState,
 };
 use glyphray_windows_host::capture::{ScreenCapture, WindowsGraphicsCaptureBackend};
-use glyphray_windows_host::encoder::{EncoderSettings, PlatformVideoEncoder};
+use glyphray_windows_host::encoder::{
+    parse_encoder_backend, EncoderSettings, PlatformVideoEncoder,
+};
 use glyphray_windows_host::input::{
-    create_keyboard_injector, create_mouse_injector, create_pen_injector, create_touch_injector,
-    KeyboardInjector, KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector,
-    StylusInputBridge, TouchInjector, TouchInputBridge,
+    create_gamepad_injector, create_keyboard_injector, create_mouse_injector, create_pen_injector,
+    create_touch_injector, GamepadInjector, GamepadInputBridge, KeyboardInjector,
+    KeyboardInputBridge, MouseInjector, MouseInputBridge, PenInjector, StylusInputBridge,
+    TouchInjector, TouchInputBridge,
 };
 use glyphray_windows_host::permission_ui::{
     permission_dialog_enabled, prompt_pairing_decision, PairingDecision, PairingPrompt,
 };
-use glyphray_windows_host::secrets::{load_or_create_host_identity, PlatformSecretStore};
+use glyphray_windows_host::redacted_log::{RecoveredState, RedactedEventLog, RedactedLogEvent};
+use glyphray_windows_host::secrets::{load_or_recover_host_identity, PlatformSecretStore};
 use glyphray_windows_host::settings::{
     EncoderPreset, HostSettingsStore, TrustedDevice, TrustedDevicePermissions,
 };
@@ -33,6 +37,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let mut redacted_log = RedactedEventLog::open_default().ok();
+    if let Some(log) = redacted_log.as_mut() {
+        log.install_panic_hook();
+        let _ = log.append(RedactedLogEvent::HostStarted);
+    }
     let config = HostConfig::default();
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
@@ -86,6 +95,7 @@ fn run_startup_command(action: Option<&str>) -> Result<(), Box<dyn Error>> {
 }
 
 fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
+    let mut redacted_log = RedactedEventLog::open_default().ok();
     let control_addr = SocketAddr::V4(SocketAddrV4::new(
         Ipv4Addr::UNSPECIFIED,
         config.control_port,
@@ -96,6 +106,7 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
     let keyboard_bridge = create_runtime_keyboard_bridge();
     let touch_bridge = create_runtime_touch_bridge(&config);
     let mouse_bridge = create_runtime_mouse_bridge(&config);
+    let gamepad_bridge = create_runtime_gamepad_bridge();
     let permission_policy = if std::env::var_os("GLYPHRAY_DEV_AUTO_APPROVE").is_some() {
         println!("Development auto-approval is enabled for incoming LAN clients.");
         PermissionPolicy::DevAutoApprove
@@ -108,17 +119,42 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
         keyboard_bridge,
         touch_bridge,
         mouse_bridge,
+        gamepad_bridge,
         permission_policy,
     );
     let mut secret_store = PlatformSecretStore::open()?;
-    let host_identity = load_or_create_host_identity(&mut secret_store)?;
+    let identity_load = load_or_recover_host_identity(&mut secret_store)?;
+    if let Some(path) = identity_load.quarantined_path.as_ref() {
+        if let Some(log) = redacted_log.as_mut() {
+            let _ = log.append(RedactedLogEvent::StateRecovered(
+                RecoveredState::HostIdentity,
+            ));
+        }
+        eprintln!(
+            "SECURITY WARNING: the unreadable host identity was quarantined at {}. A new identity was generated, so clients must verify and approve the changed host fingerprint.",
+            path.display()
+        );
+    }
+    let host_identity = identity_load.identity;
     println!(
         "Host identity fingerprint: {}",
         host_identity.fingerprint()?
     );
     runtime.set_host_identity(host_identity);
     let settings_store = HostSettingsStore::open()?;
-    let mut host_encoder_override = settings_store.load()?.encoder_override;
+    let settings_load = settings_store.load_or_recover()?;
+    if let Some(path) = settings_load.quarantined_path.as_ref() {
+        if let Some(log) = redacted_log.as_mut() {
+            let _ = log.append(RedactedLogEvent::StateRecovered(
+                RecoveredState::HostSettings,
+            ));
+        }
+        eprintln!(
+            "SECURITY WARNING: corrupted host settings were quarantined at {}. Trusted devices and encoder overrides were reset.",
+            path.display()
+        );
+    }
+    let mut host_encoder_override = settings_load.settings.encoder_override;
     if let Some(config) = host_encoder_override.as_ref() {
         println!(
             "Loaded saved encoder override: {}x{} {}fps {}kbps {:?} {:?}",
@@ -223,7 +259,6 @@ fn run_backend(config: HostConfig) -> Result<(), Box<dyn Error>> {
 
 struct RuntimeVideoPump {
     pipeline: VideoPacketPipeline<WindowsGraphicsCaptureBackend, PlatformVideoEncoder>,
-    settings: EncoderSettings,
     display_id: u32,
     frame_interval: Duration,
     source: &'static str,
@@ -234,6 +269,14 @@ impl RuntimeVideoPump {
         &mut self,
     ) -> Result<Vec<TransportPacket>, glyphray_windows_host::streaming::StreamError> {
         self.pipeline.capture_encode_packetize()
+    }
+
+    fn settings(&self) -> &EncoderSettings {
+        self.pipeline.encoder_settings()
+    }
+
+    fn backend_name(&self) -> &str {
+        self.pipeline.encoder_backend_name()
     }
 }
 
@@ -275,15 +318,17 @@ fn create_runtime_video_pump(
     );
     match pump.start() {
         Ok(()) => {
+            let selected_settings = pump.encoder_settings().clone();
+            let backend_name = pump.encoder_backend_name().to_string();
             println!(
-                "Video stream pump is enabled for display {} ({}x{}) at {}fps, {}kbps, {:?}, {:?}. Source={}. Encoder={:?}.",
+                "Video stream pump is enabled for display {} ({}x{}) at {}fps, {}kbps, {:?}, {:?}. Source={}. Encoder={:?} ({}).",
                 display.id,
                 display.width_px,
                 display.height_px,
-                pump_settings.fps,
-                pump_settings.target_bitrate_kbps,
-                pump_settings.codec,
-                pump_settings.color_space,
+                selected_settings.fps,
+                selected_settings.target_bitrate_kbps,
+                selected_settings.codec,
+                selected_settings.color_space,
                 if host_override.is_some() {
                     "host override"
                 } else if requested_config.is_some() {
@@ -291,11 +336,11 @@ fn create_runtime_video_pump(
                 } else {
                     "default"
                 },
-                pump_settings.backend
+                selected_settings.backend,
+                backend_name
             );
             Some(RuntimeVideoPump {
                 pipeline: pump,
-                settings: pump_settings,
                 display_id: display.id,
                 frame_interval,
                 source: if host_override.is_some() {
@@ -341,29 +386,40 @@ fn encoder_settings_for_display(
     display: &DisplayDescriptor,
     requested: Option<&EncoderConfig>,
 ) -> EncoderSettings {
-    let Some(config) = requested else {
-        return EncoderSettings::low_latency_h264(display.width_px, display.height_px, 60);
+    let mut settings = if let Some(config) = requested {
+        let mut settings = EncoderSettings::low_latency_h264(
+            display.width_px,
+            display.height_px,
+            config.max_fps.clamp(30, 120),
+        );
+        settings.codec = config.codec;
+        settings.color_space = config.color_space;
+        settings.target_bitrate_kbps = config.target_bitrate_kbps.clamp(4_000, 120_000);
+        settings.keyframe_interval_ms = config.keyframe_interval_ms.clamp(250, 10_000);
+        settings.allow_b_frames = !config.low_latency;
+
+        if config.width == display.width_px && config.height == display.height_px {
+            settings.width = config.width;
+            settings.height = config.height;
+        } else {
+            println!(
+                "Requested encoder resolution {}x{} differs from captured display {}x{}. Using display-native capture until scaler support lands.",
+                config.width, config.height, display.width_px, display.height_px
+            );
+        }
+        settings
+    } else {
+        EncoderSettings::low_latency_h264(display.width_px, display.height_px, 60)
     };
 
-    let mut settings = EncoderSettings::low_latency_h264(
-        display.width_px,
-        display.height_px,
-        config.max_fps.clamp(30, 120),
-    );
-    settings.codec = config.codec;
-    settings.color_space = config.color_space;
-    settings.target_bitrate_kbps = config.target_bitrate_kbps.clamp(4_000, 120_000);
-    settings.keyframe_interval_ms = config.keyframe_interval_ms.clamp(250, 10_000);
-    settings.allow_b_frames = !config.low_latency;
-
-    if config.width == display.width_px && config.height == display.height_px {
-        settings.width = config.width;
-        settings.height = config.height;
-    } else {
-        println!(
-            "Requested encoder resolution {}x{} differs from captured display {}x{}. Using display-native capture until scaler support lands.",
-            config.width, config.height, display.width_px, display.height_px
-        );
+    if let Ok(value) = std::env::var("GLYPHRAY_ENCODER_BACKEND") {
+        if let Some(backend) = parse_encoder_backend(&value) {
+            settings.backend = backend;
+        } else {
+            println!(
+                "Ignoring invalid GLYPHRAY_ENCODER_BACKEND={value:?}; expected auto, hardware, intel, nvidia, amd, or software."
+            );
+        }
     }
 
     settings
@@ -431,6 +487,27 @@ fn create_runtime_mouse_bridge(
     let mapper = mapper_for_default_display(config);
     println!("Native mouse injection is enabled with default-display coordinate mapping.");
     Some(MouseInputBridge::new(injector, mapper))
+}
+
+fn create_runtime_gamepad_bridge() -> Option<GamepadInputBridge<Box<dyn GamepadInjector>>> {
+    if std::env::var_os("GLYPHRAY_DISABLE_GAMEPAD_INJECTION").is_some() {
+        println!("Virtual gamepad injection is disabled by GLYPHRAY_DISABLE_GAMEPAD_INJECTION.");
+        return None;
+    }
+
+    let injector = match create_gamepad_injector() {
+        Ok(injector) => injector,
+        Err(err) => {
+            println!("Virtual gamepad injector unavailable: {err}");
+            println!(
+                "Install a supported virtual controller driver and set GLYPHRAY_GAMEPAD_BACKEND=vigem when the native binding is available."
+            );
+            return None;
+        }
+    };
+
+    println!("Virtual gamepad injection is enabled for approved clients.");
+    Some(GamepadInputBridge::new(injector))
 }
 
 fn temporary_mapper() -> CoordinateMapper {
@@ -562,9 +639,12 @@ impl PermissionDialogCoordinator {
         use glyphray_windows_host::backend::BackendEvent;
         match event {
             BackendEvent::PairingRequested {
-                peer, device_name, ..
+                peer,
+                device_name,
+                code_verified,
+                ..
             } => {
-                if !self.enabled || !self.active_prompts.insert(*peer) {
+                if !code_verified || !self.enabled || !self.active_prompts.insert(*peer) {
                     return;
                 }
 
@@ -719,6 +799,10 @@ fn drain_console_commands(
     while let Ok(command) = commands.try_recv() {
         match command {
             HostCommand::Approve(peer) => {
+                if !runtime.is_pairing_code_verified(peer) {
+                    println!("Cannot approve {peer} until its one-time pairing code is verified.");
+                    continue;
+                }
                 events.extend(approve_peer_and_record_trust(
                     runtime,
                     server,
@@ -742,6 +826,12 @@ fn drain_console_commands(
                 }
                 match decision {
                     PairingDecision::Approve => {
+                        if !runtime.is_pairing_code_verified(peer) {
+                            println!(
+                                "Ignoring permission approval for {peer}; its pairing code is not verified."
+                            );
+                            continue;
+                        }
                         events.extend(approve_peer_and_record_trust(
                             runtime,
                             server,
@@ -994,7 +1084,8 @@ fn maybe_challenge_trusted_pairing(
 ) -> Result<Option<Vec<glyphray_windows_host::backend::BackendEvent>>, Box<dyn Error>> {
     let glyphray_windows_host::backend::BackendEvent::PairingRequested {
         peer,
-        public_key_fingerprint: Some(fingerprint),
+        public_key_fingerprint,
+        code_verified: false,
         ..
     } = event
     else {
@@ -1002,11 +1093,14 @@ fn maybe_challenge_trusted_pairing(
     };
 
     let settings = settings_store.load()?;
-    let Some(device) = settings.trusted_devices.iter().find(|device| {
-        device.public_key_fingerprint.as_deref() == Some(fingerprint.as_str())
-            && device.public_key_der.is_some()
-    }) else {
-        return Ok(None);
+    let trusted_device = public_key_fingerprint.as_ref().and_then(|fingerprint| {
+        settings.trusted_devices.iter().find(|device| {
+            device.public_key_fingerprint.as_deref() == Some(fingerprint.as_str())
+                && device.public_key_der.is_some()
+        })
+    });
+    let Some(device) = trusted_device else {
+        return Ok(Some(runtime.issue_pairing_code_challenge(server, *peer)?));
     };
 
     println!(
@@ -1226,15 +1320,17 @@ fn print_encoder_status(
 
     match pump {
         Some(pump) => println!(
-            "encoder pump=active display={} source={} effective={}x{} {}fps {}kbps {:?} {:?}",
+            "encoder pump=active display={} source={} effective={}x{} {}fps {}kbps {:?} {:?} backend={:?} name={}",
             pump.display_id,
             pump.source,
-            pump.settings.width,
-            pump.settings.height,
-            pump.settings.fps,
-            pump.settings.target_bitrate_kbps,
-            pump.settings.codec,
-            pump.settings.color_space
+            pump.settings().width,
+            pump.settings().height,
+            pump.settings().fps,
+            pump.settings().target_bitrate_kbps,
+            pump.settings().codec,
+            pump.settings().color_space,
+            pump.settings().backend,
+            pump.backend_name()
         ),
         None => println!("encoder pump=inactive"),
     }
@@ -1268,12 +1364,36 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
             peer,
             device_name,
             public_key_fingerprint,
+            code_verified,
         } => {
             println!("Pairing requested from {device_name} at {peer}.");
             if let Some(fingerprint) = public_key_fingerprint {
                 println!("Device public key fingerprint: {fingerprint}");
             }
-            println!("Type `approve {peer}` to trust it or `reject {peer}` to deny it.");
+            if *code_verified {
+                println!("One-time pairing code verified.");
+                println!("Type `approve {peer}` to trust it or `reject {peer}` to deny it.");
+            } else {
+                println!("Waiting for one-time pairing-code verification before approval.");
+            }
+        }
+        BackendEvent::PairingCodeChallengeQueued {
+            peer,
+            display_code,
+            expires_at_unix_ms,
+        } => {
+            println!(
+                "Pairing code for {peer}: {display_code} (expires at unix_ms={expires_at_unix_ms})"
+            );
+        }
+        BackendEvent::PairingCodeRejected {
+            peer,
+            attempts_remaining,
+            reason,
+        } => {
+            println!(
+                "Pairing code rejected for {peer}: {reason}; attempts_remaining={attempts_remaining}"
+            );
         }
         BackendEvent::PairingResultQueued { peer, accepted } => {
             println!("PairingResult queued for {peer}: accepted={accepted}");
@@ -1303,20 +1423,7 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
         } => {
             println!("Encoder config from {peer}: {width}x{height} {max_fps}fps {target_bitrate_kbps}kbps");
         }
-        BackendEvent::KeyboardDecoded {
-            peer,
-            virtual_key,
-            pressed,
-        } => {
-            println!("Keyboard input from {peer}: vk={virtual_key} pressed={pressed}");
-        }
-        BackendEvent::KeyboardInjected {
-            peer,
-            virtual_key,
-            pressed,
-        } => {
-            println!("Keyboard injected for {peer}: vk={virtual_key} pressed={pressed}");
-        }
+        BackendEvent::KeyboardDecoded { .. } | BackendEvent::KeyboardInjected { .. } => {}
         BackendEvent::TouchDecoded { peer, samples } => {
             println!("Touch input from {peer}: {samples} sample(s)");
         }
@@ -1338,6 +1445,15 @@ fn print_backend_event(event: &glyphray_windows_host::backend::BackendEvent) {
             buttons,
         } => {
             println!("Gamepad input from {peer}: controller={controller_id} buttons={buttons}");
+        }
+        BackendEvent::GamepadInjected {
+            peer,
+            controller_id,
+            connected,
+        } => {
+            println!(
+                "Gamepad injected for {peer}: controller={controller_id} connected={connected}"
+            );
         }
         other => println!("backend event: {other:?}"),
     }
@@ -1444,6 +1560,7 @@ mod tests {
                 peer,
                 device_name: "Tablet".to_string(),
                 public_key_fingerprint: None,
+                code_verified: false,
             },
         );
 
