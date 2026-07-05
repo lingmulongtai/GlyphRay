@@ -1,17 +1,18 @@
 :root {
   color-scheme: dark;
-  --bg: #0d1117;
-  --bg-soft: #111827;
-  --surface: #171d27;
-  --surface-strong: #202938;
-  --text: #eef5ff;
-  --muted: #a8b5c7;
-  --line: rgba(238, 245, 255, 0.15);
-  --teal: #50d5c8;
-  --amber: #f4c95d;
-  --rose: #ee7aa7;
-  --ink: #080b10;
-  --shadow: rgba(0, 0, 0, 0.34);
+  --bg: #0b0f0e;
+  --bg-soft: #111715;
+  --surface: #171d1b;
+  --surface-strong: #202823;
+  --text: #f3f7f2;
+  --muted: #a9b6ae;
+  --line: rgba(243, 247, 242, 0.16);
+  --teal: #47d9c8;
+  --amber: #f2b85b;
+  --rose: #e56d95;
+  --green: #8fdc8c;
+  --ink: #070a09;
+  --shadow: rgba(0, 0, 0, 0.42);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -37,11 +38,28 @@ a {
   text-decoration: none;
 }
 
+img {
+  max-width: 100%;
+}
+
+.site-header,
+.brand,
+.nav-links,
+.hero-actions,
+.hero-metrics,
+.download-grid,
+.card-topline,
+.chooser,
+.status-layout,
+.command-header,
+.footer {
+  display: flex;
+}
+
 .site-header {
   align-items: center;
-  background: rgba(16, 18, 17, 0.78);
+  background: rgba(8, 12, 11, 0.76);
   border-bottom: 1px solid var(--line);
-  display: flex;
   justify-content: space-between;
   left: 0;
   padding: 14px clamp(18px, 4vw, 56px);
@@ -49,33 +67,27 @@ a {
   right: 0;
   top: 0;
   z-index: 10;
-}
-
-.brand,
-.nav-links,
-.hero-actions,
-.hero-metrics,
-.download-grid,
-.chooser,
-.status-layout,
-.command-header {
-  display: flex;
+  backdrop-filter: blur(18px);
 }
 
 .brand {
   align-items: center;
-  font-weight: 800;
   gap: 10px;
 }
 
 .brand-mark {
   align-items: center;
-  background: var(--teal);
-  color: #08201d;
+  background: var(--text);
+  color: var(--ink);
   display: inline-flex;
+  font-weight: 900;
   height: 34px;
   justify-content: center;
   width: 34px;
+}
+
+.brand-name {
+  font-weight: 850;
 }
 
 .nav-links {
@@ -84,14 +96,17 @@ a {
   font-size: 0.95rem;
 }
 
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-links a:focus-visible,
+.footer a:hover,
+.footer a:focus-visible {
   color: var(--text);
 }
 
 .hero {
-  min-height: 84svh;
+  min-height: 86svh;
   overflow: hidden;
-  padding: 128px clamp(22px, 6vw, 96px) 76px;
+  padding: 132px clamp(22px, 6vw, 96px) 76px;
   position: relative;
 }
 
@@ -102,17 +117,16 @@ a {
 }
 
 .hero-image {
-  filter: brightness(0.42) saturate(0.9);
   height: 100%;
   object-fit: cover;
-  object-position: 42% center;
-  transform: scale(1.28);
-  transform-origin: right center;
+  object-position: center;
   width: 100%;
 }
 
 .hero-shade {
-  background: rgba(5, 8, 13, 0.74);
+  background:
+    linear-gradient(90deg, rgba(5, 8, 7, 0.88), rgba(5, 8, 7, 0.56) 48%, rgba(5, 8, 7, 0.2)),
+    linear-gradient(0deg, rgba(11, 15, 14, 0.92), rgba(11, 15, 14, 0.08) 34%);
 }
 
 .hero-content {
@@ -124,7 +138,7 @@ a {
 .eyebrow {
   color: var(--teal);
   font-size: 0.76rem;
-  font-weight: 800;
+  font-weight: 850;
   letter-spacing: 0;
   margin: 0 0 14px;
   text-transform: uppercase;
@@ -138,28 +152,29 @@ p {
 }
 
 h1 {
-  font-size: 8.5rem;
+  font-size: 7.25rem;
   letter-spacing: 0;
-  line-height: 0.85;
+  line-height: 0.88;
   margin-bottom: 24px;
 }
 
 h2 {
-  font-size: 4rem;
+  font-size: 3.75rem;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 1.03;
   margin-bottom: 18px;
 }
 
 h3 {
-  font-size: 1.35rem;
-  margin-bottom: 12px;
+  font-size: 1.28rem;
+  line-height: 1.2;
+  margin-bottom: 10px;
 }
 
 .hero-copy {
-  color: #e6eefc;
-  font-size: 1.32rem;
-  max-width: 700px;
+  color: #eef4ef;
+  font-size: 1.22rem;
+  max-width: 720px;
 }
 
 .hero-actions {
@@ -171,21 +186,23 @@ h3 {
 .button {
   align-items: center;
   border: 1px solid var(--line);
+  border-radius: 8px;
   display: inline-flex;
   font-weight: 800;
   justify-content: center;
   min-height: 48px;
   padding: 0 18px;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 
 .button.primary,
 .button.card-action {
   background: var(--teal);
-  color: #061d1a;
+  color: #041916;
 }
 
 .button.secondary {
-  background: rgba(245, 240, 231, 0.08);
+  background: rgba(243, 247, 242, 0.08);
 }
 
 .button:hover,
@@ -193,22 +210,29 @@ h3 {
   transform: translateY(-1px);
 }
 
+.button:focus-visible,
+.copy-button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 3px;
+}
+
 .hero-metrics {
-  border-top: 1px solid rgba(245, 240, 231, 0.24);
+  border-top: 1px solid rgba(243, 247, 242, 0.24);
   flex-wrap: wrap;
-  gap: 22px;
+  gap: 24px;
   margin: 42px 0 0;
   padding-top: 22px;
 }
 
 .hero-metrics div {
-  min-width: 190px;
+  min-width: 196px;
 }
 
 dt {
   color: var(--muted);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
@@ -216,64 +240,115 @@ dd {
   margin: 4px 0 0;
 }
 
+.intro-band,
 .section {
   padding: 82px clamp(22px, 6vw, 96px);
 }
 
-.intro {
-  background: #111827;
-  display: grid;
-  gap: 32px;
-  grid-template-columns: minmax(0, 0.85fr) minmax(280px, 1fr);
+.intro-band {
+  background: var(--bg-soft);
 }
 
-.intro p,
-.split p,
-.progress-meter p,
+.section-heading {
+  max-width: 840px;
+}
+
+.native-grid,
+.performance-layout {
+  display: grid;
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.native-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.native-grid article,
+.download-card,
+.large-panel,
+.signal-stack article,
+.progress-meter,
+.milestones,
+.command-panel {
+  background: rgba(243, 247, 242, 0.055);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 22px 54px var(--shadow);
+}
+
+.native-grid article,
+.download-card,
+.large-panel,
+.signal-stack article,
+.progress-meter,
+.milestones {
+  padding: 24px;
+}
+
+.native-grid p,
 .download-card p,
 .download-card li,
+.large-panel p,
+.signal-stack p,
+.split p,
+.progress-meter p,
 .footer {
   color: var(--muted);
 }
 
-.section-heading {
-  max-width: 760px;
-}
-
 .download-grid {
   gap: 18px;
-  margin-top: 28px;
+  margin-top: 30px;
 }
 
 .download-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: 0 24px 60px var(--shadow);
   flex: 1;
   min-width: 0;
-  padding: 24px;
 }
 
 .download-card.featured {
-  border-color: rgba(75, 210, 195, 0.54);
+  border-color: rgba(71, 217, 200, 0.56);
 }
 
-.platform {
-  color: var(--amber);
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  margin-bottom: 16px;
+.card-topline {
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.platform-chip,
+.status-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 850;
+  min-height: 28px;
+  padding: 4px 10px;
   text-transform: uppercase;
 }
 
-.download-card ul,
+.platform-chip {
+  color: var(--amber);
+}
+
+.status-pill {
+  color: var(--muted);
+}
+
+.status-pill.strong {
+  background: rgba(71, 217, 200, 0.12);
+  color: var(--teal);
+}
+
+.feature-list,
 .milestones {
   margin: 20px 0 24px;
   padding-left: 20px;
 }
 
-.download-card li {
+.feature-list li {
   margin: 8px 0;
 }
 
@@ -281,8 +356,43 @@ dd {
   width: 100%;
 }
 
+.performance {
+  background: #0f1412;
+}
+
+.performance-layout {
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+}
+
+.large-panel {
+  min-height: 100%;
+}
+
+.spec-list {
+  display: grid;
+  gap: 14px;
+  margin: 30px 0 0;
+}
+
+.spec-list div {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.signal-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.step-number {
+  color: var(--rose);
+  display: block;
+  font-weight: 900;
+  margin-bottom: 12px;
+}
+
 .split {
-  background: #0f1722;
+  background: #111815;
   display: grid;
   gap: 36px;
   grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1fr);
@@ -311,6 +421,7 @@ select {
   appearance: none;
   background: var(--surface);
   border: 1px solid var(--line);
+  border-radius: 8px;
   color: var(--text);
   min-height: 46px;
   padding: 0 14px;
@@ -318,9 +429,8 @@ select {
 
 .command-panel {
   background: var(--ink);
-  border: 1px solid var(--line);
-  box-shadow: 0 24px 60px var(--shadow);
   min-width: 0;
+  overflow: hidden;
 }
 
 .command-header {
@@ -333,11 +443,13 @@ select {
 .copy-button {
   background: var(--amber);
   border: 0;
-  color: #251508;
+  border-radius: 8px;
+  color: #241507;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 850;
   min-height: 36px;
   padding: 0 14px;
+  transition: transform 160ms ease;
 }
 
 pre {
@@ -358,39 +470,37 @@ code {
 }
 
 .status-section {
-  background: #111722;
+  background: #0d1110;
 }
 
 .status-layout {
   align-items: stretch;
   gap: 28px;
-  margin-top: 28px;
+  margin-top: 30px;
 }
 
 .progress-meter,
 .milestones {
-  background: rgba(245, 240, 231, 0.06);
-  border: 1px solid var(--line);
   flex: 1;
-  padding: 24px;
 }
 
 .progress-number {
   color: var(--teal);
-  font-size: 7rem;
+  font-size: 6.5rem;
   font-weight: 900;
   line-height: 0.9;
 }
 
 .progress-track {
-  background: rgba(245, 240, 231, 0.12);
+  background: rgba(243, 247, 242, 0.12);
+  border-radius: 999px;
   height: 12px;
   margin: 24px 0 16px;
   overflow: hidden;
 }
 
 .progress-track span {
-  background: var(--teal);
+  background: linear-gradient(90deg, var(--teal), var(--green));
   display: block;
   height: 100%;
 }
@@ -418,9 +528,8 @@ code {
 
 .footer {
   align-items: center;
-  background: #080b10;
+  background: var(--ink);
   border-top: 1px solid var(--line);
-  display: flex;
   gap: 20px;
   justify-content: space-between;
   padding: 28px clamp(22px, 6vw, 96px);
@@ -428,15 +537,15 @@ code {
 
 .footer p {
   margin: 0;
-  max-width: 860px;
+  max-width: 880px;
 }
 
 .footer a {
   color: var(--teal);
-  font-weight: 800;
+  font-weight: 850;
 }
 
-@media (max-width: 920px) {
+@media (max-width: 980px) {
   .nav-links {
     display: none;
   }
@@ -445,13 +554,14 @@ code {
     min-height: 82svh;
   }
 
-  .intro,
+  .native-grid,
+  .performance-layout,
   .split {
     grid-template-columns: 1fr;
   }
 
   h1 {
-    font-size: 5.5rem;
+    font-size: 5.25rem;
   }
 
   h2 {
@@ -470,7 +580,8 @@ code {
   }
 
   .hero {
-    padding: 104px 18px 58px;
+    min-height: 78svh;
+    padding: 104px 18px 54px;
   }
 
   .hero-copy {
@@ -478,17 +589,18 @@ code {
   }
 
   h1 {
-    font-size: 4rem;
+    font-size: 3.9rem;
   }
 
   h2 {
-    font-size: 2.25rem;
+    font-size: 2.2rem;
   }
 
   .progress-number {
-    font-size: 4.5rem;
+    font-size: 4.4rem;
   }
 
+  .intro-band,
   .section {
     padding: 58px 18px;
   }
@@ -501,6 +613,7 @@ code {
     min-width: 100%;
   }
 
+  .card-topline,
   .footer {
     align-items: flex-start;
     flex-direction: column;

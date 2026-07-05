@@ -3,23 +3,24 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="GlyphRay downloads and setup guide for Android creative remote display clients and Windows/macOS hosts.">
-    <meta property="og:title" content="GlyphRay Downloads">
-    <meta property="og:description" content="Low-latency Android pen display for creative desktops.">
-    <meta property="og:image" content="assets/glyphray-hero.png">
-    <meta name="theme-color" content="#101211">
-    <title>GlyphRay Downloads</title>
-    <link rel="preload" href="assets/glyphray-hero.png" as="image">
+    <meta name="description" content="GlyphRay downloads, setup commands, and release status for the Android remote pen display and Windows/macOS hosts.">
+    <meta property="og:title" content="GlyphRay">
+    <meta property="og:description" content="A high-quality, low-latency Android pen display for creative desktops.">
+    <meta property="og:image" content="assets/glyphray-hero-v2.png">
+    <meta name="theme-color" content="#0b0f0e">
+    <title>GlyphRay</title>
+    <link rel="preload" href="assets/glyphray-hero-v2.png" as="image">
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
-    <header class="site-header" data-hero-nav>
+    <header class="site-header">
       <a class="brand" href="#top" aria-label="GlyphRay home">
         <span class="brand-mark" aria-hidden="true">G</span>
-        <span>GlyphRay</span>
+        <span class="brand-name">GlyphRay</span>
       </a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#downloads">Downloads</a>
+        <a href="#macos">macOS</a>
         <a href="#setup">Setup</a>
         <a href="#status">Status</a>
         <a href="https://github.com/lingm/GlyphRay">GitHub</a>
@@ -28,97 +29,166 @@
 
     <main id="top">
       <section class="hero" aria-labelledby="hero-title">
-        <img class="hero-image" src="assets/glyphray-hero.png" alt="GlyphRay remote pen display concept showing a stylus drawing on a tablet-like creative desktop interface.">
+        <img class="hero-image" src="assets/glyphray-hero-v2.png" alt="A tablet and stylus streaming a creative desktop canvas with low-latency signal trails.">
         <div class="hero-shade" aria-hidden="true"></div>
         <div class="hero-content">
           <p class="eyebrow">Android pen display for creative desktops</p>
           <h1 id="hero-title">GlyphRay</h1>
           <p class="hero-copy">
-            A low-latency remote desktop project for artists who want Android stylus input to arrive on Windows as native pen input, not mouse emulation.
+            Native hosts, encrypted realtime transport, and a hardware-first video path for artists who want an Android tablet to feel like a precise, high-quality pen display.
           </p>
           <div class="hero-actions" aria-label="Primary actions">
             <a class="button primary" href="#downloads">Get builds</a>
-            <a class="button secondary" href="#setup">Generate setup commands</a>
+            <a class="button secondary" href="#setup">Generate commands</a>
           </div>
-          <dl class="hero-metrics" aria-label="Current project targets">
+          <dl class="hero-metrics" aria-label="Project targets">
             <div>
-              <dt>Target</dt>
+              <dt>Latency target</dt>
               <dd>1080p60 under 35 ms p95</dd>
             </div>
             <div>
-              <dt>Input</dt>
-              <dd>Windows Ink-focused stylus stream</dd>
+              <dt>Input target</dt>
+              <dd>Stylus injection under 8 ms p95</dd>
             </div>
             <div>
-              <dt>Status</dt>
+              <dt>Release state</dt>
               <dd>95% implementation, 82% release ready</dd>
             </div>
           </dl>
         </div>
       </section>
 
-      <section class="section intro" aria-labelledby="intro-title">
+      <section class="intro-band" aria-labelledby="native-title">
         <div class="section-heading">
-          <p class="eyebrow">What you can download here</p>
-          <h2 id="intro-title">Native clients first, browser helpers second.</h2>
+          <p class="eyebrow">Native by platform</p>
+          <h2 id="native-title">Designed to look like it belongs on each OS.</h2>
         </div>
-        <p>
-          GitHub Pages can host the download site and setup tools, but the actual remote display experience still requires native Android and desktop host builds. A browser cannot capture S Pen data at the same fidelity, send UDP realtime streams, or inject Windows Ink events into creative apps.
-        </p>
+        <div class="native-grid">
+          <article>
+            <span class="platform-chip">macOS</span>
+            <h3>SwiftUI host shell</h3>
+            <p>Sidebar navigation, toolbar actions, privacy checks, trusted-client review, and explicit VideoToolbox hardware encoder status.</p>
+          </article>
+          <article>
+            <span class="platform-chip">Android</span>
+            <h3>Material 3 client</h3>
+            <p>Compose session cockpit with tablet-first controls for stream quality, fullscreen input, pairing, security, and diagnostics.</p>
+          </article>
+          <article>
+            <span class="platform-chip">Windows</span>
+            <h3>Fluent-aligned host</h3>
+            <p>Hardware-first capture and encoding diagnostics, native permission prompts, startup controls, and host-side stream presets.</p>
+          </article>
+        </div>
       </section>
 
       <section class="section" id="downloads" aria-labelledby="downloads-title">
         <div class="section-heading">
           <p class="eyebrow">Downloads</p>
-          <h2 id="downloads-title">Choose a component</h2>
+          <h2 id="downloads-title">Install only what you need.</h2>
         </div>
         <div class="download-grid">
           <article class="download-card">
-            <div class="platform">Android Client</div>
+            <div class="card-topline">
+              <span class="platform-chip">Android Client</span>
+              <span class="status-pill">Preview</span>
+            </div>
             <h3>Tablet and phone app</h3>
-            <p>Compose client with a refined session cockpit, LAN discovery, stylus diagnostics, control packets, and a low-latency display surface.</p>
-            <ul>
-              <li>Primary target: Samsung Galaxy Tab S11 Ultra</li>
-              <li>Captures pressure, tilt, hover, eraser, buttons, and history</li>
-              <li>APK release artifact planned</li>
+            <p>Low-latency display surface, LAN discovery, secure pairing, stylus diagnostics, video settings, audio playback foundation, and realtime input routing.</p>
+            <ul class="feature-list">
+              <li>Pressure, tilt, hover, eraser, buttons, and history</li>
+              <li>Fullscreen session mode with saved preferences</li>
+              <li>Manual host entries for Tailscale and direct endpoints</li>
             </ul>
-            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View Android releases</a>
           </article>
 
           <article class="download-card featured">
-            <div class="platform">Windows Host</div>
+            <div class="card-topline">
+              <span class="platform-chip">Windows Host</span>
+              <span class="status-pill strong">Primary</span>
+            </div>
             <h3>Creative desktop host</h3>
-            <p>Rust host with LAN backend runtime, health status metrics, diagnostics, capture foundation, and opt-in native synthetic pen injection.</p>
-            <ul>
-              <li>Windows 10/11 priority path</li>
-              <li>Development smoke test flags available</li>
-              <li>Installer packaging still in progress</li>
+            <p>Rust host with DXGI Desktop Duplication, Media Foundation H.264 hardware selection, secure UDP sessions, and Windows Ink-focused input work.</p>
+            <ul class="feature-list">
+              <li>NVENC path locally validated through packet reassembly</li>
+              <li>Encoder override and named stream presets</li>
+              <li>Permission-gated keyboard, mouse, touch, and gamepad paths</li>
             </ul>
-            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View Windows releases</a>
           </article>
 
           <article class="download-card">
-            <div class="platform">macOS Host</div>
-            <h3>Phase 2/5 preview</h3>
-            <p>SwiftUI host with Keychain identities, signed P-256 ECDH, encrypted control/video/input, secure-client stream ownership, ScreenCaptureKit capture, VideoToolbox H.264, client-selected quality, bounded streaming, and CGEvent input compatibility.</p>
-            <ul>
-              <li>macOS 13+ foundation</li>
-              <li>Encrypted mouse, keyboard, and touch-pointer path</li>
-              <li>macOS CI, device validation, and reconnect remain</li>
+            <div class="card-topline">
+              <span class="platform-chip">macOS Host</span>
+              <span class="status-pill">Accelerating</span>
+            </div>
+            <h3>Hardware-first Mac host</h3>
+            <p>SwiftUI host, ScreenCaptureKit capture, VideoToolbox H.264, Keychain trust, encrypted sessions, and CGEvent mouse, keyboard, and touch-pointer input.</p>
+            <ul class="feature-list">
+              <li>Requires hardware acceleration for live stream startup</li>
+              <li>Shows encoder, stream, and backpressure health</li>
+              <li>Built for long-run reconnect validation next</li>
             </ul>
-            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View releases</a>
+            <a class="button card-action" href="https://github.com/lingm/GlyphRay/releases">View macOS releases</a>
           </article>
+        </div>
+      </section>
+
+      <section class="section performance" id="macos" aria-labelledby="macos-title">
+        <div class="section-heading">
+          <p class="eyebrow">macOS priority</p>
+          <h2 id="macos-title">Built to avoid the software-encoder trap.</h2>
+        </div>
+        <div class="performance-layout">
+          <article class="large-panel">
+            <h3>VideoToolbox is treated as a product gate, not a footnote.</h3>
+            <p>
+              The Mac host now asks VideoToolbox for a hardware encoder before live streaming, exposes whether the session is actually hardware accelerated, and uses a high-quality low-latency H.264 profile by default.
+            </p>
+            <dl class="spec-list">
+              <div>
+                <dt>Default preview</dt>
+                <dd>H.264 1920x1080@60, 45 Mbps</dd>
+              </div>
+              <div>
+                <dt>Capture queue</dt>
+                <dd>Shallow queue for lower latency</dd>
+              </div>
+              <div>
+                <dt>Fallback behavior</dt>
+                <dd>Fail visible instead of silently streaming software encode</dd>
+              </div>
+            </dl>
+          </article>
+          <div class="signal-stack">
+            <article>
+              <span class="step-number">01</span>
+              <h3>Hardware encode first</h3>
+              <p>Require accelerated VideoToolbox sessions for live stream startup and report the result in the UI.</p>
+            </article>
+            <article>
+              <span class="step-number">02</span>
+              <h3>Realtime packets</h3>
+              <p>Keep video datagrams bounded with backpressure counters instead of letting latency accumulate.</p>
+            </article>
+            <article>
+              <span class="step-number">03</span>
+              <h3>Quality target</h3>
+              <p>Scale bitrate by resolution and frame rate so the default stream starts closer to studio quality.</p>
+            </article>
+          </div>
         </div>
       </section>
 
       <section class="section split" id="setup" aria-labelledby="setup-title">
         <div>
           <div class="section-heading">
-            <p class="eyebrow">Frontend helper</p>
-            <h2 id="setup-title">Generate local setup commands</h2>
+            <p class="eyebrow">Local setup</p>
+            <h2 id="setup-title">Generate commands for your machine.</h2>
           </div>
           <p>
-            Pick a platform and channel. The page builds copyable commands locally in your browser. It does not contact a server or collect telemetry.
+            Pick a platform and channel. Commands are generated locally in your browser and can be copied directly into your terminal.
           </p>
           <div class="chooser" role="group" aria-label="Setup command options">
             <label>
@@ -152,7 +222,7 @@
       <section class="section status-section" id="status" aria-labelledby="status-title">
         <div class="section-heading">
           <p class="eyebrow">Project status</p>
-          <h2 id="status-title">Current repository progress</h2>
+          <h2 id="status-title">Release readiness is close, but hardware validation still matters.</h2>
         </div>
         <div class="status-layout">
           <div class="progress-meter" aria-label="Implementation progress 95 percent">
@@ -160,13 +230,13 @@
             <div class="progress-track">
               <span style="width: 95%"></span>
             </div>
-            <p>Buildable developer preview with reproducible APK/AAB, MSI, and macOS app/pkg candidates, DXGI Desktop Duplication, hardware Media Foundation H.264, encrypted Windows/Android/macOS sessions, salted six-digit first-time pairing, secure macOS stream ownership, Windows host Audio-channel packetization, Android AudioFrame playback foundation, and a Windows virtual gamepad bridge. Production readiness is 82% because interactive hardware validation, signed distribution credentials, WASAPI/macOS audio capture, virtual-controller driver validation, long-run reconnect validation, and store review remain.</p>
+            <p>Implementation foundation is nearly complete. Production readiness remains lower because signed distribution, long-run Mac and Android validation, real-device latency measurements, audio capture, relay work, and store compliance are still active gates.</p>
           </div>
           <ol class="milestones">
-            <li><span>100%</span> Milestone 1 foundation</li>
-            <li><span>93%</span> Video and transport foundation</li>
-            <li><span>86%</span> Android stylus to Windows Ink path</li>
-            <li><span>98%</span> Security hardening and packaging</li>
+            <li><span>100%</span> Foundation</li>
+            <li><span>93%</span> Video and transport</li>
+            <li><span>86%</span> Android stylus to host input</li>
+            <li><span>98%</span> Security and packaging</li>
             <li><span>90%</span> macOS, audio, relay readiness</li>
           </ol>
         </div>

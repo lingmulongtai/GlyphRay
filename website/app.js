@@ -45,10 +45,11 @@ const commands = {
   },
   macos: {
     dev: {
-      title: "macOS host preview",
+      title: "macOS host preview with hardware encoder gate",
       body: [
         "cd hosts/macos-host",
         "swift build",
+        "swift run GlyphRayMacHost",
       ].join("\n"),
     },
     safe: {
