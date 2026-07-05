@@ -22,6 +22,8 @@ struct MacLiveEncodeProbeResult: Equatable {
     let capturedFrames: Int
     let encodedFrames: Int
     let encodedBytes: Int
+    let encoderStatus: String
+    let settingsSummary: String
 }
 
 struct MacLiveTransportProbeResult: Equatable {
@@ -33,6 +35,8 @@ struct MacLiveTransportProbeResult: Equatable {
     let encodedBytes: Int
     let videoDatagrams: Int
     let transportBytes: Int
+    let encoderStatus: String
+    let settingsSummary: String
 }
 
 struct MacLiveUdpStreamResult: Equatable {
@@ -56,9 +60,12 @@ struct MacLiveUdpStreamResult: Equatable {
     let reconnectCount: Int
     let running: Bool
     let target: MacUdpSendTarget
+    let encoderStatus: String
+    let settingsSummary: String
 }
 
 final class MacLiveCaptureController: NSObject {
+    private let lowLatencyQueueDepth = 2
     private let sampleQueue = DispatchQueue(label: "com.glyphray.mac.live-capture.samples")
     private var frameCount = 0
     private var encodedFrameCount = 0
@@ -70,6 +77,8 @@ final class MacLiveCaptureController: NSObject {
     private var activePublisher: MacUdpVideoPublisher?
     private var activeStreamID: UUID?
     private var activeStreamTarget: MacUdpSendTarget?
+    private var activeEncoderStatus = "encoder idle"
+    private var activeEncoderSettingsSummary = "settings unavailable"
     private var reconnectCount = 0
 
     #if canImport(ScreenCaptureKit)
@@ -93,7 +102,7 @@ final class MacLiveCaptureController: NSObject {
         let configuration = SCStreamConfiguration()
         configuration.width = display.width
         configuration.height = display.height
-        configuration.queueDepth = 3
+        configuration.queueDepth = lowLatencyQueueDepth
         configuration.showsCursor = true
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
@@ -138,26 +147,32 @@ final class MacLiveCaptureController: NSObject {
         encodedFrameCount = 0
         encodedBytes = 0
 
+        let settings = MacEncoderSettings(
+            width: Int32(display.width),
+            height: Int32(display.height),
+            fps: 60,
+            bitrate: MacEncoderSettings.recommendedBitrateKbps(
+                width: display.width,
+                height: display.height,
+                fps: 60
+            ) * 1_000,
+            codec: .h264
+        )
         let encoder = VideoToolboxEncoder(
-            settings: MacEncoderSettings(
-                width: Int32(display.width),
-                height: Int32(display.height),
-                fps: 60,
-                bitrate: 20_000_000,
-                codec: .h264
-            ),
+            settings: settings,
             onFrame: { [weak self] frame in
                 self?.encodedFrameCount += 1
                 self?.encodedBytes += frame.byteCount
             }
         )
         try encoder.start()
+        let encoderStatus = encoder.hardwareAccelerationLabel
         activeEncoder = encoder
 
         let configuration = SCStreamConfiguration()
         configuration.width = display.width
         configuration.height = display.height
-        configuration.queueDepth = 3
+        configuration.queueDepth = lowLatencyQueueDepth
         configuration.showsCursor = true
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
@@ -180,7 +195,9 @@ final class MacLiveCaptureController: NSObject {
             height: descriptor.height,
             capturedFrames: frameCount,
             encodedFrames: encodedFrameCount,
-            encodedBytes: encodedBytes
+            encodedBytes: encodedBytes,
+            encoderStatus: encoderStatus,
+            settingsSummary: settings.displaySummary
         )
         #else
         throw MacHostError.frameworkUnavailable("ScreenCaptureKit")
@@ -208,14 +225,19 @@ final class MacLiveCaptureController: NSObject {
         transportBytes = 0
 
         let packetizer = MacVideoTransportPacketizer()
+        let settings = MacEncoderSettings(
+            width: Int32(display.width),
+            height: Int32(display.height),
+            fps: 60,
+            bitrate: MacEncoderSettings.recommendedBitrateKbps(
+                width: display.width,
+                height: display.height,
+                fps: 60
+            ) * 1_000,
+            codec: .h264
+        )
         let encoder = VideoToolboxEncoder(
-            settings: MacEncoderSettings(
-                width: Int32(display.width),
-                height: Int32(display.height),
-                fps: 60,
-                bitrate: 20_000_000,
-                codec: .h264
-            ),
+            settings: settings,
             onFrame: { [weak self] frame in
                 guard let self else {
                     return
@@ -229,12 +251,13 @@ final class MacLiveCaptureController: NSObject {
             }
         )
         try encoder.start()
+        let encoderStatus = encoder.hardwareAccelerationLabel
         activeEncoder = encoder
 
         let configuration = SCStreamConfiguration()
         configuration.width = display.width
         configuration.height = display.height
-        configuration.queueDepth = 3
+        configuration.queueDepth = lowLatencyQueueDepth
         configuration.showsCursor = true
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
 
@@ -259,7 +282,9 @@ final class MacLiveCaptureController: NSObject {
             encodedFrames: encodedFrameCount,
             encodedBytes: encodedBytes,
             videoDatagrams: videoDatagramCount,
-            transportBytes: transportBytes
+            transportBytes: transportBytes,
+            encoderStatus: encoderStatus,
+            settingsSummary: settings.displaySummary
         )
         #else
         throw MacHostError.frameworkUnavailable("ScreenCaptureKit")
@@ -297,7 +322,12 @@ final class MacLiveCaptureController: NSObject {
             preference.map { min(Int($0.height), display.height) } ?? display.height
         )
         let outputFPS = Int32(min(max(Int(preference?.maxFPS ?? 60), 1), 120))
-        let bitrateKbps = min(max(Int(preference?.targetBitrateKbps ?? 20_000), 1_000), 100_000)
+        let defaultBitrateKbps = MacEncoderSettings.recommendedBitrateKbps(
+            width: outputWidth,
+            height: outputHeight,
+            fps: Int(outputFPS)
+        )
+        let bitrateKbps = min(max(Int(preference?.targetBitrateKbps ?? UInt32(defaultBitrateKbps)), 1_000), 140_000)
         let keyframeIntervalMs = min(
             max(Int(preference?.keyframeIntervalMs ?? 1_000), 250),
             10_000
@@ -319,18 +349,20 @@ final class MacLiveCaptureController: NSObject {
 
         let publisher = try MacUdpVideoPublisher(
             target: target,
+            maxInFlightDatagrams: 72,
             transformDatagram: transformDatagram
         )
         let packetizer = MacVideoTransportPacketizer()
+        let settings = MacEncoderSettings(
+            width: Int32(outputWidth),
+            height: Int32(outputHeight),
+            fps: outputFPS,
+            bitrate: bitrateKbps * 1_000,
+            codec: .h264,
+            keyframeIntervalMs: keyframeIntervalMs
+        )
         let encoder = VideoToolboxEncoder(
-            settings: MacEncoderSettings(
-                width: Int32(outputWidth),
-                height: Int32(outputHeight),
-                fps: outputFPS,
-                bitrate: bitrateKbps * 1_000,
-                codec: .h264,
-                keyframeIntervalMs: keyframeIntervalMs
-            ),
+            settings: settings,
             onFrame: { [weak self] frame in
                 guard let self else {
                     return
@@ -350,7 +382,7 @@ final class MacLiveCaptureController: NSObject {
         let configuration = SCStreamConfiguration()
         configuration.width = outputWidth
         configuration.height = outputHeight
-        configuration.queueDepth = 3
+        configuration.queueDepth = lowLatencyQueueDepth
         configuration.showsCursor = true
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: outputFPS)
 
@@ -360,6 +392,8 @@ final class MacLiveCaptureController: NSObject {
 
         do {
             try encoder.start()
+            activeEncoderStatus = encoder.hardwareAccelerationLabel
+            activeEncoderSettingsSummary = settings.displaySummary
             activeEncoder = encoder
             activePublisher = publisher
             activeStreamID = streamID
@@ -375,6 +409,8 @@ final class MacLiveCaptureController: NSObject {
             activeStreamID = nil
             activeStreamTarget = nil
             activeDisplay = nil
+            activeEncoderStatus = "encoder idle"
+            activeEncoderSettingsSummary = "settings unavailable"
             self.stream = nil
             throw error
         }
@@ -403,16 +439,18 @@ final class MacLiveCaptureController: NSObject {
 
         try await stop()
         activeEncoder?.stop()
-        activeEncoder = nil
-        activePublisher = nil
-        activeStreamID = nil
-        activeStreamTarget = nil
         let result = udpStreamResult(
             streamID: streamID,
             display: display,
             publisher: publisher,
             running: false
         )
+        activeEncoder = nil
+        activePublisher = nil
+        activeStreamID = nil
+        activeStreamTarget = nil
+        activeEncoderStatus = "encoder idle"
+        activeEncoderSettingsSummary = "settings unavailable"
         _ = publisher.stop()
         return result
     }
@@ -455,7 +493,9 @@ final class MacLiveCaptureController: NSObject {
                 || snapshot.lastError?.contains("backlog") == true,
             reconnectCount: reconnectCount,
             running: running,
-            target: snapshot.target
+            target: snapshot.target,
+            encoderStatus: activeEncoderStatus,
+            settingsSummary: activeEncoderSettingsSummary
         )
     }
 }
