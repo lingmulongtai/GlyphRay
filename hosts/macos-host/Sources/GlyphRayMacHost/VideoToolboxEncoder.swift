@@ -11,21 +11,60 @@ enum MacVideoCodec: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-struct MacEncoderSettings {
+enum MacVideoHardwarePolicy: String, CaseIterable, Identifiable {
+    case required = "Hardware required"
+    case preferred = "Hardware preferred"
+    case allowed = "Software allowed"
+
+    var id: String { rawValue }
+}
+
+struct MacEncoderSettings: Equatable {
     let width: Int32
     let height: Int32
     let fps: Int32
     let bitrate: Int
     let codec: MacVideoCodec
-    let keyframeIntervalMs: Int = 1_000
+    let keyframeIntervalMs: Int
+    let hardwarePolicy: MacVideoHardwarePolicy
+
+    init(
+        width: Int32,
+        height: Int32,
+        fps: Int32,
+        bitrate: Int,
+        codec: MacVideoCodec,
+        keyframeIntervalMs: Int = 1_000,
+        hardwarePolicy: MacVideoHardwarePolicy = .required
+    ) {
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.bitrate = bitrate
+        self.codec = codec
+        self.keyframeIntervalMs = keyframeIntervalMs
+        self.hardwarePolicy = hardwarePolicy
+    }
 
     static let lowLatencyPreview = MacEncoderSettings(
         width: 1920,
         height: 1080,
         fps: 60,
-        bitrate: 20_000_000,
+        bitrate: 45_000_000,
         codec: .h264
     )
+
+    static func recommendedBitrateKbps(width: Int, height: Int, fps: Int) -> Int {
+        let baselinePixelsPerSecond = 1920.0 * 1080.0 * 60.0
+        let requestedPixelsPerSecond = Double(max(1, width) * max(1, height) * max(1, fps))
+        let scaled = Int((45_000.0 * requestedPixelsPerSecond / baselinePixelsPerSecond).rounded())
+        return min(max(scaled, 18_000), 140_000)
+    }
+
+    var displaySummary: String {
+        let bitrateMbps = Double(bitrate) / 1_000_000.0
+        return "\(codec.rawValue) \(width)x\(height)@\(fps) \(String(format: "%.0f", bitrateMbps)) Mbps, \(hardwarePolicy.rawValue)"
+    }
 }
 
 struct MacEncodedFrame: Equatable {
@@ -43,6 +82,18 @@ final class VideoToolboxEncoder {
     private let settings: MacEncoderSettings
     private let onFrame: ((MacEncodedFrame) -> Void)?
     private var nextFrameSequence: Int64 = 1
+    private(set) var usingHardwareAcceleration: Bool?
+
+    var hardwareAccelerationLabel: String {
+        switch usingHardwareAcceleration {
+        case .some(true):
+            return "hardware accelerated"
+        case .some(false):
+            return "software encoder"
+        case .none:
+            return "hardware status unknown"
+        }
+    }
 
     #if canImport(VideoToolbox)
     private var session: VTCompressionSession?
@@ -61,7 +112,7 @@ final class VideoToolboxEncoder {
             width: settings.width,
             height: settings.height,
             codecType: settings.videoCodecType,
-            encoderSpecification: nil,
+            encoderSpecification: settings.encoderSpecification,
             imageBufferAttributes: nil,
             compressedDataAllocator: nil,
             outputCallback: videoToolboxOutputCallback,
@@ -75,6 +126,7 @@ final class VideoToolboxEncoder {
 
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+        VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_MaxFrameDelayCount, value: NSNumber(value: 1))
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: settings.bitrate))
         VTSessionSetProperty(createdSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: settings.fps))
         VTSessionSetProperty(
@@ -82,7 +134,23 @@ final class VideoToolboxEncoder {
             key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration,
             value: NSNumber(value: Double(settings.keyframeIntervalMs) / 1_000.0)
         )
-        VTCompressionSessionPrepareToEncodeFrames(createdSession)
+        if settings.codec == .h264 {
+            VTSessionSetProperty(
+                createdSession,
+                key: kVTCompressionPropertyKey_ProfileLevel,
+                value: kVTProfileLevel_H264_High_AutoLevel
+            )
+        }
+        let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(createdSession)
+        guard prepareStatus == noErr else {
+            VTCompressionSessionInvalidate(createdSession)
+            throw MacHostError.encoderUnavailable(prepareStatus)
+        }
+        usingHardwareAcceleration = copyHardwareAccelerationStatus(from: createdSession)
+        if settings.hardwarePolicy == .required, usingHardwareAcceleration == false {
+            VTCompressionSessionInvalidate(createdSession)
+            throw MacHostError.hardwareEncoderRequired
+        }
         session = createdSession
         #else
         throw MacHostError.frameworkUnavailable("VideoToolbox")
@@ -189,6 +257,21 @@ private let videoToolboxOutputCallback: VTCompressionOutputCallback = {
 }
 
 private extension MacEncoderSettings {
+    var encoderSpecification: CFDictionary? {
+        switch hardwarePolicy {
+        case .required:
+            return [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: kCFBooleanTrue as Any
+            ] as CFDictionary
+        case .preferred:
+            return [
+                kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: kCFBooleanTrue as Any
+            ] as CFDictionary
+        case .allowed:
+            return nil
+        }
+    }
+
     var videoCodecType: CMVideoCodecType {
         switch codec {
         case .h264:
@@ -197,6 +280,20 @@ private extension MacEncoderSettings {
             return kCMVideoCodecType_HEVC
         }
     }
+}
+
+private func copyHardwareAccelerationStatus(from session: VTCompressionSession) -> Bool? {
+    var value: CFTypeRef?
+    let status = VTSessionCopyProperty(
+        session,
+        key: kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
+        allocator: kCFAllocatorDefault,
+        valueOut: &value
+    )
+    guard status == noErr, let value else {
+        return nil
+    }
+    return (value as? NSNumber)?.boolValue
 }
 
 private extension CMSampleBuffer {
@@ -314,6 +411,7 @@ private func appendAnnexBStartCode(to out: inout Data) {
 enum MacHostError: Error, CustomStringConvertible {
     case frameworkUnavailable(String)
     case encoderUnavailable(OSStatus)
+    case hardwareEncoderRequired
     case captureUnavailable(String)
     case transportUnavailable(String)
     case unsupportedCodec(String)
@@ -324,6 +422,8 @@ enum MacHostError: Error, CustomStringConvertible {
             return "\(name) is unavailable on this platform"
         case .encoderUnavailable(let status):
             return "VideoToolbox encoder unavailable: \(status)"
+        case .hardwareEncoderRequired:
+            return "VideoToolbox reported a software encoder while hardware encoding is required"
         case .captureUnavailable(let message):
             return "Screen capture unavailable: \(message)"
         case .transportUnavailable(let message):
