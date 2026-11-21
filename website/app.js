@@ -68,6 +68,8 @@ const commandTitle = document.querySelector("#commandTitle");
 const commandOutput = document.querySelector("#commandOutput");
 const copyButton = document.querySelector("#copyCommand");
 const copyStatus = document.querySelector("#copyStatus");
+const menuToggle = document.querySelector("#menuToggle");
+const mobileNav = document.querySelector("#mobileNav");
 
 function selectedCommand() {
   const platform = platformSelect.value;
@@ -86,10 +88,29 @@ async function copyCommand() {
   const command = selectedCommand().body;
   try {
     await navigator.clipboard.writeText(command);
-    copyStatus.textContent = "Copied to clipboard.";
+    copyStatus.textContent = "Copied to clipboard";
   } catch {
-    copyStatus.textContent = "Select the command text and copy it manually.";
+    copyStatus.textContent = "Select the command text and copy it manually";
   }
+}
+
+if (menuToggle && mobileNav) {
+  const closeMenu = () => {
+    menuToggle.setAttribute("aria-expanded", "false");
+    mobileNav.hidden = true;
+  };
+  menuToggle.addEventListener("click", () => {
+    const open = menuToggle.getAttribute("aria-expanded") !== "true";
+    menuToggle.setAttribute("aria-expanded", String(open));
+    mobileNav.hidden = !open;
+  });
+  mobileNav.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMenu));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !mobileNav.hidden) {
+      closeMenu();
+      menuToggle.focus();
+    }
+  });
 }
 
 platformSelect.addEventListener("change", renderCommand);
